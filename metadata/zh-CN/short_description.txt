@@ -1,1 +1,1 @@
-简洁、快速的 Xray 客户端
+HyperXray - 简洁、快速的 Xray 客户端

@@ -1,1 +1,1 @@
-A simple, fast Xray client
+HyperXray - A simple, fast Xray client
