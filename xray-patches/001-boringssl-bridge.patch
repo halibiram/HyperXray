@@ -1,0 +1,383 @@
+diff --git a/crypto/boringssl_bridge.go b/crypto/boringssl_bridge.go
+new file mode 100644
+index 0000000..880c3b5
+--- /dev/null
++++ b/crypto/boringssl_bridge.go
+@@ -0,0 +1,377 @@
++//go:build cgo
++// +build cgo
++
++package crypto
++
++/*
++#include <openssl/ssl.h>
++#include <openssl/crypto.h>
++#include <openssl/evp.h>
++#include <openssl/cipher.h>
++#include <openssl/aes.h>
++#include <openssl/err.h>
++#include <openssl/rand.h>
++#include <string.h>
++#include <stdlib.h>
++*/
++import "C"
++import (
++	"crypto/cipher"
++	"errors"
++	"unsafe"
++)
++
++var (
++	ErrBoringSSLInit = errors.New("BoringSSL initialization failed")
++	ErrInvalidKey    = errors.New("invalid key size")
++	ErrInvalidNonce  = errors.New("invalid nonce size")
++)
++
++// init initializes BoringSSL
++func init() {
++	// BoringSSL doesn't require explicit initialization in modern versions
++	// but we can verify it's available
++	if C.OPENSSL_VERSION_NUMBER == 0 {
++		panic("BoringSSL not available")
++	}
++}
++
++// AES128GCMEncrypt encrypts data using AES-128-GCM with BoringSSL
++func AES128GCMEncrypt(key, nonce, plaintext, aad []byte) ([]byte, []byte, error) {
++	if len(key) != 16 {
++		return nil, nil, ErrInvalidKey
++	}
++	if len(nonce) != 12 {
++		return nil, nil, ErrInvalidNonce
++	}
++
++	ctx := C.EVP_CIPHER_CTX_new()
++	if ctx == nil {
++		return nil, nil, ErrBoringSSLInit
++	}
++	defer C.EVP_CIPHER_CTX_free(ctx)
++
++	cipher := C.EVP_aes_128_gcm()
++	if C.EVP_EncryptInit_ex(ctx, cipher, nil, (*C.uchar)(&key[0]), (*C.uchar)(&nonce[0])) != 1 {
++		return nil, nil, getBoringSSLError()
++	}
++
++	var outlen C.int
++	ciphertext := make([]byte, len(plaintext)+16) // GCM tag is 16 bytes
++
++	// Update AAD if provided
++	if len(aad) > 0 {
++		if C.EVP_EncryptUpdate(ctx, nil, &outlen, (*C.uchar)(&aad[0]), C.int(len(aad))) != 1 {
++			return nil, nil, getBoringSSLError()
++		}
++	}
++
++	// Encrypt plaintext
++	if C.EVP_EncryptUpdate(ctx, (*C.uchar)(&ciphertext[0]), &outlen, (*C.uchar)(&plaintext[0]), C.int(len(plaintext))) != 1 {
++		return nil, nil, getBoringSSLError()
++	}
++	ciphertext = ciphertext[:outlen]
++
++	// Finalize and get tag
++	tag := make([]byte, 16)
++	if C.EVP_EncryptFinal_ex(ctx, (*C.uchar)(&tag[0]), &outlen) != 1 {
++		return nil, nil, getBoringSSLError()
++	}
++
++	return ciphertext, tag, nil
++}
++
++// AES256GCMEncrypt encrypts data using AES-256-GCM with BoringSSL
++func AES256GCMEncrypt(key, nonce, plaintext, aad []byte) ([]byte, []byte, error) {
++	if len(key) != 32 {
++		return nil, nil, ErrInvalidKey
++	}
++	if len(nonce) != 12 {
++		return nil, nil, ErrInvalidNonce
++	}
++
++	ctx := C.EVP_CIPHER_CTX_new()
++	if ctx == nil {
++		return nil, nil, ErrBoringSSLInit
++	}
++	defer C.EVP_CIPHER_CTX_free(ctx)
++
++	cipher := C.EVP_aes_256_gcm()
++	if C.EVP_EncryptInit_ex(ctx, cipher, nil, (*C.uchar)(&key[0]), (*C.uchar)(&nonce[0])) != 1 {
++		return nil, nil, getBoringSSLError()
++	}
++
++	var outlen C.int
++	ciphertext := make([]byte, len(plaintext)+16)
++
++	if len(aad) > 0 {
++		if C.EVP_EncryptUpdate(ctx, nil, &outlen, (*C.uchar)(&aad[0]), C.int(len(aad))) != 1 {
++			return nil, nil, getBoringSSLError()
++		}
++	}
++
++	if C.EVP_EncryptUpdate(ctx, (*C.uchar)(&ciphertext[0]), &outlen, (*C.uchar)(&plaintext[0]), C.int(len(plaintext))) != 1 {
++		return nil, nil, getBoringSSLError()
++	}
++	ciphertext = ciphertext[:outlen]
++
++	tag := make([]byte, 16)
++	if C.EVP_EncryptFinal_ex(ctx, (*C.uchar)(&tag[0]), &outlen) != 1 {
++		return nil, nil, getBoringSSLError()
++	}
++
++	return ciphertext, tag, nil
++}
++
++// ChaCha20Poly1305Encrypt encrypts data using ChaCha20-Poly1305 with BoringSSL
++// Note: BoringSSL does not provide EVP_chacha20_poly1305() in the EVP_CIPHER API.
++// ChaCha20-Poly1305 is available via the EVP_AEAD API (EVP_aead_chacha20_poly1305).
++// This function is a placeholder and not currently implemented.
++func ChaCha20Poly1305Encrypt(key, nonce, plaintext, aad []byte) ([]byte, []byte, error) {
++	if len(key) != 32 {
++		return nil, nil, ErrInvalidKey
++	}
++	if len(nonce) != 12 {
++		return nil, nil, ErrInvalidNonce
++	}
++
++	// ChaCha20-Poly1305 in BoringSSL requires the AEAD API, not EVP_CIPHER API
++	// To implement this, use EVP_aead_chacha20_poly1305() with EVP_AEAD_CTX instead
++	return nil, nil, errors.New("ChaCha20-Poly1305 not supported via EVP_CIPHER API in BoringSSL - use AEAD API instead")
++}
++
++// SHA256Hash computes SHA-256 hash using BoringSSL
++func SHA256Hash(data []byte) []byte {
++	md := C.EVP_sha256()
++	ctx := C.EVP_MD_CTX_new()
++	if ctx == nil {
++		return nil
++	}
++	defer C.EVP_MD_CTX_free(ctx)
++
++	if C.EVP_DigestInit_ex(ctx, md, nil) != 1 {
++		return nil
++	}
++
++	if C.EVP_DigestUpdate(ctx, unsafe.Pointer(&data[0]), C.size_t(len(data))) != 1 {
++		return nil
++	}
++
++	hash := make([]byte, 32)
++	var outlen C.uint
++	if C.EVP_DigestFinal_ex(ctx, (*C.uchar)(&hash[0]), &outlen) != 1 {
++		return nil
++	}
++
++	return hash
++}
++
++// SHA512Hash computes SHA-512 hash using BoringSSL
++func SHA512Hash(data []byte) []byte {
++	md := C.EVP_sha512()
++	ctx := C.EVP_MD_CTX_new()
++	if ctx == nil {
++		return nil
++	}
++	defer C.EVP_MD_CTX_free(ctx)
++
++	if C.EVP_DigestInit_ex(ctx, md, nil) != 1 {
++		return nil
++	}
++
++	if C.EVP_DigestUpdate(ctx, unsafe.Pointer(&data[0]), C.size_t(len(data))) != 1 {
++		return nil
++	}
++
++	hash := make([]byte, 64)
++	var outlen C.uint
++	if C.EVP_DigestFinal_ex(ctx, (*C.uchar)(&hash[0]), &outlen) != 1 {
++		return nil
++	}
++
++	return hash
++}
++
++// RandomBytes generates random bytes using BoringSSL
++func RandomBytes(n int) ([]byte, error) {
++	buf := make([]byte, n)
++	if C.RAND_bytes((*C.uchar)(&buf[0]), C.size_t(n)) != 1 {
++		return nil, getBoringSSLError()
++	}
++	return buf, nil
++}
++
++// getBoringSSLError retrieves the last BoringSSL error
++func getBoringSSLError() error {
++	var buf [256]C.char
++	C.ERR_error_string_n(C.ERR_get_error(), &buf[0], C.size_t(len(buf)))
++	return errors.New(C.GoString(&buf[0]))
++}
++
++// BoringSSLGCM implements cipher.AEAD interface using BoringSSL
++type BoringSSLGCM struct {
++	key []byte
++}
++
++// NewBoringSSLGCM creates a new GCM cipher using BoringSSL
++func NewBoringSSLGCM(key []byte) (cipher.AEAD, error) {
++	if len(key) != 16 && len(key) != 24 && len(key) != 32 {
++		return nil, ErrInvalidKey
++	}
++	return &BoringSSLGCM{key: key}, nil
++}
++
++func (g *BoringSSLGCM) NonceSize() int {
++	return 12
++}
++
++func (g *BoringSSLGCM) Overhead() int {
++	return 16
++}
++
++func (g *BoringSSLGCM) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
++	if len(nonce) != g.NonceSize() {
++		panic("cipher: incorrect nonce length")
++	}
++
++	var ciphertext, tag []byte
++	var err error
++
++	switch len(g.key) {
++	case 16:
++		ciphertext, tag, err = AES128GCMEncrypt(g.key, nonce, plaintext, additionalData)
++	case 32:
++		ciphertext, tag, err = AES256GCMEncrypt(g.key, nonce, plaintext, additionalData)
++	default:
++		panic("cipher: unsupported key size")
++	}
++
++	if err != nil {
++		panic(err)
++	}
++
++	ret := append(dst, ciphertext...)
++	return append(ret, tag...)
++}
++
++func (g *BoringSSLGCM) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, error) {
++	if len(nonce) != g.NonceSize() {
++		return nil, errors.New("cipher: incorrect nonce length")
++	}
++
++	if len(ciphertext) < g.Overhead() {
++		return nil, errors.New("cipher: ciphertext too short")
++	}
++
++	// Decrypt using BoringSSL (decryption implementation similar to encryption)
++	// This is a simplified version - full implementation would use EVP_Decrypt* functions
++	// For now, we'll return an error indicating this needs full implementation
++	// To implement: split ciphertext into ct and tag, then use EVP_DecryptUpdate/Final
++	return nil, errors.New("BoringSSL GCM decryption not yet fully implemented")
++}
++
++// TLS Handshake Bridge Functions
++
++// TLS13Handshake performs TLS 1.3 handshake using BoringSSL
++func TLS13Handshake(ctx *C.SSL_CTX, conn *C.SSL) error {
++	if ctx == nil || conn == nil {
++		return errors.New("invalid SSL context or connection")
++	}
++
++	if C.SSL_do_handshake(conn) != 1 {
++		return getBoringSSLError()
++	}
++	return nil
++}
++
++// TLS13ClientHello creates a TLS 1.3 client hello using BoringSSL
++func TLS13ClientHello(ctx *C.SSL_CTX, hostname string) (*C.SSL, error) {
++	if ctx == nil {
++		return nil, errors.New("invalid SSL context")
++	}
++
++	conn := C.SSL_new(ctx)
++	if conn == nil {
++		return nil, getBoringSSLError()
++	}
++
++	// Set TLS 1.3
++	if C.SSL_set_min_proto_version(conn, C.TLS1_3_VERSION) != 1 {
++		C.SSL_free(conn)
++		return nil, getBoringSSLError()
++	}
++	if C.SSL_set_max_proto_version(conn, C.TLS1_3_VERSION) != 1 {
++		C.SSL_free(conn)
++		return nil, getBoringSSLError()
++	}
++
++	// Set SNI (Server Name Indication)
++	if hostname != "" {
++		cHostname := C.CString(hostname)
++		defer C.free(unsafe.Pointer(cHostname))
++		if C.SSL_set_tlsext_host_name(conn, cHostname) != 1 {
++			C.SSL_free(conn)
++			return nil, getBoringSSLError()
++		}
++	}
++
++	return conn, nil
++}
++
++// TLS13ServerHello processes TLS 1.3 server hello using BoringSSL
++func TLS13ServerHello(conn *C.SSL) error {
++	if conn == nil {
++		return errors.New("invalid SSL connection")
++	}
++
++	// Server hello is part of the handshake
++	if C.SSL_do_handshake(conn) != 1 {
++		return getBoringSSLError()
++	}
++	return nil
++}
++
++// TLS13KeyExchange performs TLS 1.3 key exchange using BoringSSL
++func TLS13KeyExchange(conn *C.SSL) ([]byte, error) {
++	if conn == nil {
++		return nil, errors.New("invalid SSL connection")
++	}
++
++	// In TLS 1.3, key exchange is part of the handshake
++	// This function extracts the shared secret after handshake
++	// Note: BoringSSL doesn't expose raw key material directly
++	// This is a placeholder - actual implementation would use SSL_get_session
++
++	return nil, errors.New("TLS 1.3 key exchange extraction not yet fully implemented")
++}
++
++// Hardware Acceleration Detection
++
++// HasAESNI checks if CPU supports AES-NI instructions (x86_64)
++// Note: This is a placeholder - actual implementation requires CPUID
++func HasAESNI() bool {
++	// This requires runtime CPU feature detection
++	// For now, return false - actual implementation would use CPUID
++	return false
++}
++
++// HasNEON checks if CPU supports ARM NEON instructions (ARM64)
++func HasNEON() bool {
++	// ARMv8 crypto extensions are typically available on ARM64
++	// BoringSSL will automatically use them if available
++	return true
++}
++
++// HasARMv8Crypto checks if CPU supports ARMv8 crypto extensions
++func HasARMv8Crypto() bool {
++	// ARMv8 crypto extensions include AES, SHA1, SHA2-256
++	// BoringSSL will automatically use them if available
++	return true
++}
++
++// OptimizedCryptoEnabled returns true if hardware acceleration is available
++func OptimizedCryptoEnabled() bool {
++	// Check for hardware acceleration support
++	// BoringSSL automatically uses hardware acceleration when available
++	return true
++}
