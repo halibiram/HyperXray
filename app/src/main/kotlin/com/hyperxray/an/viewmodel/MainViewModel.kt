@@ -21,6 +21,7 @@ import com.hyperxray.an.BuildConfig
 import com.hyperxray.an.R
 import com.hyperxray.an.common.CoreStatsClient
 import com.hyperxray.an.common.ROUTE_APP_LIST
+import com.hyperxray.an.common.formatBytes
 import com.hyperxray.an.common.ROUTE_CONFIG_EDIT
 import com.hyperxray.an.common.ThemeMode
 import com.hyperxray.an.data.source.FileManager
@@ -207,22 +208,55 @@ class MainViewModel(application: Application) :
         val libraryDir = TProxyService.getNativeLibraryDir(application)
         val xrayPath = "$libraryDir/libxray.so"
         try {
-            val process = Runtime.getRuntime().exec("$xrayPath -version")
+            // Check if libxray.so exists
+            val xrayFile = File(xrayPath)
+            if (!xrayFile.exists()) {
+                Log.w(TAG, "libxray.so not found at $xrayPath")
+                _settingsState.value = _settingsState.value.copy(
+                    info = _settingsState.value.info.copy(
+                        kernelVersion = "N/A (file not found)"
+                    )
+                )
+                return
+            }
+            
+            // Try to execute with linker (Android way)
+            val process = Runtime.getRuntime().exec(arrayOf("/system/bin/linker64", xrayPath, "-version"))
             val reader = BufferedReader(InputStreamReader(process.inputStream))
             val firstLine = reader.readLine()
             process.destroy()
-            _settingsState.value = _settingsState.value.copy(
-                info = _settingsState.value.info.copy(
-                    kernelVersion = firstLine ?: "N/A"
+            
+            if (firstLine != null && firstLine.isNotEmpty()) {
+                _settingsState.value = _settingsState.value.copy(
+                    info = _settingsState.value.info.copy(
+                        kernelVersion = firstLine
+                    )
                 )
-            )
-        } catch (e: IOException) {
+            } else {
+                // Fallback: show that file exists but version couldn't be read
+                _settingsState.value = _settingsState.value.copy(
+                    info = _settingsState.value.info.copy(
+                        kernelVersion = "Available (BoringSSL)"
+                    )
+                )
+            }
+        } catch (e: Exception) {
             Log.e(TAG, "Failed to get xray version", e)
-            _settingsState.value = _settingsState.value.copy(
-                info = _settingsState.value.info.copy(
-                    kernelVersion = "N/A"
+            // Check if file exists at least
+            val xrayFile = File(xrayPath)
+            if (xrayFile.exists()) {
+                _settingsState.value = _settingsState.value.copy(
+                    info = _settingsState.value.info.copy(
+                        kernelVersion = "Available (BoringSSL)"
+                    )
                 )
-            )
+            } else {
+                _settingsState.value = _settingsState.value.copy(
+                    info = _settingsState.value.info.copy(
+                        kernelVersion = "N/A"
+                    )
+                )
+            }
         }
     }
 
@@ -309,26 +343,32 @@ class MainViewModel(application: Application) :
         val traffic = coreStatsClient?.getTraffic()
 
         if (stats == null && traffic == null) {
+            Log.w(TAG, "Both stats and traffic are null, closing client")
             coreStatsClient?.close()
             coreStatsClient = null
             return
         }
 
+        // Preserve existing traffic values if new traffic data is null
+        val currentState = _coreStatsState.value
+        val newUplink = traffic?.uplink ?: currentState.uplink
+        val newDownlink = traffic?.downlink ?: currentState.downlink
+
         _coreStatsState.value = CoreStatsState(
-            uplink = traffic?.uplink ?: 0,
-            downlink = traffic?.downlink ?: 0,
-            numGoroutine = stats?.numGoroutine ?: 0,
-            numGC = stats?.numGC ?: 0,
-            alloc = stats?.alloc ?: 0,
-            totalAlloc = stats?.totalAlloc ?: 0,
-            sys = stats?.sys ?: 0,
-            mallocs = stats?.mallocs ?: 0,
-            frees = stats?.frees ?: 0,
-            liveObjects = stats?.liveObjects ?: 0,
-            pauseTotalNs = stats?.pauseTotalNs ?: 0,
-            uptime = stats?.uptime ?: 0
+            uplink = newUplink,
+            downlink = newDownlink,
+            numGoroutine = stats?.numGoroutine ?: currentState.numGoroutine,
+            numGC = stats?.numGC ?: currentState.numGC,
+            alloc = stats?.alloc ?: currentState.alloc,
+            totalAlloc = stats?.totalAlloc ?: currentState.totalAlloc,
+            sys = stats?.sys ?: currentState.sys,
+            mallocs = stats?.mallocs ?: currentState.mallocs,
+            frees = stats?.frees ?: currentState.frees,
+            liveObjects = stats?.liveObjects ?: currentState.liveObjects,
+            pauseTotalNs = stats?.pauseTotalNs ?: currentState.pauseTotalNs,
+            uptime = stats?.uptime ?: currentState.uptime
         )
-        Log.d(TAG, "Core stats updated")
+        Log.d(TAG, "Core stats updated - Uplink: ${formatBytes(newUplink)}, Downlink: ${formatBytes(newDownlink)}")
     }
 
     suspend fun importConfigFromClipboard(): String? {

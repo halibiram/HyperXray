@@ -6,7 +6,9 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -19,6 +21,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
@@ -359,12 +362,24 @@ private fun LogActions(
     onLogSearchingChange: (Boolean) -> Unit = {}
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var showClearDialog by remember { mutableStateOf(false) }
     val hasLogsToExport by logViewModel.hasLogsToExport.collectAsStateWithLifecycle()
+    val logEntries by logViewModel.logEntries.collectAsStateWithLifecycle()
+    val hasLogs = logEntries.isNotEmpty()
 
     IconButton(onClick = { onLogSearchingChange(true) }) {
         Icon(
             painterResource(id = R.drawable.search),
             contentDescription = stringResource(R.string.search)
+        )
+    }
+    IconButton(
+        onClick = { showClearDialog = true },
+        enabled = hasLogs
+    ) {
+        Icon(
+            Icons.Default.Delete,
+            contentDescription = "Clear logs"
         )
     }
     IconButton(onClick = { expanded = true }) {
@@ -384,6 +399,32 @@ private fun LogActions(
                 expanded = false
             },
             enabled = hasLogsToExport
+        )
+    }
+    
+    // Clear logs confirmation dialog
+    if (showClearDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearDialog = false },
+            title = { Text("Clear Logs") },
+            text = { Text("Are you sure you want to clear all logs? This action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        logViewModel.clearLogs()
+                        showClearDialog = false
+                    }
+                ) {
+                    Text("Clear")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showClearDialog = false }
+                ) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
         )
     }
 }

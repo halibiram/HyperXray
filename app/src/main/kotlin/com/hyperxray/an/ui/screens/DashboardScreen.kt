@@ -94,7 +94,7 @@ fun DashboardScreen(
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Text(
-                        text = "Stats",
+                        text = "System Stats",
                         style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
@@ -107,12 +107,56 @@ fun DashboardScreen(
                         value = formatNumber(coreStats.numGC.toLong())
                     )
                     StatRow(
+                        label = stringResource(id = R.string.stats_uptime),
+                        value = formatUptime(coreStats.uptime)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.extraLarge),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                )
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        text = "Memory Stats",
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    StatRow(
                         label = stringResource(id = R.string.stats_alloc),
                         value = formatBytes(coreStats.alloc)
                     )
                     StatRow(
-                        label = stringResource(id = R.string.stats_uptime),
-                        value = formatUptime(coreStats.uptime)
+                        label = "Total Alloc",
+                        value = formatBytes(coreStats.totalAlloc)
+                    )
+                    StatRow(
+                        label = "Sys",
+                        value = formatBytes(coreStats.sys)
+                    )
+                    StatRow(
+                        label = "Mallocs",
+                        value = formatNumber(coreStats.mallocs)
+                    )
+                    StatRow(
+                        label = "Frees",
+                        value = formatNumber(coreStats.frees)
+                    )
+                    StatRow(
+                        label = "Live Objects",
+                        value = formatNumber(coreStats.liveObjects)
+                    )
+                    StatRow(
+                        label = "GC Pause Total",
+                        value = formatUptime((coreStats.pauseTotalNs / 1_000_000_000).toInt())
                     )
                 }
             }

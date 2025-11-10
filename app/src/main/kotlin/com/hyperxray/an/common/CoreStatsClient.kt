@@ -1,5 +1,6 @@
 package com.hyperxray.an.common
 
+import android.util.Log
 import com.hyperxray.an.viewmodel.TrafficState
 import com.xray.app.stats.command.QueryStatsRequest
 import com.xray.app.stats.command.StatsServiceGrpc
@@ -24,26 +25,40 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
     }
 
     suspend fun getTraffic(): TrafficState? = withContext(Dispatchers.IO) {
-        val request = QueryStatsRequest.newBuilder()
-            .setPattern("outbound")
-            .setReset(false)
-            .build()
-
-        runCatching { blockingStub.queryStats(request) }
-            .getOrNull()
-            ?.statList
-            ?.groupBy {
-                when {
-                    it.name.endsWith("uplink") -> "uplink"
-                    it.name.endsWith("downlink") -> "downlink"
-                    else -> "other"
+        runCatching {
+            // Try multiple patterns to get traffic stats
+            val patterns = listOf("outbound", "inbound", "user")
+            var totalUplink = 0L
+            var totalDownlink = 0L
+            
+            for (pattern in patterns) {
+                val request = QueryStatsRequest.newBuilder()
+                    .setPattern(pattern)
+                    .setReset(false)
+                    .build()
+                
+                val response = blockingStub.queryStats(request)
+                response?.statList?.forEach { stat ->
+                    Log.d("CoreStatsClient", "Stat: ${stat.name} = ${stat.value}")
+                    when {
+                        stat.name.contains("uplink", ignoreCase = true) -> {
+                            totalUplink += stat.value
+                        }
+                        stat.name.contains("downlink", ignoreCase = true) -> {
+                            totalDownlink += stat.value
+                        }
+                    }
                 }
             }
-            ?.let { groups ->
-                val uplink = groups["uplink"]?.sumOf { it.value } ?: 0L
-                val downlink = groups["downlink"]?.sumOf { it.value } ?: 0L
-                TrafficState(uplink, downlink)
+            
+            Log.d("CoreStatsClient", "Total Uplink: $totalUplink, Total Downlink: $totalDownlink")
+            
+            if (totalUplink > 0 || totalDownlink > 0) {
+                TrafficState(totalUplink, totalDownlink)
+            } else {
+                null
             }
+        }.getOrNull()
     }
 
     override fun close() {
