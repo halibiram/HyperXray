@@ -465,15 +465,29 @@ class TProxyService : VpnService() {
         }
 
         private fun getTproxyConf(prefs: Preferences): String {
+            // Use custom values if available, otherwise use defaults
+            val mtu = prefs.tunnelMtuCustom
+            val taskStack = prefs.taskStackSizeCustom
+            val tcpBuffer = prefs.tcpBufferSize.coerceAtMost(65432) // Max TCP_SND_BUF limit
+            val nofile = prefs.limitNofile
+            val connectTimeout = prefs.connectTimeout
+            val readWriteTimeout = prefs.readWriteTimeout
+            
             var tproxyConf = """misc:
-  task-stack-size: ${prefs.taskStackSize}
+  task-stack-size: $taskStack
+  tcp-buffer-size: $tcpBuffer
+  connect-timeout: $connectTimeout
+  read-write-timeout: $readWriteTimeout
+  limit-nofile: $nofile
 tunnel:
-  mtu: ${prefs.tunnelMtu}
+  mtu: $mtu
+  multi-queue: ${prefs.tunnelMultiQueue}
 """
             tproxyConf += """socks5:
   port: ${prefs.socksPort}
   address: '${prefs.socksAddress}'
   udp: '${if (prefs.udpInTcp) "tcp" else "udp"}'
+  pipeline: ${prefs.socks5Pipeline}
 """
             if (prefs.socksUsername.isNotEmpty() && prefs.socksPassword.isNotEmpty()) {
                 tproxyConf += "  username: '" + prefs.socksUsername + "'\n"

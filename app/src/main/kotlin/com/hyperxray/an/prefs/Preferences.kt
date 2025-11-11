@@ -199,6 +199,55 @@ class Preferences(context: Context) {
     val taskStackSize: Int
         get() = 81920
 
+    // hev-socks5-tunnel Maximum Performance Settings
+    var tunnelMtuCustom: Int
+        get() = getPrefData("TunnelMtuCustom").first?.toIntOrNull() ?: 8500
+        set(value) {
+            setValueInProvider("TunnelMtuCustom", value.toString())
+        }
+
+    var taskStackSizeCustom: Int
+        get() = getPrefData("TaskStackSizeCustom").first?.toIntOrNull() ?: 81920
+        set(value) {
+            setValueInProvider("TaskStackSizeCustom", value.toString())
+        }
+
+    var tcpBufferSize: Int
+        get() = getPrefData("TcpBufferSize").first?.toIntOrNull() ?: 65536
+        set(value) {
+            setValueInProvider("TcpBufferSize", value.toString())
+        }
+
+    var limitNofile: Int
+        get() = getPrefData("LimitNofile").first?.toIntOrNull() ?: 65535
+        set(value) {
+            setValueInProvider("LimitNofile", value.toString())
+        }
+
+    var connectTimeout: Int
+        get() = getPrefData("ConnectTimeout").first?.toIntOrNull() ?: 5000
+        set(value) {
+            setValueInProvider("ConnectTimeout", value.toString())
+        }
+
+    var readWriteTimeout: Int
+        get() = getPrefData("ReadWriteTimeout").first?.toIntOrNull() ?: 60000
+        set(value) {
+            setValueInProvider("ReadWriteTimeout", value.toString())
+        }
+
+    var socks5Pipeline: Boolean
+        get() = getBooleanPref("Socks5Pipeline", false)
+        set(value) {
+            setValueInProvider("Socks5Pipeline", value.toString())
+        }
+
+    var tunnelMultiQueue: Boolean
+        get() = getBooleanPref("TunnelMultiQueue", false)
+        set(value) {
+            setValueInProvider("TunnelMultiQueue", value.toString())
+        }
+
     var selectedConfigPath: String?
         get() = getPrefData(SELECTED_CONFIG_PATH).first
         set(path) {
@@ -300,6 +349,134 @@ class Preferences(context: Context) {
             setValueInProvider(THEME, value.value)
         }
 
+    // Aggressive Speed Optimization Settings
+    var aggressiveSpeedOptimizations: Boolean
+        get() = getBooleanPref(AGGRESSIVE_SPEED_OPTIMIZATIONS, false)
+        set(enable) {
+            setValueInProvider(AGGRESSIVE_SPEED_OPTIMIZATIONS, enable)
+        }
+
+    var connIdleTimeout: Int
+        get() = getPrefData(CONN_IDLE_TIMEOUT).first?.toIntOrNull() ?: 300
+        set(value) {
+            setValueInProvider(CONN_IDLE_TIMEOUT, value.toString())
+        }
+
+    var handshakeTimeout: Int
+        get() = getPrefData(HANDSHAKE_TIMEOUT).first?.toIntOrNull() ?: 4
+        set(value) {
+            setValueInProvider(HANDSHAKE_TIMEOUT, value.toString())
+        }
+
+    var uplinkOnly: Int
+        get() = getPrefData(UPLINK_ONLY).first?.toIntOrNull() ?: 2
+        set(value) {
+            setValueInProvider(UPLINK_ONLY, value.toString())
+        }
+
+    var downlinkOnly: Int
+        get() = getPrefData(DOWNLINK_ONLY).first?.toIntOrNull() ?: 5
+        set(value) {
+            setValueInProvider(DOWNLINK_ONLY, value.toString())
+        }
+
+    var dnsCacheSize: Int
+        get() = getPrefData(DNS_CACHE_SIZE).first?.toIntOrNull() ?: 5000
+        set(value) {
+            setValueInProvider(DNS_CACHE_SIZE, value.toString())
+        }
+
+    var disableFakeDns: Boolean
+        get() = getBooleanPref(DISABLE_FAKE_DNS, false)
+        set(enable) {
+            setValueInProvider(DISABLE_FAKE_DNS, enable)
+        }
+
+    var optimizeRoutingRules: Boolean
+        get() = getBooleanPref(OPTIMIZE_ROUTING_RULES, true)
+        set(enable) {
+            setValueInProvider(OPTIMIZE_ROUTING_RULES, enable)
+        }
+
+    var tcpFastOpen: Boolean
+        get() = getBooleanPref(TCP_FAST_OPEN, true)
+        set(enable) {
+            setValueInProvider(TCP_FAST_OPEN, enable)
+        }
+
+    var http2Optimization: Boolean
+        get() = getBooleanPref(HTTP2_OPTIMIZATION, true)
+        set(enable) {
+            setValueInProvider(HTTP2_OPTIMIZATION, enable)
+        }
+
+    // Extreme RAM/CPU Optimization Settings
+    var extremeRamCpuOptimizations: Boolean
+        get() = getBooleanPref(EXTREME_RAM_CPU_OPTIMIZATIONS, false)
+        set(enable) {
+            setValueInProvider(EXTREME_RAM_CPU_OPTIMIZATIONS, enable)
+        }
+
+    var extremeConnIdleTimeout: Int
+        get() = getPrefData(EXTREME_CONN_IDLE_TIMEOUT).first?.toIntOrNull() ?: 600
+        set(value) {
+            setValueInProvider(EXTREME_CONN_IDLE_TIMEOUT, value.toString())
+        }
+
+    var extremeHandshakeTimeout: Int
+        get() = getPrefData(EXTREME_HANDSHAKE_TIMEOUT).first?.toIntOrNull() ?: 8
+        set(value) {
+            setValueInProvider(EXTREME_HANDSHAKE_TIMEOUT, value.toString())
+        }
+
+    var extremeUplinkOnly: Int
+        get() = getPrefData(EXTREME_UPLINK_ONLY).first?.toIntOrNull() ?: 8
+        set(value) {
+            setValueInProvider(EXTREME_UPLINK_ONLY, value.toString())
+        }
+
+    var extremeDownlinkOnly: Int
+        get() = getPrefData(EXTREME_DOWNLINK_ONLY).first?.toIntOrNull() ?: 16
+        set(value) {
+            setValueInProvider(EXTREME_DOWNLINK_ONLY, value.toString())
+        }
+
+    var extremeDnsCacheSize: Int
+        get() = getPrefData(EXTREME_DNS_CACHE_SIZE).first?.toIntOrNull() ?: 10000
+        set(value) {
+            setValueInProvider(EXTREME_DNS_CACHE_SIZE, value.toString())
+        }
+
+    var extremeDisableFakeDns: Boolean
+        get() = getBooleanPref(EXTREME_DISABLE_FAKE_DNS, true)
+        set(enable) {
+            setValueInProvider(EXTREME_DISABLE_FAKE_DNS, enable)
+        }
+
+    var extremeRoutingOptimization: Boolean
+        get() = getBooleanPref(EXTREME_ROUTING_OPTIMIZATION, true)
+        set(enable) {
+            setValueInProvider(EXTREME_ROUTING_OPTIMIZATION, enable)
+        }
+
+    var maxConcurrentConnections: Int
+        get() = getPrefData(MAX_CONCURRENT_CONNECTIONS).first?.toIntOrNull() ?: 0
+        set(value) {
+            setValueInProvider(MAX_CONCURRENT_CONNECTIONS, value.toString())
+        }
+
+    var parallelDnsQueries: Boolean
+        get() = getBooleanPref(PARALLEL_DNS_QUERIES, true)
+        set(enable) {
+            setValueInProvider(PARALLEL_DNS_QUERIES, enable)
+        }
+
+    var extremeProxyOptimization: Boolean
+        get() = getBooleanPref(EXTREME_PROXY_OPTIMIZATION, true)
+        set(enable) {
+            setValueInProvider(EXTREME_PROXY_OPTIMIZATION, enable)
+        }
+
     companion object {
         const val SOCKS_ADDR: String = "SocksAddr"
         const val SOCKS_PORT: String = "SocksPort"
@@ -328,6 +505,32 @@ class Preferences(context: Context) {
         const val API_PORT: String = "ApiPort"
         const val BYPASS_SELECTED_APPS: String = "BypassSelectedApps"
         const val THEME: String = "Theme"
+        
+        // Aggressive Speed Optimization Keys
+        const val AGGRESSIVE_SPEED_OPTIMIZATIONS: String = "AggressiveSpeedOptimizations"
+        const val CONN_IDLE_TIMEOUT: String = "ConnIdleTimeout"
+        const val HANDSHAKE_TIMEOUT: String = "HandshakeTimeout"
+        const val UPLINK_ONLY: String = "UplinkOnly"
+        const val DOWNLINK_ONLY: String = "DownlinkOnly"
+        const val DNS_CACHE_SIZE: String = "DnsCacheSize"
+        const val DISABLE_FAKE_DNS: String = "DisableFakeDns"
+        const val OPTIMIZE_ROUTING_RULES: String = "OptimizeRoutingRules"
+        const val TCP_FAST_OPEN: String = "TcpFastOpen"
+        const val HTTP2_OPTIMIZATION: String = "Http2Optimization"
+        
+        // Extreme RAM/CPU Optimization Keys
+        const val EXTREME_RAM_CPU_OPTIMIZATIONS: String = "ExtremeRamCpuOptimizations"
+        const val EXTREME_CONN_IDLE_TIMEOUT: String = "ExtremeConnIdleTimeout"
+        const val EXTREME_HANDSHAKE_TIMEOUT: String = "ExtremeHandshakeTimeout"
+        const val EXTREME_UPLINK_ONLY: String = "ExtremeUplinkOnly"
+        const val EXTREME_DOWNLINK_ONLY: String = "ExtremeDownlinkOnly"
+        const val EXTREME_DNS_CACHE_SIZE: String = "ExtremeDnsCacheSize"
+        const val EXTREME_DISABLE_FAKE_DNS: String = "ExtremeDisableFakeDns"
+        const val EXTREME_ROUTING_OPTIMIZATION: String = "ExtremeRoutingOptimization"
+        const val MAX_CONCURRENT_CONNECTIONS: String = "MaxConcurrentConnections"
+        const val PARALLEL_DNS_QUERIES: String = "ParallelDnsQueries"
+        const val EXTREME_PROXY_OPTIMIZATION: String = "ExtremeProxyOptimization"
+        
         private const val TAG = "Preferences"
     }
 }
