@@ -177,6 +177,7 @@ class TProxyService : VpnService() {
             val libraryDir = getNativeLibraryDir(applicationContext)
             val prefs = Preferences(applicationContext)
             val selectedConfigPath = prefs.selectedConfigPath ?: return
+            // Use libxray.so directly with Android linker
             val xrayPath = "$libraryDir/libxray.so"
             val configContent = File(selectedConfigPath).readText()
             val apiPort = findAvailablePort(extractPortsFromJson(configContent)) ?: return
@@ -187,12 +188,31 @@ class TProxyService : VpnService() {
             currentProcess = processBuilder.start()
             this.xrayProcess = currentProcess
 
+            // Wait a bit to ensure process is fully started
+            Thread.sleep(100)
+            
+            // Check if process is still alive
+            if (!currentProcess.isAlive) {
+                val exitValue = try { currentProcess.exitValue() } catch (e: IllegalThreadStateException) { -1 }
+                Log.e(TAG, "Xray process exited immediately with code: $exitValue")
+                throw IOException("Xray process exited immediately")
+            }
+
             Log.d(TAG, "Writing config to xray stdin from: $selectedConfigPath")
             val injectedConfigContent =
                 ConfigUtils.injectStatsService(prefs, configContent)
-            currentProcess.outputStream.use { os ->
-                os.write(injectedConfigContent.toByteArray())
-                os.flush()
+            
+            try {
+                currentProcess.outputStream.use { os ->
+                    os.write(injectedConfigContent.toByteArray())
+                    os.flush()
+                }
+            } catch (e: IOException) {
+                if (!currentProcess.isAlive) {
+                    val exitValue = try { currentProcess.exitValue() } catch (ex: IllegalThreadStateException) { -1 }
+                    Log.e(TAG, "Xray process exited while writing config, exit code: $exitValue")
+                }
+                throw e
             }
 
             val inputStream = currentProcess.inputStream
@@ -201,11 +221,13 @@ class TProxyService : VpnService() {
             Log.d(TAG, "Reading xray process output.")
             while ((reader.readLine().also { line = it }) != null) {
                 logFileManager.appendLog(line)
+                // Broadcast immediately without delay for maximum responsiveness
                 synchronized(logBroadcastBuffer) {
                     logBroadcastBuffer.add(line)
-                    if (!handler.hasCallbacks(broadcastLogsRunnable)) {
-                        handler.postDelayed(broadcastLogsRunnable, BROADCAST_DELAY_MS)
-                    }
+                    // Remove any pending delayed broadcasts
+                    handler.removeCallbacks(broadcastLogsRunnable)
+                    // Broadcast immediately on main thread
+                    handler.post(broadcastLogsRunnable)
                 }
             }
             Log.d(TAG, "xray process output stream finished.")
@@ -232,7 +254,26 @@ class TProxyService : VpnService() {
 
     private fun getProcessBuilder(xrayPath: String): ProcessBuilder {
         val filesDir = applicationContext.filesDir
-        val command: MutableList<String> = mutableListOf(xrayPath)
+
+        // Check if libxray.so exists
+        val libxrayFile = File(xrayPath)
+        if (!libxrayFile.exists()) {
+            throw IOException("libxray.so not found at: $xrayPath")
+        }
+
+        // Use Android linker to execute libxray.so
+        // For 64-bit: /system/bin/linker64
+        // For 32-bit: /system/bin/linker
+        val linkerPath = if (Build.SUPPORTED_64_BIT_ABIS.isNotEmpty()) {
+            "/system/bin/linker64"
+        } else {
+            "/system/bin/linker"
+        }
+
+        Log.d(TAG, "Using linker: $linkerPath to execute: $xrayPath")
+
+        val command: MutableList<String> = mutableListOf(linkerPath, xrayPath, "run")
+
         val processBuilder = ProcessBuilder(command)
         val environment = processBuilder.environment()
         environment["XRAY_LOCATION_ASSET"] = filesDir.path
@@ -383,7 +424,8 @@ class TProxyService : VpnService() {
         const val ACTION_RELOAD_CONFIG: String = "com.hyperxray.an.RELOAD_CONFIG"
         const val EXTRA_LOG_DATA: String = "log_data"
         private const val TAG = "VpnService"
-        private const val BROADCAST_DELAY_MS: Long = 3000
+        private const val BROADCAST_DELAY_MS: Long = 10
+        private const val BROADCAST_BUFFER_SIZE_THRESHOLD: Int = 1
 
         init {
             System.loadLibrary("hev-socks5-tunnel")

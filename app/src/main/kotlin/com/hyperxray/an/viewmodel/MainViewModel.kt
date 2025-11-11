@@ -108,7 +108,32 @@ class MainViewModel(application: Application) :
                 isGeositeCustom = prefs.customGeositeImported
             ),
             connectivityTestTarget = InputFieldState(prefs.connectivityTestTarget),
-            connectivityTestTimeout = InputFieldState(prefs.connectivityTestTimeout.toString())
+            connectivityTestTimeout = InputFieldState(prefs.connectivityTestTimeout.toString()),
+            performance = PerformanceSettings(
+                aggressiveSpeedOptimizations = prefs.aggressiveSpeedOptimizations,
+                connIdleTimeout = InputFieldState(prefs.connIdleTimeout.toString()),
+                handshakeTimeout = InputFieldState(prefs.handshakeTimeout.toString()),
+                uplinkOnly = InputFieldState(prefs.uplinkOnly.toString()),
+                downlinkOnly = InputFieldState(prefs.downlinkOnly.toString()),
+                dnsCacheSize = InputFieldState(prefs.dnsCacheSize.toString()),
+                disableFakeDns = prefs.disableFakeDns,
+                optimizeRoutingRules = prefs.optimizeRoutingRules,
+                tcpFastOpen = prefs.tcpFastOpen,
+                http2Optimization = prefs.http2Optimization,
+                extreme = ExtremeOptimizationSettings(
+                    extremeRamCpuOptimizations = prefs.extremeRamCpuOptimizations,
+                    extremeConnIdleTimeout = InputFieldState(prefs.extremeConnIdleTimeout.toString()),
+                    extremeHandshakeTimeout = InputFieldState(prefs.extremeHandshakeTimeout.toString()),
+                    extremeUplinkOnly = InputFieldState(prefs.extremeUplinkOnly.toString()),
+                    extremeDownlinkOnly = InputFieldState(prefs.extremeDownlinkOnly.toString()),
+                    extremeDnsCacheSize = InputFieldState(prefs.extremeDnsCacheSize.toString()),
+                    extremeDisableFakeDns = prefs.extremeDisableFakeDns,
+                    extremeRoutingOptimization = prefs.extremeRoutingOptimization,
+                    maxConcurrentConnections = InputFieldState(prefs.maxConcurrentConnections.toString()),
+                    parallelDnsQueries = prefs.parallelDnsQueries,
+                    extremeProxyOptimization = prefs.extremeProxyOptimization
+                )
+            )
         )
     )
     val settingsState: StateFlow<SettingsState> = _settingsState.asStateFlow()
@@ -200,7 +225,32 @@ class MainViewModel(application: Application) :
                 isGeositeCustom = prefs.customGeositeImported
             ),
             connectivityTestTarget = InputFieldState(prefs.connectivityTestTarget),
-            connectivityTestTimeout = InputFieldState(prefs.connectivityTestTimeout.toString())
+            connectivityTestTimeout = InputFieldState(prefs.connectivityTestTimeout.toString()),
+            performance = PerformanceSettings(
+                aggressiveSpeedOptimizations = prefs.aggressiveSpeedOptimizations,
+                connIdleTimeout = InputFieldState(prefs.connIdleTimeout.toString()),
+                handshakeTimeout = InputFieldState(prefs.handshakeTimeout.toString()),
+                uplinkOnly = InputFieldState(prefs.uplinkOnly.toString()),
+                downlinkOnly = InputFieldState(prefs.downlinkOnly.toString()),
+                dnsCacheSize = InputFieldState(prefs.dnsCacheSize.toString()),
+                disableFakeDns = prefs.disableFakeDns,
+                optimizeRoutingRules = prefs.optimizeRoutingRules,
+                tcpFastOpen = prefs.tcpFastOpen,
+                http2Optimization = prefs.http2Optimization,
+                extreme = ExtremeOptimizationSettings(
+                    extremeRamCpuOptimizations = prefs.extremeRamCpuOptimizations,
+                    extremeConnIdleTimeout = InputFieldState(prefs.extremeConnIdleTimeout.toString()),
+                    extremeHandshakeTimeout = InputFieldState(prefs.extremeHandshakeTimeout.toString()),
+                    extremeUplinkOnly = InputFieldState(prefs.extremeUplinkOnly.toString()),
+                    extremeDownlinkOnly = InputFieldState(prefs.extremeDownlinkOnly.toString()),
+                    extremeDnsCacheSize = InputFieldState(prefs.extremeDnsCacheSize.toString()),
+                    extremeDisableFakeDns = prefs.extremeDisableFakeDns,
+                    extremeRoutingOptimization = prefs.extremeRoutingOptimization,
+                    maxConcurrentConnections = InputFieldState(prefs.maxConcurrentConnections.toString()),
+                    parallelDnsQueries = prefs.parallelDnsQueries,
+                    extremeProxyOptimization = prefs.extremeProxyOptimization
+                )
+            )
         )
     }
 
@@ -530,6 +580,374 @@ class MainViewModel(application: Application) :
             switches = _settingsState.value.switches.copy(themeMode = mode)
         )
         reloadView?.invoke()
+    }
+
+    // Performance Settings Functions
+    fun setAggressiveSpeedOptimizations(enabled: Boolean) {
+        prefs.aggressiveSpeedOptimizations = enabled
+        _settingsState.value = _settingsState.value.copy(
+            performance = _settingsState.value.performance.copy(
+                aggressiveSpeedOptimizations = enabled
+            )
+        )
+    }
+
+    fun updateConnIdleTimeout(value: String) {
+        val timeout = value.toIntOrNull()
+        if (timeout != null && timeout > 0) {
+            prefs.connIdleTimeout = timeout
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    connIdleTimeout = InputFieldState(value)
+                )
+            )
+        } else {
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    connIdleTimeout = InputFieldState(
+                        value = value,
+                        error = application.getString(R.string.invalid_timeout),
+                        isValid = false
+                    )
+                )
+            )
+        }
+    }
+
+    fun updateHandshakeTimeout(value: String) {
+        val timeout = value.toIntOrNull()
+        if (timeout != null && timeout > 0) {
+            prefs.handshakeTimeout = timeout
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    handshakeTimeout = InputFieldState(value)
+                )
+            )
+        } else {
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    handshakeTimeout = InputFieldState(
+                        value = value,
+                        error = application.getString(R.string.invalid_timeout),
+                        isValid = false
+                    )
+                )
+            )
+        }
+    }
+
+    fun updateUplinkOnly(value: String) {
+        val uplink = value.toIntOrNull()
+        if (uplink != null && uplink >= 0) {
+            prefs.uplinkOnly = uplink
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    uplinkOnly = InputFieldState(value)
+                )
+            )
+        } else {
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    uplinkOnly = InputFieldState(
+                        value = value,
+                        error = "Invalid value",
+                        isValid = false
+                    )
+                )
+            )
+        }
+    }
+
+    fun updateDownlinkOnly(value: String) {
+        val downlink = value.toIntOrNull()
+        if (downlink != null && downlink >= 0) {
+            prefs.downlinkOnly = downlink
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    downlinkOnly = InputFieldState(value)
+                )
+            )
+        } else {
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    downlinkOnly = InputFieldState(
+                        value = value,
+                        error = "Invalid value",
+                        isValid = false
+                    )
+                )
+            )
+        }
+    }
+
+    fun updateDnsCacheSize(value: String) {
+        val cacheSize = value.toIntOrNull()
+        if (cacheSize != null && cacheSize > 0) {
+            prefs.dnsCacheSize = cacheSize
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    dnsCacheSize = InputFieldState(value)
+                )
+            )
+        } else {
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    dnsCacheSize = InputFieldState(
+                        value = value,
+                        error = "Invalid cache size",
+                        isValid = false
+                    )
+                )
+            )
+        }
+    }
+
+    fun setDisableFakeDns(enabled: Boolean) {
+        prefs.disableFakeDns = enabled
+        _settingsState.value = _settingsState.value.copy(
+            performance = _settingsState.value.performance.copy(
+                disableFakeDns = enabled
+            )
+        )
+    }
+
+    fun setOptimizeRoutingRules(enabled: Boolean) {
+        prefs.optimizeRoutingRules = enabled
+        _settingsState.value = _settingsState.value.copy(
+            performance = _settingsState.value.performance.copy(
+                optimizeRoutingRules = enabled
+            )
+        )
+    }
+
+    fun setTcpFastOpen(enabled: Boolean) {
+        prefs.tcpFastOpen = enabled
+        _settingsState.value = _settingsState.value.copy(
+            performance = _settingsState.value.performance.copy(
+                tcpFastOpen = enabled
+            )
+        )
+    }
+
+    fun setHttp2Optimization(enabled: Boolean) {
+        prefs.http2Optimization = enabled
+        _settingsState.value = _settingsState.value.copy(
+            performance = _settingsState.value.performance.copy(
+                http2Optimization = enabled
+            )
+        )
+    }
+
+    // Extreme RAM/CPU Optimization Functions
+    fun setExtremeRamCpuOptimizations(enabled: Boolean) {
+        prefs.extremeRamCpuOptimizations = enabled
+        _settingsState.value = _settingsState.value.copy(
+            performance = _settingsState.value.performance.copy(
+                extreme = _settingsState.value.performance.extreme.copy(
+                    extremeRamCpuOptimizations = enabled
+                )
+            )
+        )
+    }
+
+    fun updateExtremeConnIdleTimeout(value: String) {
+        val timeout = value.toIntOrNull()
+        if (timeout != null && timeout > 0) {
+            prefs.extremeConnIdleTimeout = timeout
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    extreme = _settingsState.value.performance.extreme.copy(
+                        extremeConnIdleTimeout = InputFieldState(value)
+                    )
+                )
+            )
+        } else {
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    extreme = _settingsState.value.performance.extreme.copy(
+                        extremeConnIdleTimeout = InputFieldState(
+                            value = value,
+                            error = application.getString(R.string.invalid_timeout),
+                            isValid = false
+                        )
+                    )
+                )
+            )
+        }
+    }
+
+    fun updateExtremeHandshakeTimeout(value: String) {
+        val timeout = value.toIntOrNull()
+        if (timeout != null && timeout > 0) {
+            prefs.extremeHandshakeTimeout = timeout
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    extreme = _settingsState.value.performance.extreme.copy(
+                        extremeHandshakeTimeout = InputFieldState(value)
+                    )
+                )
+            )
+        } else {
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    extreme = _settingsState.value.performance.extreme.copy(
+                        extremeHandshakeTimeout = InputFieldState(
+                            value = value,
+                            error = application.getString(R.string.invalid_timeout),
+                            isValid = false
+                        )
+                    )
+                )
+            )
+        }
+    }
+
+    fun updateExtremeUplinkOnly(value: String) {
+        val uplink = value.toIntOrNull()
+        if (uplink != null && uplink >= 0) {
+            prefs.extremeUplinkOnly = uplink
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    extreme = _settingsState.value.performance.extreme.copy(
+                        extremeUplinkOnly = InputFieldState(value)
+                    )
+                )
+            )
+        } else {
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    extreme = _settingsState.value.performance.extreme.copy(
+                        extremeUplinkOnly = InputFieldState(
+                            value = value,
+                            error = "Invalid value",
+                            isValid = false
+                        )
+                    )
+                )
+            )
+        }
+    }
+
+    fun updateExtremeDownlinkOnly(value: String) {
+        val downlink = value.toIntOrNull()
+        if (downlink != null && downlink >= 0) {
+            prefs.extremeDownlinkOnly = downlink
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    extreme = _settingsState.value.performance.extreme.copy(
+                        extremeDownlinkOnly = InputFieldState(value)
+                    )
+                )
+            )
+        } else {
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    extreme = _settingsState.value.performance.extreme.copy(
+                        extremeDownlinkOnly = InputFieldState(
+                            value = value,
+                            error = "Invalid value",
+                            isValid = false
+                        )
+                    )
+                )
+            )
+        }
+    }
+
+    fun updateExtremeDnsCacheSize(value: String) {
+        val cacheSize = value.toIntOrNull()
+        if (cacheSize != null && cacheSize > 0) {
+            prefs.extremeDnsCacheSize = cacheSize
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    extreme = _settingsState.value.performance.extreme.copy(
+                        extremeDnsCacheSize = InputFieldState(value)
+                    )
+                )
+            )
+        } else {
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    extreme = _settingsState.value.performance.extreme.copy(
+                        extremeDnsCacheSize = InputFieldState(
+                            value = value,
+                            error = "Invalid cache size",
+                            isValid = false
+                        )
+                    )
+                )
+            )
+        }
+    }
+
+    fun setExtremeDisableFakeDns(enabled: Boolean) {
+        prefs.extremeDisableFakeDns = enabled
+        _settingsState.value = _settingsState.value.copy(
+            performance = _settingsState.value.performance.copy(
+                extreme = _settingsState.value.performance.extreme.copy(
+                    extremeDisableFakeDns = enabled
+                )
+            )
+        )
+    }
+
+    fun setExtremeRoutingOptimization(enabled: Boolean) {
+        prefs.extremeRoutingOptimization = enabled
+        _settingsState.value = _settingsState.value.copy(
+            performance = _settingsState.value.performance.copy(
+                extreme = _settingsState.value.performance.extreme.copy(
+                    extremeRoutingOptimization = enabled
+                )
+            )
+        )
+    }
+
+    fun updateMaxConcurrentConnections(value: String) {
+        val maxConn = value.toIntOrNull()
+        if (maxConn != null && maxConn >= 0) {
+            prefs.maxConcurrentConnections = maxConn
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    extreme = _settingsState.value.performance.extreme.copy(
+                        maxConcurrentConnections = InputFieldState(value)
+                    )
+                )
+            )
+        } else {
+            _settingsState.value = _settingsState.value.copy(
+                performance = _settingsState.value.performance.copy(
+                    extreme = _settingsState.value.performance.extreme.copy(
+                        maxConcurrentConnections = InputFieldState(
+                            value = value,
+                            error = "Invalid value (0 = unlimited)",
+                            isValid = false
+                        )
+                    )
+                )
+            )
+        }
+    }
+
+    fun setParallelDnsQueries(enabled: Boolean) {
+        prefs.parallelDnsQueries = enabled
+        _settingsState.value = _settingsState.value.copy(
+            performance = _settingsState.value.performance.copy(
+                extreme = _settingsState.value.performance.extreme.copy(
+                    parallelDnsQueries = enabled
+                )
+            )
+        )
+    }
+
+    fun setExtremeProxyOptimization(enabled: Boolean) {
+        prefs.extremeProxyOptimization = enabled
+        _settingsState.value = _settingsState.value.copy(
+            performance = _settingsState.value.performance.copy(
+                extreme = _settingsState.value.performance.extreme.copy(
+                    extremeProxyOptimization = enabled
+                )
+            )
+        )
     }
 
     fun importRuleFile(uri: Uri, fileName: String) {
