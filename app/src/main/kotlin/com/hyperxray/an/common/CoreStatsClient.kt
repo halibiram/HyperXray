@@ -13,6 +13,10 @@ import kotlinx.coroutines.withContext
 import java.io.Closeable
 import java.util.concurrent.TimeUnit
 
+/**
+ * gRPC client for querying Xray-core statistics API.
+ * Provides system stats and traffic metrics via StatsService.
+ */
 class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
     private val blockingStub: StatsServiceGrpc.StatsServiceBlockingStub =
         StatsServiceGrpc.newBlockingStub(channel)
@@ -27,7 +31,8 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
     suspend fun getTraffic(): TrafficState? = withContext(Dispatchers.IO) {
         runCatching {
             // Try multiple patterns to get traffic stats
-            val patterns = listOf("outbound", "inbound", "user")
+            // Empty pattern gets all stats
+            val patterns = listOf("", "outbound", "inbound", "user", "traffic")
             var totalUplink = 0L
             var totalDownlink = 0L
             
@@ -38,14 +43,39 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
                     .build()
                 
                 val response = blockingStub.queryStats(request)
+                val statCount = response?.statList?.size ?: 0
+                Log.d("CoreStatsClient", "Pattern '$pattern' returned $statCount stats")
+                
                 response?.statList?.forEach { stat ->
                     Log.d("CoreStatsClient", "Stat: ${stat.name} = ${stat.value}")
                     when {
                         stat.name.contains("uplink", ignoreCase = true) -> {
                             totalUplink += stat.value
+                            Log.d("CoreStatsClient", "Found uplink stat: ${stat.name} = ${stat.value}, total now: $totalUplink")
                         }
                         stat.name.contains("downlink", ignoreCase = true) -> {
                             totalDownlink += stat.value
+                            Log.d("CoreStatsClient", "Found downlink stat: ${stat.name} = ${stat.value}, total now: $totalDownlink")
+                        }
+                        stat.name.contains("outbound", ignoreCase = true) && stat.name.contains("traffic", ignoreCase = true) -> {
+                            // Try alternative pattern: outbound>>>traffic>>>uplink/downlink
+                            if (stat.name.contains("uplink", ignoreCase = true)) {
+                                totalUplink += stat.value
+                                Log.d("CoreStatsClient", "Found uplink via outbound pattern: ${stat.name} = ${stat.value}")
+                            } else if (stat.name.contains("downlink", ignoreCase = true)) {
+                                totalDownlink += stat.value
+                                Log.d("CoreStatsClient", "Found downlink via outbound pattern: ${stat.name} = ${stat.value}")
+                            }
+                        }
+                        stat.name.contains("inbound", ignoreCase = true) && stat.name.contains("traffic", ignoreCase = true) -> {
+                            // Try alternative pattern: inbound>>>traffic>>>uplink/downlink
+                            if (stat.name.contains("uplink", ignoreCase = true)) {
+                                totalUplink += stat.value
+                                Log.d("CoreStatsClient", "Found uplink via inbound pattern: ${stat.name} = ${stat.value}")
+                            } else if (stat.name.contains("downlink", ignoreCase = true)) {
+                                totalDownlink += stat.value
+                                Log.d("CoreStatsClient", "Found downlink via inbound pattern: ${stat.name} = ${stat.value}")
+                            }
                         }
                     }
                 }
