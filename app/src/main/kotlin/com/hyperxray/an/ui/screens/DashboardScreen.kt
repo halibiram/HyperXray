@@ -29,6 +29,10 @@ import com.hyperxray.an.R
 import com.hyperxray.an.common.formatBytes
 import com.hyperxray.an.common.formatNumber
 import com.hyperxray.an.common.formatUptime
+import com.hyperxray.an.common.formatThroughput
+import com.hyperxray.an.common.formatRtt
+import com.hyperxray.an.common.formatLoss
+import com.hyperxray.an.common.formatHandshakeTime
 import com.hyperxray.an.viewmodel.MainViewModel
 import kotlinx.coroutines.delay
 
@@ -37,12 +41,16 @@ fun DashboardScreen(
     mainViewModel: MainViewModel
 ) {
     val coreStats by mainViewModel.coreStatsState.collectAsState()
+    val telemetryState by mainViewModel.telemetryState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     LaunchedEffect(Unit) {
+        // Poll stats every second while screen is resumed
+        // Loop is safe: repeatOnLifecycle cancels when lifecycle state changes
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (true) {
                 mainViewModel.updateCoreStats()
+                mainViewModel.updateTelemetryStats()
                 delay(1000)
             }
         }
@@ -77,6 +85,14 @@ fun DashboardScreen(
                     StatRow(
                         label = stringResource(id = R.string.stats_downlink),
                         value = formatBytes(coreStats.downlink)
+                    )
+                    StatRow(
+                        label = "Uplink Throughput",
+                        value = formatThroughput(coreStats.uplinkThroughput)
+                    )
+                    StatRow(
+                        label = "Downlink Throughput",
+                        value = formatThroughput(coreStats.downlinkThroughput)
                     )
                 }
             }
@@ -158,6 +174,54 @@ fun DashboardScreen(
                         label = "GC Pause Total",
                         value = formatUptime((coreStats.pauseTotalNs / 1_000_000_000).toInt())
                     )
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.extraLarge),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                )
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        text = "AI Telemetry",
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    if (telemetryState != null) {
+                        StatRow(
+                            label = "Avg Throughput",
+                            value = formatThroughput(telemetryState!!.avgThroughput)
+                        )
+                        StatRow(
+                            label = "RTT P95",
+                            value = formatRtt(telemetryState!!.rttP95)
+                        )
+                        StatRow(
+                            label = "Avg Handshake Time",
+                            value = formatHandshakeTime(telemetryState!!.avgHandshakeTime)
+                        )
+                        StatRow(
+                            label = "Avg Packet Loss",
+                            value = formatLoss(telemetryState!!.avgLoss)
+                        )
+                        StatRow(
+                            label = "Sample Count",
+                            value = formatNumber(telemetryState!!.sampleCount.toLong())
+                        )
+                    } else {
+                        Text(
+                            text = stringResource(id = R.string.vpn_disconnected),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
