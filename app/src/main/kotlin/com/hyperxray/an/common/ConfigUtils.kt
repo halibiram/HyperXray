@@ -301,26 +301,21 @@ object ConfigUtils {
         
         val connectionLimits = JSONObject()
         connectionLimits.put("connIdle", prefs.connIdleTimeout)
-        // 0 = unlimited buffer (sınırsız)
-        if (prefs.uplinkOnly > 0) {
-            connectionLimits.put("uplinkOnly", prefs.uplinkOnly)
-        }
-        if (prefs.downlinkOnly > 0) {
-            connectionLimits.put("downlinkOnly", prefs.downlinkOnly)
-        }
+        connectionLimits.put("handshake", prefs.handshakeTimeout)
+        // Set to 0 for unlimited connections to prevent broken pipe errors
+        connectionLimits.put("uplinkOnly", 0)  // Unlimited
+        connectionLimits.put("downlinkOnly", 0)  // Unlimited
         level0.put("connection", connectionLimits)
         
-        // Buffer size optimizations
+        // Buffer size optimizations - MAXIMIZED for performance
         val bufferLimits = JSONObject()
         bufferLimits.put("handshake", prefs.handshakeTimeout)
         bufferLimits.put("connIdle", prefs.connIdleTimeout)
-        // 0 = unlimited buffer (sınırsız)
-        if (prefs.uplinkOnly > 0) {
-            bufferLimits.put("uplinkOnly", prefs.uplinkOnly)
-        }
-        if (prefs.downlinkOnly > 0) {
-            bufferLimits.put("downlinkOnly", prefs.downlinkOnly)
-        }
+        // Set to 0 for unlimited buffer to prevent broken pipe errors
+        bufferLimits.put("uplinkOnly", 0)  // Unlimited
+        bufferLimits.put("downlinkOnly", 0)  // Unlimited
+        // Buffer strategy: maximum throughput
+        bufferLimits.put("bufferSize", 512)  // 512KB per connection (maximum Xray supports)
         level0.put("buffer", bufferLimits)
         
         // Enable user-level stats for uplink/downlink tracking
@@ -331,7 +326,7 @@ object ConfigUtils {
         policyObject.put("levels", levelsObject)
         policyObject.put("system", systemObject)
         
-        Log.d(TAG, "Policy settings optimized: connIdle=${prefs.connIdleTimeout}, handshake=${prefs.handshakeTimeout}, uplink=${prefs.uplinkOnly} (0=unlimited), downlink=${prefs.downlinkOnly} (0=unlimited)")
+        Log.d(TAG, "Policy settings optimized: connIdle=${prefs.connIdleTimeout}, handshake=${prefs.handshakeTimeout}, uplink=UNLIMITED (0), downlink=UNLIMITED (0), bufferSize=512KB")
     }
 
     /**
@@ -511,30 +506,24 @@ object ConfigUtils {
             level0 = JSONObject()
         }
 
-        // Extreme connection pool settings
+        // Extreme connection pool settings - MAXIMUM
         var connectionLimits = level0.optJSONObject("connection") ?: JSONObject()
         connectionLimits.put("connIdle", prefs.extremeConnIdleTimeout)
         connectionLimits.put("handshake", prefs.extremeHandshakeTimeout)
-        // 0 = unlimited buffer (sınırsız)
-        if (prefs.extremeUplinkOnly > 0) {
-            connectionLimits.put("uplinkOnly", prefs.extremeUplinkOnly)
-        }
-        if (prefs.extremeDownlinkOnly > 0) {
-            connectionLimits.put("downlinkOnly", prefs.extremeDownlinkOnly)
-        }
+        // Set to 0 for unlimited connections - maximum throughput
+        connectionLimits.put("uplinkOnly", 0)  // Unlimited
+        connectionLimits.put("downlinkOnly", 0)  // Unlimited
         level0.put("connection", connectionLimits)
 
-        // Extreme buffer settings - maximize buffer sizes
+        // Extreme buffer settings - MAXIMUM buffer sizes
         var bufferLimits = level0.optJSONObject("buffer") ?: JSONObject()
         bufferLimits.put("handshake", prefs.extremeHandshakeTimeout)
         bufferLimits.put("connIdle", prefs.extremeConnIdleTimeout)
-        // 0 = unlimited buffer (sınırsız)
-        if (prefs.extremeUplinkOnly > 0) {
-            bufferLimits.put("uplinkOnly", prefs.extremeUplinkOnly)
-        }
-        if (prefs.extremeDownlinkOnly > 0) {
-            bufferLimits.put("downlinkOnly", prefs.extremeDownlinkOnly)
-        }
+        // Set to 0 for unlimited buffer - maximum throughput
+        bufferLimits.put("uplinkOnly", 0)  // Unlimited
+        bufferLimits.put("downlinkOnly", 0)  // Unlimited
+        // Maximum buffer size per connection (512KB is Xray's maximum)
+        bufferLimits.put("bufferSize", 512)  // 512KB per connection
         level0.put("buffer", bufferLimits)
         
         // Enable user-level stats for uplink/downlink tracking
@@ -546,7 +535,7 @@ object ConfigUtils {
         policyObject.put("system", systemObject)
         jsonObject.put("policy", policyObject)
 
-        Log.d(TAG, "EXTREME policy settings: connIdle=${prefs.extremeConnIdleTimeout}, buffers=${prefs.extremeUplinkOnly}/${prefs.extremeDownlinkOnly}")
+        Log.d(TAG, "EXTREME policy settings: connIdle=${prefs.extremeConnIdleTimeout}, uplink=UNLIMITED (0), downlink=UNLIMITED (0), bufferSize=512KB")
     }
 
     /**
@@ -651,23 +640,21 @@ object ConfigUtils {
             level0 = JSONObject()
         }
 
-        // Extreme connection pool configuration
+        // Extreme connection pool configuration - MAXIMUM
         var connectionLimits = level0.optJSONObject("connection") ?: JSONObject()
-        
+
         // Maximize connection limits
         connectionLimits.put("connIdle", prefs.extremeConnIdleTimeout)
         connectionLimits.put("handshake", prefs.extremeHandshakeTimeout)
-        // 0 = unlimited buffer (sınırsız)
-        if (prefs.extremeUplinkOnly > 0) {
-            connectionLimits.put("uplinkOnly", prefs.extremeUplinkOnly)
-        }
-        if (prefs.extremeDownlinkOnly > 0) {
-            connectionLimits.put("downlinkOnly", prefs.extremeDownlinkOnly)
-        }
-        
-        // Add connection concurrency limits if supported
+        // Set to 0 for unlimited - prevents connection drops and broken pipe
+        connectionLimits.put("uplinkOnly", 0)  // Unlimited
+        connectionLimits.put("downlinkOnly", 0)  // Unlimited
+
+        // Add connection concurrency limits if supported (0 = unlimited)
         if (prefs.maxConcurrentConnections > 0) {
             connectionLimits.put("concurrency", prefs.maxConcurrentConnections)
+        } else {
+            connectionLimits.put("concurrency", 0)  // Unlimited concurrent connections
         }
 
         level0.put("connection", connectionLimits)
@@ -675,7 +662,7 @@ object ConfigUtils {
         policyObject.put("levels", levelsObject)
         jsonObject.put("policy", policyObject)
 
-        Log.d(TAG, "EXTREME connection pools: maxConcurrent=${prefs.maxConcurrentConnections}")
+        Log.d(TAG, "EXTREME connection pools: maxConcurrent=${if (prefs.maxConcurrentConnections > 0) prefs.maxConcurrentConnections else "UNLIMITED (0)"}, uplink=UNLIMITED, downlink=UNLIMITED")
     }
 
     /**
