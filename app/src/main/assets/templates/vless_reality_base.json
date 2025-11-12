@@ -1,0 +1,62 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "inbounds": [
+    {
+      "port": 10808,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "8.8.8.8"
+      },
+      "streamSettings": {
+        "network": "tcp"
+      },
+      "tag": "in"
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "",
+            "port": 443,
+            "users": [
+              {
+                "id": "",
+                "encryption": "none",
+                "flow": ""
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "dest": "",
+          "xver": 0,
+          "serverNames": [],
+          "privateKey": "",
+          "shortIds": [],
+          "spiderX": ""
+        }
+      },
+      "tag": "out"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["in"],
+        "outboundTag": "out"
+      }
+    ]
+  }
+}
