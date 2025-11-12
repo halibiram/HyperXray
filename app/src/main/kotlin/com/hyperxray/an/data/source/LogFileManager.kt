@@ -11,6 +11,10 @@ import java.io.IOException
 import java.io.PrintWriter
 import java.io.RandomAccessFile
 
+/**
+ * Manages log file operations with automatic size-based truncation.
+ * Ensures log file doesn't exceed MAX_LOG_SIZE_BYTES by truncating oldest entries.
+ */
 class LogFileManager(context: Context) {
     val logFile: File
 

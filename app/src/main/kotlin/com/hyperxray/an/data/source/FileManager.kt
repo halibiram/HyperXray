@@ -37,6 +37,10 @@ import java.util.zip.Inflater
 import kotlin.math.log10
 import kotlin.math.pow
 
+/**
+ * Manages file operations for configs, rule files (geoip/geosite), and backups.
+ * Handles import/export, compression, and asset extraction.
+ */
 class FileManager(private val application: Application, private val prefs: Preferences) {
     @Throws(IOException::class)
     private fun readFileContent(file: File): String {

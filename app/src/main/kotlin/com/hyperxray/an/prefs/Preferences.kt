@@ -477,6 +477,42 @@ class Preferences(context: Context) {
             setValueInProvider(EXTREME_PROXY_OPTIMIZATION, enable)
         }
 
+    var bypassDomains: List<String>
+        get() {
+            val jsonList = getPrefData(BYPASS_DOMAINS).first
+            return jsonList?.let {
+                try {
+                    val type = object : TypeToken<List<String>>() {}.type
+                    gson.fromJson(it, type)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error deserializing BYPASS_DOMAINS List<String>", e)
+                    emptyList()
+                }
+            } ?: emptyList()
+        }
+        set(domains) {
+            val jsonList = gson.toJson(domains)
+            setValueInProvider(BYPASS_DOMAINS, jsonList)
+        }
+
+    var bypassIps: List<String>
+        get() {
+            val jsonList = getPrefData(BYPASS_IPS).first
+            return jsonList?.let {
+                try {
+                    val type = object : TypeToken<List<String>>() {}.type
+                    gson.fromJson(it, type)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error deserializing BYPASS_IPS List<String>", e)
+                    emptyList()
+                }
+            } ?: emptyList()
+        }
+        set(ips) {
+            val jsonList = gson.toJson(ips)
+            setValueInProvider(BYPASS_IPS, jsonList)
+        }
+
     companion object {
         const val SOCKS_ADDR: String = "SocksAddr"
         const val SOCKS_PORT: String = "SocksPort"
@@ -530,6 +566,8 @@ class Preferences(context: Context) {
         const val MAX_CONCURRENT_CONNECTIONS: String = "MaxConcurrentConnections"
         const val PARALLEL_DNS_QUERIES: String = "ParallelDnsQueries"
         const val EXTREME_PROXY_OPTIMIZATION: String = "ExtremeProxyOptimization"
+        const val BYPASS_DOMAINS: String = "BypassDomains"
+        const val BYPASS_IPS: String = "BypassIps"
         
         private const val TAG = "Preferences"
     }
