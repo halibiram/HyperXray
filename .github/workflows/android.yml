@@ -1,0 +1,47 @@
+name: Android Build
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up JDK 22
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '22'
+    
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+    
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+    
+    - name: Build with Gradle
+      run: ./gradlew assembleDebug assembleRelease
+    
+    - name: Upload APK artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: apk-files
+        path: |
+          app/build/outputs/apk/**/*.apk
+        retention-days: 30
+    
+    - name: Check for ONNX models
+      run: |
+        if [ ! -f "app/src/main/assets/models/tls_sni_optimizer_v5_fp32.onnx" ]; then
+          echo "⚠️ Warning: TLS SNI Optimizer v5 FP32 model not found"
+        fi
+        if [ ! -f "app/src/main/assets/models/tls_sni_optimizer_v5_fp16.onnx" ]; then
+          echo "⚠️ Warning: TLS SNI Optimizer v5 FP16 model not found (optional)"
+        fi
+

@@ -1,0 +1,58 @@
+name: Python Runtime Agent
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'runtime/py/**'
+      - '.github/workflows/python.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'runtime/py/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        cd runtime/py
+        pip install -r requirements.txt
+        pip install pytest
+    
+    - name: Lint with flake8
+      run: |
+        pip install flake8
+        cd runtime/py
+        flake8 tls_sni_v5_runtime.py --max-line-length=120 --ignore=E501,W503 || true
+    
+    - name: Run smoke test
+      run: |
+        cd runtime/py
+        python -c "
+        from tls_sni_v5_runtime import TLSFeatureEncoder, BanditRouter
+        encoder = TLSFeatureEncoder()
+        features = encoder.encode('youtube.com', 'h2')
+        assert len(features) == 32, 'Feature vector must be 32D'
+        print('✅ Feature encoder test passed')
+        
+        bandit = BanditRouter()
+        route = bandit.select_route(0)
+        assert route in [0, 1, 2], 'Route must be 0-2'
+        print('✅ Bandit router test passed')
+        "
+    
+    - name: Check runtime script syntax
+      run: |
+        cd runtime/py
+        python -m py_compile tls_sni_v5_runtime.py
+

@@ -1,0 +1,39 @@
+name: Colab Notebook Check
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'colab/**'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'colab/**'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+    
+    - name: Check Colab cell syntax
+      run: |
+        python -m py_compile colab/tls_sni_v5_colab_cell.py
+        echo "✅ Colab cell syntax check passed"
+    
+    - name: Validate JSON structure
+      run: |
+        python -c "
+        import json
+        with open('colab/tls_sni_v5_colab.ipynb', 'r') as f:
+            nb = json.load(f)
+        assert 'cells' in nb, 'Notebook must have cells'
+        print('✅ Notebook JSON structure valid')
+        "
+
