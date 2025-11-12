@@ -163,10 +163,11 @@ class HyperXrayApplication : Application() {
             // Step 6: Initialize OptimizerOrchestrator (uses the initialized deepPolicyModel)
             Log.d(TAG, "[Step 6/6] Initializing OptimizerOrchestrator...")
             AiLogHelper.d(TAG, "[Step 6/6] Initializing OptimizerOrchestrator...")
-            if (deepPolicyModel != null) {
+            val model = deepPolicyModel
+            if (model != null) {
                 optimizerOrchestrator = OptimizerOrchestrator(
                     context = this@HyperXrayApplication,
-                    deepModel = deepPolicyModel!!
+                    deepModel = model
                 )
                 Log.i(TAG, "OptimizerOrchestrator initialized successfully")
                 AiLogHelper.i(TAG, "OptimizerOrchestrator initialized successfully")
@@ -255,29 +256,35 @@ class HyperXrayApplication : Application() {
                         val sampleArms = createSampleRealityArms()
                         
                         if (sampleArms.isNotEmpty()) {
-                            Log.i(TAG, "Running OptimizerOrchestrator cycle with ${sampleArms.size} sample arms")
-                            AiLogHelper.i(TAG, "Running OptimizerOrchestrator cycle with ${sampleArms.size} sample arms")
-                            
-                            try {
-                                val result = optimizerOrchestrator!!.runOptimizerCycle(
-                                    coreStats = null,
-                                    availableArms = sampleArms
-                                )
+                            val orchestrator = optimizerOrchestrator
+                            if (orchestrator != null) {
+                                Log.i(TAG, "Running OptimizerOrchestrator cycle with ${sampleArms.size} sample arms")
+                                AiLogHelper.i(TAG, "Running OptimizerOrchestrator cycle with ${sampleArms.size} sample arms")
                                 
-                                if (result.success) {
-                                    Log.i(TAG, "OptimizerOrchestrator cycle completed successfully")
-                                    Log.i(TAG, "  Selected arm: ${result.selectedArm?.armId}")
-                                    Log.i(TAG, "  Safeguard passed: ${result.safeguardPassed}")
-                                    Log.i(TAG, "  Reward: ${result.reward}")
-                                    AiLogHelper.i(TAG, "OptimizerOrchestrator cycle completed successfully")
-                                    AiLogHelper.i(TAG, "  Selected arm: ${result.selectedArm?.armId}")
-                                } else {
-                                    Log.w(TAG, "OptimizerOrchestrator cycle completed with errors: ${result.error}")
-                                    AiLogHelper.w(TAG, "OptimizerOrchestrator cycle completed with errors: ${result.error}")
+                                try {
+                                    val result = orchestrator.runOptimizerCycle(
+                                        coreStats = null,
+                                        availableArms = sampleArms
+                                    )
+                                    
+                                    if (result.success) {
+                                        Log.i(TAG, "OptimizerOrchestrator cycle completed successfully")
+                                        Log.i(TAG, "  Selected arm: ${result.selectedArm?.armId}")
+                                        Log.i(TAG, "  Safeguard passed: ${result.safeguardPassed}")
+                                        Log.i(TAG, "  Reward: ${result.reward}")
+                                        AiLogHelper.i(TAG, "OptimizerOrchestrator cycle completed successfully")
+                                        AiLogHelper.i(TAG, "  Selected arm: ${result.selectedArm?.armId}")
+                                    } else {
+                                        Log.w(TAG, "OptimizerOrchestrator cycle completed with errors: ${result.error}")
+                                        AiLogHelper.w(TAG, "OptimizerOrchestrator cycle completed with errors: ${result.error}")
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "OptimizerOrchestrator cycle failed", e)
+                                    AiLogHelper.e(TAG, "OptimizerOrchestrator cycle failed: ${e.message}")
                                 }
-                            } catch (e: Exception) {
-                                Log.e(TAG, "OptimizerOrchestrator cycle failed", e)
-                                AiLogHelper.e(TAG, "OptimizerOrchestrator cycle failed: ${e.message}")
+                            } else {
+                                Log.w(TAG, "OptimizerOrchestrator is null, cannot run cycle")
+                                AiLogHelper.w(TAG, "OptimizerOrchestrator is null, cannot run cycle")
                             }
                         } else {
                             Log.w(TAG, "No sample arms available for OptimizerOrchestrator cycle")
