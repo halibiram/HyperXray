@@ -16,12 +16,14 @@ import androidx.navigation.NavBackStackEntry
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.hyperxray.an.common.ROUTE_AI_INSIGHTS
 import com.hyperxray.an.common.ROUTE_APP_LIST
 import com.hyperxray.an.common.ROUTE_CONFIG_EDIT
 import com.hyperxray.an.common.ROUTE_MAIN
 import com.hyperxray.an.ui.screens.AppListScreen
 import com.hyperxray.an.ui.screens.ConfigEditScreen
 import com.hyperxray.an.ui.screens.MainScreen
+import com.hyperxray.an.ui.screens.insights.AiInsightsScreen
 import com.hyperxray.an.viewmodel.MainViewModel
 
 @Composable
@@ -72,6 +74,18 @@ fun AppNavHost(
                 onBackClick = { navController.popBackStack() },
                 snackbarHostState = remember { SnackbarHostState() },
                 viewModel = mainViewModel.configEditViewModel
+            )
+        }
+
+        composable(
+            route = ROUTE_AI_INSIGHTS,
+            enterTransition = { enterTransition() },
+            exitTransition = { exitTransition() },
+            popEnterTransition = { EnterTransition.None },
+            popExitTransition = { popExitTransition() }
+        ) {
+            AiInsightsScreen(
+                onBackClick = { navController.popBackStack() }
             )
         }
     }
