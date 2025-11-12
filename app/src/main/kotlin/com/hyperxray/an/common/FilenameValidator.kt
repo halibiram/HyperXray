@@ -4,6 +4,10 @@ import android.content.Context
 import com.hyperxray.an.R
 import java.util.regex.Pattern
 
+/**
+ * Validates filename strings to ensure they don't contain invalid characters.
+ * Used for config file naming validation.
+ */
 object FilenameValidator {
     private const val INVALID_CHARS_PATTERN = "[\\\\/:*?\"<>|]"
 

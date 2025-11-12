@@ -5,10 +5,6 @@ import com.hyperxray.an.prefs.Preferences
 import org.json.JSONException
 import org.json.JSONObject
 
-/**
- * Utility object for Xray configuration manipulation.
- * Handles formatting, stats service injection, optimization application, and port extraction.
- */
 object ConfigUtils {
     private const val TAG = "ConfigUtils"
 
@@ -46,36 +42,15 @@ object ConfigUtils {
         apiObject.put("services", servicesArray)
 
         jsonObject.put("api", apiObject)
-        
-        // Enable stats module with full configuration
-        val statsObject = JSONObject()
-        // Stats module doesn't need additional config, just presence enables it
-        jsonObject.put("stats", statsObject)
+        jsonObject.put("stats", JSONObject())
 
-        // Get or create policy object
-        var policyObject = jsonObject.optJSONObject("policy")
-        if (policyObject == null) {
-            policyObject = JSONObject()
-        }
-        
-        // Get or create system object in policy
-        var systemObject = policyObject.optJSONObject("system")
-        if (systemObject == null) {
-            systemObject = JSONObject()
-        }
-        
-        // Enable outbound stats (uplink and downlink)
+        val policyObject = JSONObject()
+        val systemObject = JSONObject()
         systemObject.put("statsOutboundUplink", true)
         systemObject.put("statsOutboundDownlink", true)
-        
-        // Enable inbound stats (uplink and downlink) for complete traffic tracking
-        systemObject.put("statsInboundUplink", true)
-        systemObject.put("statsInboundDownlink", true)
-        
         policyObject.put("system", systemObject)
+
         jsonObject.put("policy", policyObject)
-        
-        Log.d(TAG, "Stats module enabled with outbound and inbound tracking")
 
         // Enable debug logging for TLS/SSL information
         val logObject = jsonObject.optJSONObject("log") ?: JSONObject()
@@ -101,6 +76,9 @@ object ConfigUtils {
 
         // Apply bypass domain/IP routing rules
         applyBypassRoutingRules(prefs, jsonObject)
+
+        // Ensure all outbounds have tags for stats collection
+        ensureOutboundTags(jsonObject)
 
         val finalConfig = jsonObject.toString(2)
         Log.d(TAG, "=== Config injection completed ===")
@@ -152,15 +130,6 @@ object ConfigUtils {
         if (inboundArray != null) {
             for (i in 0 until inboundArray.length()) {
                 val inbound = inboundArray.getJSONObject(i)
-                
-                // Ensure inbound has a tag for stats tracking
-                if (!inbound.has("tag")) {
-                    val protocol = inbound.optString("protocol", "unknown")
-                    val port = inbound.optInt("port", 0)
-                    inbound.put("tag", "inbound-${protocol}-${port}")
-                    Log.d(TAG, "Added tag to inbound: inbound-${protocol}-${port}")
-                }
-                
                 // Only add sniffing if it doesn't already exist
                 if (!inbound.has("sniffing")) {
                     inbound.put("sniffing", sniffingObject)
@@ -313,11 +282,9 @@ object ConfigUtils {
             policyObject.put("system", systemObject)
         }
 
-        // Enable stats tracking
+        // Aggressive connection limits
         systemObject.put("statsOutboundUplink", true)
         systemObject.put("statsOutboundDownlink", true)
-        systemObject.put("statsInboundUplink", true)
-        systemObject.put("statsInboundDownlink", true)
         
         // Connection pool optimizations
         // Xray requires levels to be an object with level IDs (e.g., "0", "1")
@@ -355,6 +322,10 @@ object ConfigUtils {
             bufferLimits.put("downlinkOnly", prefs.downlinkOnly)
         }
         level0.put("buffer", bufferLimits)
+        
+        // Enable user-level stats for uplink/downlink tracking
+        level0.put("statsUserUplink", true)
+        level0.put("statsUserDownlink", true)
         
         levelsObject.put("0", level0)
         policyObject.put("levels", levelsObject)
@@ -433,15 +404,6 @@ object ConfigUtils {
         if (outboundArray != null) {
             for (i in 0 until outboundArray.length()) {
                 val outbound = outboundArray.getJSONObject(i)
-                
-                // Ensure outbound has a tag for stats tracking
-                if (!outbound.has("tag")) {
-                    val protocol = outbound.optString("protocol", "unknown")
-                    val tagIndex = i + 1
-                    outbound.put("tag", "outbound-${protocol}-${tagIndex}")
-                    Log.d(TAG, "Added tag to outbound: outbound-${protocol}-${tagIndex}")
-                }
-                
                 val streamSettings = outbound.optJSONObject("streamSettings")
                 
                 if (streamSettings != null) {
@@ -574,6 +536,10 @@ object ConfigUtils {
             bufferLimits.put("downlinkOnly", prefs.extremeDownlinkOnly)
         }
         level0.put("buffer", bufferLimits)
+        
+        // Enable user-level stats for uplink/downlink tracking
+        level0.put("statsUserUplink", true)
+        level0.put("statsUserDownlink", true)
         
         levelsObject.put("0", level0)
         policyObject.put("levels", levelsObject)
@@ -843,7 +809,7 @@ object ConfigUtils {
         if (bypassDomains.isNotEmpty()) {
             val domainRule = JSONObject()
             val domainArray = org.json.JSONArray()
-            bypassDomains.forEach { domain ->
+            bypassDomains.forEach { domain: String ->
                 val trimmedDomain = domain.trim()
                 // Support geosite: tags (e.g., geosite:youtube) for automatic domain lists
                 // Xray will automatically resolve geosite: tags from geosite.dat file
@@ -866,7 +832,7 @@ object ConfigUtils {
         if (bypassIps.isNotEmpty()) {
             val ipRule = JSONObject()
             val ipArray = org.json.JSONArray()
-            bypassIps.forEach { ip ->
+            bypassIps.forEach { ip: String ->
                 ipArray.put(ip.trim())
             }
             ipRule.put("ip", ipArray)
@@ -884,6 +850,59 @@ object ConfigUtils {
 
         jsonObject.put("routing", routingObject)
         Log.d(TAG, "Bypass routing rules applied successfully")
+    }
+
+    /**
+     * Ensures all outbounds have tags for stats collection.
+     * Xray stats format: outbound>>>[tag]>>>traffic>>>uplink/downlink
+     * Without tags, stats cannot be collected properly.
+     */
+    @Throws(JSONException::class)
+    private fun ensureOutboundTags(jsonObject: JSONObject) {
+        val outboundArray = jsonObject.optJSONArray("outbounds") ?: jsonObject.optJSONArray("outbound")
+        if (outboundArray == null) {
+            Log.d(TAG, "No outbounds found, skipping tag assignment")
+            return
+        }
+
+        var tagCount = 0
+        for (i in 0 until outboundArray.length()) {
+            val outbound = outboundArray.getJSONObject(i)
+            val existingTag = outbound.optString("tag", "")
+            
+            if (existingTag.isBlank()) {
+                // Generate a unique tag based on protocol and index
+                val protocol = outbound.optString("protocol", "unknown")
+                val tag = when {
+                    protocol == "freedom" -> "direct"
+                    protocol == "blackhole" -> "blackhole"
+                    protocol == "dns" -> "dns"
+                    else -> {
+                        // For proxy outbounds, use protocol + index
+                        val tagName = "${protocol}_${i}"
+                        tagName.replace("-", "_").lowercase()
+                    }
+                }
+                outbound.put("tag", tag)
+                tagCount++
+                Log.d(TAG, "Added tag '$tag' to outbound[$i] (protocol: $protocol)")
+            } else {
+                Log.d(TAG, "Outbound[$i] already has tag: $existingTag")
+            }
+        }
+
+        // Update the outbounds array
+        if (jsonObject.has("outbounds")) {
+            jsonObject.put("outbounds", outboundArray)
+        } else {
+            jsonObject.put("outbound", outboundArray)
+        }
+
+        if (tagCount > 0) {
+            Log.d(TAG, "Added tags to $tagCount outbound(s) for stats collection")
+        } else {
+            Log.d(TAG, "All outbounds already have tags")
+        }
     }
 }
 

@@ -9,7 +9,7 @@ import java.net.URLDecoder
 import java.util.Base64
 import java.util.zip.Inflater
 
-class HyperXrayFormatConverter: ConfigFormatConverter {
+class SimpleXrayFormatConverter: ConfigFormatConverter {
     override fun detect(content: String): Boolean {
         return content.startsWith("hyperxray://config/")
     }

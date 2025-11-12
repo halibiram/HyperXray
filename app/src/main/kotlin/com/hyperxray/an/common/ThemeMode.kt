@@ -1,5 +1,8 @@
 package com.hyperxray.an.common
 
+/**
+ * Theme mode options for the application UI.
+ */
 enum class ThemeMode(val value: String) {
     Light("Light"),
     Dark("Dark"),
