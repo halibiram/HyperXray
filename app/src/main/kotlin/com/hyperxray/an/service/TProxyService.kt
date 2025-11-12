@@ -1119,7 +1119,8 @@ class TProxyService : VpnService() {
             // Use custom values if available, otherwise use defaults
             val mtu = prefs.tunnelMtuCustom
             val taskStack = prefs.taskStackSizeCustom
-            val tcpBuffer = prefs.tcpBufferSize.coerceAtMost(65432) // Max TCP_SND_BUF limit
+            // Maximum buffer size for optimal performance - removed 65432 limit
+            val tcpBuffer = prefs.tcpBufferSize
             val nofile = prefs.limitNofile
             val connectTimeout = prefs.connectTimeout
             val readWriteTimeout = prefs.readWriteTimeout

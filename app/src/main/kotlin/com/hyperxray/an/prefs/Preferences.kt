@@ -213,7 +213,7 @@ class Preferences(context: Context) {
         }
 
     var tcpBufferSize: Int
-        get() = getPrefData("TcpBufferSize").first?.toIntOrNull() ?: 65536
+        get() = getPrefData("TcpBufferSize").first?.toIntOrNull() ?: 262144 // 256KB for maximum throughput
         set(value) {
             setValueInProvider("TcpBufferSize", value.toString())
         }
@@ -225,13 +225,13 @@ class Preferences(context: Context) {
         }
 
     var connectTimeout: Int
-        get() = getPrefData("ConnectTimeout").first?.toIntOrNull() ?: 5000
+        get() = getPrefData("ConnectTimeout").first?.toIntOrNull() ?: 10000 // 10 seconds
         set(value) {
             setValueInProvider("ConnectTimeout", value.toString())
         }
 
     var readWriteTimeout: Int
-        get() = getPrefData("ReadWriteTimeout").first?.toIntOrNull() ?: 60000
+        get() = getPrefData("ReadWriteTimeout").first?.toIntOrNull() ?: 300000 // 5 minutes to prevent broken pipe
         set(value) {
             setValueInProvider("ReadWriteTimeout", value.toString())
         }
