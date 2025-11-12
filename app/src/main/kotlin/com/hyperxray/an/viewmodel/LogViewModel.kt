@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.hyperxray.an.data.source.AiLogCapture
 import com.hyperxray.an.data.source.LogFileManager
 import com.hyperxray.an.service.TProxyService
 import kotlinx.coroutines.Dispatchers
@@ -30,11 +31,16 @@ import java.util.Collections
 
 private const val TAG = "LogViewModel"
 
+/**
+ * ViewModel for managing log display and filtering.
+ * Handles log updates from TProxyService broadcasts and provides search functionality.
+ */
 @OptIn(FlowPreview::class)
 class LogViewModel(application: Application) :
     AndroidViewModel(application) {
 
     private val logFileManager = LogFileManager(application)
+    private val aiLogCapture = AiLogCapture(application, logFileManager)
 
     private val _logEntries = MutableStateFlow<List<String>>(emptyList())
     val logEntries: StateFlow<List<String>> = _logEntries.asStateFlow()
@@ -102,12 +108,16 @@ class LogViewModel(application: Application) :
             @Suppress("UnspecifiedRegisterReceiverFlag")
             context.registerReceiver(logUpdateReceiver, filter)
         }
-        Log.d(TAG, "Log receiver registered.")
+        // Start capturing AI logs
+        aiLogCapture.startCapture()
+        Log.d(TAG, "Log receiver registered and AI log capture started.")
     }
 
     fun unregisterLogReceiver(context: Context) {
         context.unregisterReceiver(logUpdateReceiver)
-        Log.d(TAG, "Log receiver unregistered.")
+        // Stop capturing AI logs
+        aiLogCapture.stopCapture()
+        Log.d(TAG, "Log receiver unregistered and AI log capture stopped.")
     }
 
     fun loadLogs() {
@@ -160,6 +170,9 @@ class LogViewModel(application: Application) :
     }
 }
 
+/**
+ * Factory for creating LogViewModel instances.
+ */
 class LogViewModelFactory(
     private val application: Application
 ) : ViewModelProvider.Factory {

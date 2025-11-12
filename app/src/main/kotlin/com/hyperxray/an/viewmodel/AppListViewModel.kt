@@ -26,10 +26,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
+/**
+ * UI events for AppListViewModel communication.
+ */
 sealed class AppListViewUiEvent {
     data class ShowSnackbar(val message: String) : AppListViewUiEvent()
 }
 
+/**
+ * Represents an installed app package with selection state.
+ */
 data class Package(
     var selected: Boolean,
     val label: String,
@@ -38,6 +44,10 @@ data class Package(
     val isSystemApp: Boolean
 )
 
+/**
+ * ViewModel for managing per-app proxy (split tunneling) configuration.
+ * Handles app list loading, filtering, selection, and import/export functionality.
+ */
 class AppListViewModel(application: Application) : AndroidViewModel(application) {
     val prefs = Preferences(getApplication<Application>().applicationContext)
     private val packageList = mutableStateListOf<Package>()
@@ -70,6 +80,8 @@ class AppListViewModel(application: Application) : AndroidViewModel(application)
         var loadedPackages = pm.getInstalledPackages(PackageManager.GET_PERMISSIONS)
         val startTime = System.currentTimeMillis()
         viewModelScope.launch(Dispatchers.IO) {
+            // Retry loading packages with timeout (max 10 seconds)
+            // Loop is safe: has timeout check and runs in cancellable coroutine scope
             while ((loadedPackages.isEmpty() || loadedPackages.size == 1)
                 && System.currentTimeMillis() - startTime < 10000
             ) {

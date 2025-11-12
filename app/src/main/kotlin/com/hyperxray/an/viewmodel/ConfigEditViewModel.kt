@@ -29,12 +29,19 @@ import java.util.zip.Deflater
 
 private const val TAG = "ConfigEditViewModel"
 
+/**
+ * UI events for ConfigEditViewModel communication.
+ */
 sealed class ConfigEditUiEvent {
     data class ShowSnackbar(val message: String) : ConfigEditUiEvent()
     data class ShareContent(val content: String) : ConfigEditUiEvent()
     data object NavigateBack : ConfigEditUiEvent()
 }
 
+/**
+ * ViewModel for editing Xray configuration files.
+ * Handles file reading, saving, validation, and sharing via custom URI scheme.
+ */
 class ConfigEditViewModel(
     application: Application,
     private val initialFilePath: String,

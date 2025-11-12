@@ -31,6 +31,34 @@ data class FileStates(
     val isGeositeCustom: Boolean
 )
 
+data class ExtremeOptimizationSettings(
+    val extremeRamCpuOptimizations: Boolean,
+    val extremeConnIdleTimeout: InputFieldState,
+    val extremeHandshakeTimeout: InputFieldState,
+    val extremeUplinkOnly: InputFieldState,
+    val extremeDownlinkOnly: InputFieldState,
+    val extremeDnsCacheSize: InputFieldState,
+    val extremeDisableFakeDns: Boolean,
+    val extremeRoutingOptimization: Boolean,
+    val maxConcurrentConnections: InputFieldState,
+    val parallelDnsQueries: Boolean,
+    val extremeProxyOptimization: Boolean
+)
+
+data class PerformanceSettings(
+    val aggressiveSpeedOptimizations: Boolean,
+    val connIdleTimeout: InputFieldState,
+    val handshakeTimeout: InputFieldState,
+    val uplinkOnly: InputFieldState,
+    val downlinkOnly: InputFieldState,
+    val dnsCacheSize: InputFieldState,
+    val disableFakeDns: Boolean,
+    val optimizeRoutingRules: Boolean,
+    val tcpFastOpen: Boolean,
+    val http2Optimization: Boolean,
+    val extreme: ExtremeOptimizationSettings
+)
+
 data class SettingsState(
     val socksPort: InputFieldState,
     val dnsIpv4: InputFieldState,
@@ -39,5 +67,8 @@ data class SettingsState(
     val info: InfoStates,
     val files: FileStates,
     val connectivityTestTarget: InputFieldState,
-    val connectivityTestTimeout: InputFieldState
+    val connectivityTestTimeout: InputFieldState,
+    val performance: PerformanceSettings,
+    val bypassDomains: List<String> = emptyList(),
+    val bypassIps: List<String> = emptyList()
 ) 

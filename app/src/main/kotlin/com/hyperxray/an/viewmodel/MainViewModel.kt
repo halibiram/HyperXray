@@ -22,6 +22,7 @@ import com.hyperxray.an.R
 import com.hyperxray.an.common.CoreStatsClient
 import com.hyperxray.an.common.ROUTE_APP_LIST
 import com.hyperxray.an.common.formatBytes
+import com.hyperxray.an.common.formatThroughput
 import com.hyperxray.an.common.ROUTE_CONFIG_EDIT
 import com.hyperxray.an.common.ThemeMode
 import com.hyperxray.an.data.source.FileManager
@@ -29,7 +30,6 @@ import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.service.TProxyService
 import com.hyperxray.an.telemetry.TelemetryStore
 import com.hyperxray.an.telemetry.AggregatedTelemetry
-import com.hyperxray.an.telemetry.TProxyMetricsCollector
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -59,7 +59,6 @@ import java.net.URL
 import java.util.regex.Pattern
 import javax.net.ssl.SSLSocketFactory
 import kotlin.coroutines.cancellation.CancellationException
-import java.time.Instant
 
 private const val TAG = "MainViewModel"
 
@@ -86,14 +85,14 @@ class MainViewModel(application: Application) :
 
     private var coreStatsClient: CoreStatsClient? = null
     
-    // Throughput calculation tracking
-    private var lastTrafficStats: Pair<Long, Long>? = null // (uplink, downlink)
-    private var lastTrafficTime: Instant? = null
+    // Throughput calculation state
+    private var lastUplink: Long = 0L
+    private var lastDownlink: Long = 0L
+    private var lastStatsTime: Long = 0L
 
     private val fileManager: FileManager = FileManager(application, prefs)
     
     private val telemetryStore: TelemetryStore = TelemetryStore()
-    private var metricsCollector: TProxyMetricsCollector? = null
 
     var reloadView: (() -> Unit)? = null
 
@@ -207,11 +206,12 @@ class MainViewModel(application: Application) :
             setServiceEnabled(false)
             setControlMenuClickable(true)
             _coreStatsState.value = CoreStatsState()
+            // Reset throughput calculation state
+            lastUplink = 0L
+            lastDownlink = 0L
+            lastStatsTime = 0L
             coreStatsClient?.close()
             coreStatsClient = null
-            // Reset throughput tracking
-            lastTrafficStats = null
-            lastTrafficTime = null
         }
     }
 
@@ -412,49 +412,6 @@ class MainViewModel(application: Application) :
         return filePath
     }
 
-    /**
-     * Calculate throughput (bytes per second) from traffic delta.
-     * Returns Pair<uplinkThroughput, downlinkThroughput> in bytes per second.
-     */
-    private fun calculateThroughput(
-        currentUplink: Long,
-        currentDownlink: Long
-    ): Pair<Double, Double> {
-        val now = Instant.now()
-        
-        return if (lastTrafficStats != null && lastTrafficTime != null) {
-            val timeDelta = java.time.Duration.between(lastTrafficTime, now).toMillis()
-            
-            if (timeDelta > 0) {
-                val uplinkDelta = currentUplink - lastTrafficStats!!.first
-                val downlinkDelta = currentDownlink - lastTrafficStats!!.second
-                
-                // Calculate bytes per second
-                val uplinkThroughput = (uplinkDelta.toDouble() / timeDelta) * 1000.0
-                val downlinkThroughput = (downlinkDelta.toDouble() / timeDelta) * 1000.0
-                
-                Log.d(TAG, "Throughput calc: timeDelta=${timeDelta}ms, uplinkDelta=$uplinkDelta, downlinkDelta=$downlinkDelta, " +
-                        "uplinkThroughput=${uplinkThroughput}B/s, downlinkThroughput=${downlinkThroughput}B/s")
-                
-                // Update last stats
-                lastTrafficStats = Pair(currentUplink, currentDownlink)
-                lastTrafficTime = now
-                
-                Pair(uplinkThroughput, downlinkThroughput)
-            } else {
-                // Time delta too small, return previous throughput
-                Log.d(TAG, "Throughput calc: timeDelta too small ($timeDelta ms), returning 0")
-                Pair(0.0, 0.0)
-            }
-        } else {
-            // First measurement - initialize baseline
-            Log.d(TAG, "Throughput calc: First measurement - initializing baseline: uplink=$currentUplink, downlink=$currentDownlink")
-            lastTrafficStats = Pair(currentUplink, currentDownlink)
-            lastTrafficTime = now
-            Pair(0.0, 0.0)
-        }
-    }
-
     suspend fun updateCoreStats() {
         if (!_isServiceEnabled.value) return
         if (coreStatsClient == null)
@@ -475,8 +432,32 @@ class MainViewModel(application: Application) :
         val newUplink = traffic?.uplink ?: currentState.uplink
         val newDownlink = traffic?.downlink ?: currentState.downlink
 
-        // Calculate throughput
-        val (uplinkThroughput, downlinkThroughput) = calculateThroughput(newUplink, newDownlink)
+        // Calculate throughput (bytes per second)
+        val now = System.currentTimeMillis()
+        var uplinkThroughput = 0.0
+        var downlinkThroughput = 0.0
+        
+        if (lastStatsTime > 0 && now > lastStatsTime) {
+            val timeDelta = (now - lastStatsTime) / 1000.0 // Convert to seconds
+            
+            if (timeDelta > 0) {
+                val uplinkDelta = newUplink - lastUplink
+                val downlinkDelta = newDownlink - lastDownlink
+                
+                uplinkThroughput = uplinkDelta / timeDelta
+                downlinkThroughput = downlinkDelta / timeDelta
+                
+                Log.d(TAG, "Throughput calculated: uplink=${formatThroughput(uplinkThroughput)}, downlink=${formatThroughput(downlinkThroughput)}, timeDelta=${timeDelta}s")
+            }
+        } else if (lastStatsTime == 0L) {
+            // First measurement - initialize baseline
+            Log.d(TAG, "First throughput measurement - initializing baseline")
+        }
+        
+        // Update last values for next calculation
+        lastUplink = newUplink
+        lastDownlink = newDownlink
+        lastStatsTime = now
 
         _coreStatsState.value = CoreStatsState(
             uplink = newUplink,
@@ -494,39 +475,15 @@ class MainViewModel(application: Application) :
             pauseTotalNs = stats?.pauseTotalNs ?: currentState.pauseTotalNs,
             uptime = stats?.uptime ?: currentState.uptime
         )
-        Log.d(TAG, "Core stats updated - Uplink: ${formatBytes(newUplink)}, Downlink: ${formatBytes(newDownlink)}, " +
-                "Uplink Throughput: ${formatBytes(uplinkThroughput.toLong())}/s, " +
-                "Downlink Throughput: ${formatBytes(downlinkThroughput.toLong())}/s")
+        Log.d(TAG, "Core stats updated - Uplink: ${formatBytes(newUplink)}, Downlink: ${formatBytes(newDownlink)}, Uplink Throughput: ${formatThroughput(uplinkThroughput)}, Downlink Throughput: ${formatThroughput(downlinkThroughput)}")
     }
 
     suspend fun updateTelemetryStats() {
         if (!_isServiceEnabled.value) {
             _telemetryState.value = null
-            metricsCollector?.close()
-            metricsCollector = null
             return
         }
         
-        // Initialize metrics collector if needed
-        if (metricsCollector == null) {
-            metricsCollector = TProxyMetricsCollector(application, prefs)
-        }
-        
-        // Collect current metrics and add to store
-        val metrics = metricsCollector?.collectMetrics(_coreStatsState.value)
-        metrics?.let {
-            // Only add metrics with valid throughput (> 1 KB/s) to avoid polluting the store with very small values
-            // This ensures we only track actual meaningful traffic data
-            val throughputKBps = it.throughput / 1024.0
-            if (throughputKBps > 1.0) {
-                telemetryStore.add(it)
-                Log.d(TAG, "Added telemetry metrics: throughput=${it.throughput / (1024 * 1024)}MB/s (${throughputKBps}KB/s)")
-            } else {
-                Log.d(TAG, "Skipping telemetry metrics with low throughput: ${throughputKBps}KB/s (threshold: 1KB/s)")
-            }
-        }
-        
-        // Get aggregated data and update state
         val aggregated = telemetryStore.getAggregated()
         _telemetryState.value = aggregated
     }
