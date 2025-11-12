@@ -21,12 +21,14 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.hyperxray.an.common.ROUTE_CONFIG
 import com.hyperxray.an.common.ROUTE_LOG
+import com.hyperxray.an.common.ROUTE_OPTIMIZER
 import com.hyperxray.an.common.ROUTE_SETTINGS
 import com.hyperxray.an.common.ROUTE_STATS
 import com.hyperxray.an.service.TProxyService
 import com.hyperxray.an.ui.screens.ConfigScreen
 import com.hyperxray.an.ui.screens.DashboardScreen
 import com.hyperxray.an.ui.screens.LogScreen
+import com.hyperxray.an.ui.screens.OptimizerScreen
 import com.hyperxray.an.ui.screens.SettingsScreen
 import com.hyperxray.an.viewmodel.LogViewModel
 import com.hyperxray.an.viewmodel.MainViewModel
@@ -38,7 +40,8 @@ private val BOTTOM_NAV_ROUTE_INDEX = mapOf(
     ROUTE_STATS to 0,
     ROUTE_CONFIG to 1,
     ROUTE_LOG to 2,
-    ROUTE_SETTINGS to 3
+    ROUTE_OPTIMIZER to 3,
+    ROUTE_SETTINGS to 4
 )
 
 private fun NavBackStackEntry.routeIndex(): Int =
@@ -149,6 +152,16 @@ fun BottomNavHost(
                 logViewModel = logViewModel,
                 listState = logListState
             )
+        }
+
+        composable(
+            route = ROUTE_OPTIMIZER,
+            enterTransition = { enterTransition() },
+            exitTransition = { exitTransition() },
+            popEnterTransition = { popEnterTransition() },
+            popExitTransition = { popExitTransition() }
+        ) {
+            OptimizerScreen()
         }
 
         composable(

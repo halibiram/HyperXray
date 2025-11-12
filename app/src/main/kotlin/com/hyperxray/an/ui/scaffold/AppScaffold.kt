@@ -47,6 +47,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import com.hyperxray.an.R
 import com.hyperxray.an.common.ROUTE_CONFIG
 import com.hyperxray.an.common.ROUTE_LOG
+import com.hyperxray.an.common.ROUTE_OPTIMIZER
 import com.hyperxray.an.common.ROUTE_SETTINGS
 import com.hyperxray.an.common.ROUTE_STATS
 import com.hyperxray.an.viewmodel.LogViewModel
@@ -145,6 +146,7 @@ fun AppTopAppBar(
         "stats" -> stringResource(R.string.core_stats_title)
         "config" -> stringResource(R.string.configuration)
         "log" -> stringResource(R.string.log)
+        "optimizer" -> "TLS SNI Optimizer"
         "settings" -> stringResource(R.string.settings)
         else -> stringResource(R.string.app_name)
     }
@@ -161,6 +163,7 @@ fun AppTopAppBar(
             when (currentRoute) {
                 "log" -> logListState.firstVisibleItemIndex > 0 || logListState.firstVisibleItemScrollOffset > 0
                 "config" -> configListState.firstVisibleItemIndex > 0 || configListState.firstVisibleItemScrollOffset > 0
+                "optimizer" -> false // Optimizer screen doesn't scroll
                 "settings" -> settingsScrollState.value > 0
                 else -> false
             }
@@ -548,6 +551,18 @@ fun AppBottomNavigationBar(navController: NavHostController) {
                 )
             },
             label = { Text(stringResource(R.string.log)) }
+        )
+        NavigationBarItem(
+            alwaysShowLabel = false,
+            selected = currentRoute == ROUTE_OPTIMIZER,
+            onClick = { navigateToRoute(navController, ROUTE_OPTIMIZER) },
+            icon = {
+                Icon(
+                    painter = painterResource(id = R.drawable.optimizer),
+                    contentDescription = "TLS SNI Optimizer"
+                )
+            },
+            label = { Text("Optimizer") }
         )
         NavigationBarItem(
             alwaysShowLabel = false,
