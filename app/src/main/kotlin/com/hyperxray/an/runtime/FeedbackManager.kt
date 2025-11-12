@@ -38,7 +38,13 @@ class FeedbackManager(
         val routingDecision: Int,
         val latencyMs: Float,
         val throughputKbps: Float,
-        val success: Boolean
+        val success: Boolean,
+        val alpn: String = "h2",
+        val rtt: Double? = null,
+        val jitter: Double? = null,
+        val networkType: String? = null,
+        val hourOfDay: Int? = null,
+        val dayOfWeek: Int? = null
     )
     
     /**
@@ -50,20 +56,37 @@ class FeedbackManager(
         routingDecision: Int,
         latencyMs: Float,
         throughputKbps: Float,
-        success: Boolean
+        success: Boolean,
+        alpn: String = "h2",
+        rtt: Double? = null,
+        jitter: Double? = null,
+        networkType: String? = null
     ) {
         try {
             // Redact PII from SNI (keep only domain structure)
             val redactedSni = redactSni(sni)
             
+            // Extract temporal features from timestamp
+            val timestamp = Instant.now()
+            val calendar = java.util.Calendar.getInstance()
+            calendar.timeInMillis = timestamp.toEpochMilli()
+            val hourOfDay = calendar.get(java.util.Calendar.HOUR_OF_DAY) // 0-23
+            val dayOfWeek = calendar.get(java.util.Calendar.DAY_OF_WEEK) // 1-7 (Sunday=1)
+            
             val metrics = NetworkMetrics(
-                timestamp = Instant.now().toString(),
+                timestamp = timestamp.toString(),
                 sni = redactedSni,
                 serviceType = serviceType,
                 routingDecision = routingDecision,
                 latencyMs = latencyMs,
                 throughputKbps = throughputKbps,
-                success = success
+                success = success,
+                alpn = alpn,
+                rtt = rtt,
+                jitter = jitter,
+                networkType = networkType,
+                hourOfDay = hourOfDay,
+                dayOfWeek = dayOfWeek
             )
             
             synchronized(metricsHistory) {
@@ -169,9 +192,11 @@ class FeedbackManager(
                 writer.flush()
             }
             
-            // Rotate log if too large (10MB)
-            if (logFile.length() > 10 * 1024 * 1024) {
+            // Rotate log if too large (1GB)
+            val maxLogSize = 1024L * 1024L * 1024L // 1GB
+            if (logFile.length() > maxLogSize) {
                 rotateLog(logFile)
+                Log.i(TAG, "Log file exceeded 1GB limit, rotated to archive")
             }
             
         } catch (e: IOException) {
