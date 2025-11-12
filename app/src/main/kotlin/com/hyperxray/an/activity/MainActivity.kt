@@ -12,12 +12,8 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import com.hyperxray.an.ui.theme.ExpressiveMaterialTheme
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.hyperxray.an.common.ThemeMode
@@ -27,6 +23,10 @@ import com.hyperxray.an.viewmodel.MainViewModelFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
+/**
+ * Main activity for HyperXray VPN application.
+ * Handles UI initialization, theme management, and intent processing for config sharing.
+ */
 class MainActivity : ComponentActivity() {
     private val mainViewModel: MainViewModel by viewModels { MainViewModelFactory(application) }
 
@@ -55,17 +55,7 @@ class MainActivity : ComponentActivity() {
         insetsController.isAppearanceLightStatusBars = !isDark
 
         setContent {
-            val context = LocalContext.current
-            val dynamicColor = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-
-            val colorScheme = when {
-                dynamicColor && isDark -> dynamicDarkColorScheme(context)
-                dynamicColor && !isDark -> dynamicLightColorScheme(context)
-                isDark -> darkColorScheme()
-                else -> lightColorScheme()
-            }
-
-            MaterialTheme(colorScheme = colorScheme) {
+            ExpressiveMaterialTheme(darkTheme = isDark) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

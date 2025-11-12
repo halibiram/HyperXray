@@ -24,6 +24,8 @@ import com.hyperxray.an.common.ConfigUtils
 import com.hyperxray.an.common.ConfigUtils.extractPortsFromJson
 import com.hyperxray.an.data.source.LogFileManager
 import com.hyperxray.an.prefs.Preferences
+import com.hyperxray.an.telemetry.TProxyAiOptimizer
+import com.hyperxray.an.viewmodel.CoreStatsState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,6 +41,10 @@ import java.net.ServerSocket
 import kotlin.concurrent.Volatile
 import kotlin.system.exitProcess
 
+/**
+ * VPN service that manages Xray-core process execution and TUN interface.
+ * Handles connection lifecycle, log streaming, and configuration management.
+ */
 class TProxyService : VpnService() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val handler = Handler(Looper.getMainLooper())
@@ -85,11 +91,19 @@ class TProxyService : VpnService() {
 
     @Volatile
     private var reloadingRequested = false
+    
+    // AI-powered TProxy optimizer
+    private var tproxyAiOptimizer: TProxyAiOptimizer? = null
+    private var coreStatsState: CoreStatsState? = null
 
     override fun onCreate() {
         super.onCreate()
         logFileManager = LogFileManager(this)
-        Log.d(TAG, "TProxyService created.")
+        
+        // Initialize AI-powered TProxy optimizer
+        val prefs = Preferences(this)
+        tproxyAiOptimizer = TProxyAiOptimizer(this, prefs)
+        Log.d(TAG, "TProxyService created with AI optimizer.")
     }
 
     override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
@@ -155,6 +169,11 @@ class TProxyService : VpnService() {
         super.onDestroy()
         handler.removeCallbacks(broadcastLogsRunnable)
         broadcastLogsRunnable.run()
+        
+        // Stop AI optimizer
+        tproxyAiOptimizer?.stopOptimization()
+        tproxyAiOptimizer = null
+        
         serviceScope.cancel()
         Log.d(TAG, "TProxyService destroyed.")
         exitProcess(0)
@@ -215,19 +234,21 @@ class TProxyService : VpnService() {
                 throw e
             }
 
-            val inputStream = currentProcess.inputStream
-            val reader = BufferedReader(InputStreamReader(inputStream))
-            var line: String
-            Log.d(TAG, "Reading xray process output.")
-            while ((reader.readLine().also { line = it }) != null) {
-                logFileManager.appendLog(line)
-                // Broadcast immediately without delay for maximum responsiveness
-                synchronized(logBroadcastBuffer) {
-                    logBroadcastBuffer.add(line)
-                    // Remove any pending delayed broadcasts
-                    handler.removeCallbacks(broadcastLogsRunnable)
-                    // Broadcast immediately on main thread
-                    handler.post(broadcastLogsRunnable)
+            // Use use() to ensure BufferedReader is closed
+            BufferedReader(InputStreamReader(currentProcess.inputStream)).use { reader ->
+                var line: String?
+                Log.d(TAG, "Reading xray process output.")
+                while (reader.readLine().also { line = it } != null) {
+                    val logLine = line!!
+                    logFileManager.appendLog(logLine)
+                    // Broadcast immediately without delay for maximum responsiveness
+                    synchronized(logBroadcastBuffer) {
+                        logBroadcastBuffer.add(logLine)
+                        // Remove any pending delayed broadcasts
+                        handler.removeCallbacks(broadcastLogsRunnable)
+                        // Broadcast immediately on main thread
+                        handler.post(broadcastLogsRunnable)
+                    }
                 }
             }
             Log.d(TAG, "xray process output stream finished.")
@@ -316,12 +337,57 @@ class TProxyService : VpnService() {
             stopXray()
             return
         }
-        tunFd?.fd?.let { fd ->
+        val tunFdValue = tunFd
+        tunFdValue?.fd?.let { fd ->
             TProxyStartService(tproxyFile.absolutePath, fd)
         } ?: run {
             Log.e(TAG, "tunFd is null after establish()")
             stopXray()
             return
+        }
+
+        // Start AI-powered TProxy optimization
+        // Note: prefs is already defined above (line 321)
+        if (tproxyAiOptimizer != null && !tproxyAiOptimizer!!.isOptimizing()) {
+            Log.i(TAG, "Starting AI-powered TProxy optimization")
+            
+            // Set callback to reload TProxy when configuration changes
+            tproxyAiOptimizer!!.onConfigurationApplied = { config, needsReload ->
+                if (needsReload) {
+                    Log.i(TAG, "AI optimizer applied new configuration, reloading TProxy...")
+                    // Reload TProxy configuration by recreating the config file and restarting
+                    serviceScope.launch {
+                        try {
+                            val tproxyFile = File(cacheDir, "tproxy.conf")
+                            if (tproxyFile.exists()) {
+                                FileOutputStream(tproxyFile, false).use { fos ->
+                                    val tproxyConf = getTproxyConf(prefs)
+                                    fos.write(tproxyConf.toByteArray())
+                                }
+                                Log.i(TAG, "TProxy configuration file updated with AI-optimized settings")
+                                
+                                // Restart TProxy service to apply new configuration
+                                // This is necessary because hev-socks5-tunnel reads config at startup
+                                if (tunFd != null) {
+                                    Log.i(TAG, "Restarting TProxy service to apply AI-optimized configuration...")
+                                    val fd = tunFd!!.fd
+                                    TProxyStopService()
+                                    Thread.sleep(100) // Brief delay to ensure clean shutdown
+                                    TProxyStartService(tproxyFile.absolutePath, fd)
+                                    Log.i(TAG, "TProxy service restarted with AI-optimized configuration")
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error updating TProxy configuration", e)
+                        }
+                    }
+                }
+            }
+            
+            tproxyAiOptimizer!!.startOptimization(
+                coreStatsState = coreStatsState,
+                optimizationIntervalMs = 30000L // Optimize every 30 seconds
+            )
         }
 
         val successIntent = Intent(ACTION_START)
@@ -371,6 +437,9 @@ class TProxyService : VpnService() {
     }
 
     private fun stopService() {
+        // Stop AI optimizer before stopping service
+        tproxyAiOptimizer?.stopOptimization()
+        
         tunFd?.let {
             try {
                 it.close()
@@ -382,6 +451,23 @@ class TProxyService : VpnService() {
             TProxyStopService()
         }
         exit()
+    }
+    
+    /**
+     * Update core stats state for AI optimizer.
+     * Called from MainViewModel when stats are updated.
+     */
+    fun updateCoreStatsState(stats: CoreStatsState) {
+        coreStatsState = stats
+        // Notify AI optimizer if it's running
+        // The optimizer will pick up the new stats in its next cycle
+    }
+    
+    /**
+     * Get AI optimizer instance (for testing/debugging).
+     */
+    fun getAiOptimizer(): TProxyAiOptimizer? {
+        return tproxyAiOptimizer
     }
 
     @Suppress("SameParameterValue")
@@ -433,15 +519,21 @@ class TProxyService : VpnService() {
 
         @JvmStatic
         @Suppress("FunctionName")
-        private external fun TProxyStartService(configPath: String, fd: Int)
+        external fun TProxyStartService(configPath: String, fd: Int)
 
         @JvmStatic
         @Suppress("FunctionName")
-        private external fun TProxyStopService()
+        external fun TProxyStopService()
 
+        /**
+         * Get native TProxy statistics from hev-socks5-tunnel.
+         * Returns: [txPackets, txBytes, rxPackets, rxBytes] or null on error.
+         * 
+         * JNI maps this Java method name "TProxyGetStats" to native_get_stats C function.
+         */
         @JvmStatic
         @Suppress("FunctionName")
-        private external fun TProxyGetStats(): LongArray?
+        external fun TProxyGetStats(): LongArray?
 
         fun getNativeLibraryDir(context: Context?): String? {
             if (context == null) {

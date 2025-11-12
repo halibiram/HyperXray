@@ -11,6 +11,10 @@ import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.util.Log
 
+/**
+ * Quick Settings tile service for quick VPN connection toggle.
+ * Listens to TProxyService broadcasts to update tile state.
+ */
 class QuickTileService : TileService() {
 
     private val broadcastReceiver = object : BroadcastReceiver() {
