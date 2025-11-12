@@ -1,0 +1,123 @@
+name: Train Policy Model
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'tools/train_hyperxray_policy_loss02_gpu.py'
+      - '.github/workflows/train-model.yml'
+  schedule:
+    # Run weekly on Monday at 00:00 UTC
+    - cron: '0 0 * * 1'
+
+jobs:
+  train-model:
+    name: Train Policy Model (Loss ≤ 0.2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake
+
+      - name: Create Virtual Environment
+        run: |
+          python -m venv .venv
+          echo "VIRTUAL_ENV=${{ github.workspace }}/.venv" >> $GITHUB_ENV
+          echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
+
+      - name: Upgrade pip
+        run: |
+          source .venv/bin/activate
+          python -m pip install --upgrade pip setuptools wheel
+
+      - name: Install PyTorch (CPU)
+        run: |
+          source .venv/bin/activate
+          # Install CPU-only PyTorch for faster CI builds
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install Python Dependencies
+        run: |
+          source .venv/bin/activate
+          pip install onnx onnxoptimizer tqdm numpy
+
+      - name: Create Models Directory
+        run: |
+          mkdir -p app/src/main/assets/models
+
+      - name: Train Policy Model
+        run: |
+          source .venv/bin/activate
+          python tools/train_hyperxray_policy_loss02_gpu.py
+        continue-on-error: true
+
+      - name: Check Model Files
+        run: |
+          echo "Checking for generated model files..."
+          ls -lh app/src/main/assets/models/ || true
+          if [ -f "app/src/main/assets/models/hyperxray_policy_loss02.onnx" ]; then
+            echo "✅ FP32 model found"
+            du -h app/src/main/assets/models/hyperxray_policy_loss02.onnx
+          else
+            echo "⚠️ FP32 model not found"
+          fi
+          if [ -f "app/src/main/assets/models/hyperxray_policy_loss02_int8.onnx" ]; then
+            echo "✅ INT8 model found"
+            du -h app/src/main/assets/models/hyperxray_policy_loss02_int8.onnx
+          else
+            echo "⚠️ INT8 model not found (quantization may have failed)"
+          fi
+
+      - name: Upload Model Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hyperxray-policy-models
+          path: |
+            app/src/main/assets/models/hyperxray_policy_loss02*.onnx
+            app/src/main/assets/models/hyperxray_policy_loss02*.pt
+            app/src/main/assets/models/hyperxray_policy_loss02*.pth
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Generate Model Report
+        if: always()
+        run: |
+          echo "## Model Training Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Training Status" >> $GITHUB_STEP_SUMMARY
+          if [ -f "app/src/main/assets/models/hyperxray_policy_loss02.onnx" ]; then
+            SIZE=$(du -h app/src/main/assets/models/hyperxray_policy_loss02.onnx | cut -f1)
+            echo "✅ **FP32 Model**: Generated ($SIZE)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **FP32 Model**: Not generated" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f "app/src/main/assets/models/hyperxray_policy_loss02_int8.onnx" ]; then
+            SIZE=$(du -h app/src/main/assets/models/hyperxray_policy_loss02_int8.onnx | cut -f1)
+            echo "✅ **INT8 Model**: Generated ($SIZE)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ **INT8 Model**: Not generated (quantization may have failed)" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "Model files are available as workflow artifacts." >> $GITHUB_STEP_SUMMARY
+
+
+
