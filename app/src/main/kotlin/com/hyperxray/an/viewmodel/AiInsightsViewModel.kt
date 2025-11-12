@@ -44,9 +44,9 @@ class AiInsightsViewModel(application: Application) : AndroidViewModel(applicati
     fun refresh() {
         // First trigger RealityWorker to create/update policy files
         triggerRealityWorker()
-        // Then reload data after a short delay to allow RealityWorker to finish
+        // Then reload data after a longer delay to allow RealityWorker to complete
         viewModelScope.launch {
-            kotlinx.coroutines.delay(1000) // Wait 1 second for RealityWorker to complete
+            kotlinx.coroutines.delay(2000) // Wait 2 seconds for RealityWorker to complete (increased from 1s)
             loadData()
         }
     }
@@ -356,8 +356,17 @@ class AiInsightsViewModel(application: Application) : AndroidViewModel(applicati
             val route0Count = parsedEntries.count { it.routeDecision == 0 }
             Log.d(TAG, "Policy entries: route_2=$route2Count, route_1=$route1Count, route_0=$route0Count, total=${parsedEntries.size}")
             
-            // Return entries in original order (no sorting)
-            parsedEntries
+            // Sort by timestamp (most recent first) for display
+            parsedEntries.sortedByDescending { entry ->
+                try {
+                    // Parse timestamp string to long for sorting
+                    val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                    dateFormat.parse(entry.timestamp)?.time ?: 0L
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to parse timestamp for sorting: ${entry.timestamp}", e)
+                    0L
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error reading latest policy file", e)
             emptyList()

@@ -297,17 +297,39 @@ class RealityWorker(
             val feedbackEntries = loadRecentFeedback()
             
             // Build policy array from feedback entries
+            // Use most recent entries (last 5000) for policy display
+            // Sort by timestamp (most recent first) and take unique SNIs (most recent route decision for each SNI)
+            val recentEntries = feedbackEntries.sortedByDescending { it.timestamp }.take(5000)
+            val sniToEntry = mutableMapOf<String, FeedbackEntry>()
+            
+            // Keep only the most recent entry for each SNI (already sorted by timestamp desc)
+            recentEntries.forEach { entry ->
+                if (!sniToEntry.containsKey(entry.sni)) {
+                    sniToEntry[entry.sni] = entry
+                }
+            }
+            
+            // Sort by timestamp (most recent first) for display
+            val sortedEntries = sniToEntry.values.sortedByDescending { it.timestamp }
+            
+            // Convert to policy array with individual timestamps (use same dateFormat)
             val policyArray = org.json.JSONArray()
-            feedbackEntries.forEach { entry ->
+            sortedEntries.forEach { entry ->
+                val entryTimestampStr = dateFormat.format(java.util.Date(entry.timestamp))
                 val policyEntry = JSONObject().apply {
                     put("sni", entry.sni)
                     put("svc_class", entry.svcClass)
                     put("route_decision", entry.routeDecision)
-                    put("alpn", "h2") // Default ALPN, could be extracted from feedback
-                    put("timestamp", timestampStr)
+                    put("alpn", entry.alpn) // Use actual ALPN from feedback
+                    put("timestamp", entryTimestampStr) // Use entry's own timestamp
+                    put("latency_ms", entry.latency)
+                    put("throughput_kbps", entry.throughput)
+                    put("success", entry.success)
                 }
                 policyArray.put(policyEntry)
             }
+            
+            Log.d(TAG, "Policy array: ${policyArray.length()} unique SNIs from ${recentEntries.size} recent entries (total feedback: ${feedbackEntries.size})")
             
             // Build JSON object with policy array
             val policy = JSONObject().apply {
@@ -373,7 +395,13 @@ class RealityWorker(
                         throughput = json.optDouble("throughputKbps", json.optDouble("throughput", 0.0)),
                         success = json.getBoolean("success"),
                         svcClass = json.optInt("svcClass", 7),
-                        routeDecision = json.optInt("routeDecision", 0)
+                        routeDecision = json.optInt("routeDecision", 0),
+                        alpn = json.optString("alpn")?.takeIf { it.isNotEmpty() } ?: "h2",
+                        rtt = if (json.has("rtt")) json.optDouble("rtt") else null,
+                        jitter = if (json.has("jitter")) json.optDouble("jitter") else null,
+                        networkType = json.optString("networkType")?.takeIf { it.isNotEmpty() },
+                        hourOfDay = if (json.has("hourOfDay")) json.optInt("hourOfDay") else null,
+                        dayOfWeek = if (json.has("dayOfWeek")) json.optInt("dayOfWeek") else null
                     )
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to parse feedback entry: ${e.message}")
@@ -431,11 +459,11 @@ class RealityWorker(
     
     companion object {
         /**
-         * Schedule periodic work (30 minutes, can run when idle/charging).
+         * Schedule periodic work (5 minutes for more frequent policy updates).
          */
         fun schedule(context: Context) {
             val workRequest = PeriodicWorkRequestBuilder<RealityWorker>(
-                30, TimeUnit.MINUTES
+                5, TimeUnit.MINUTES // Changed from 30 minutes to 5 minutes for more frequent updates
             )
                 .setConstraints(
                     Constraints.Builder()
@@ -448,11 +476,11 @@ class RealityWorker(
             
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 "reality_worker",
-                ExistingPeriodicWorkPolicy.KEEP, // Keep existing if already scheduled
+                ExistingPeriodicWorkPolicy.REPLACE, // Replace existing to update interval
                 workRequest
             )
             
-            Log.i("RealityWorker", "Scheduled periodic learning work (30 min)")
+            Log.i("RealityWorker", "Scheduled periodic learning work (5 min)")
         }
     }
 }
