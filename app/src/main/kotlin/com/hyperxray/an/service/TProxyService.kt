@@ -26,6 +26,10 @@ import com.hyperxray.an.data.source.LogFileManager
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.telemetry.TProxyAiOptimizer
 import com.hyperxray.an.viewmodel.CoreStatsState
+import com.hyperxray.an.core.inference.OnnxRuntimeManager
+import com.hyperxray.an.core.network.TLSFeatureEncoder
+import com.hyperxray.an.core.monitor.OptimizerLogger
+import com.hyperxray.an.ui.screens.log.extractSNI
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -114,6 +118,18 @@ class TProxyService : VpnService() {
         val prefs = Preferences(this)
         tproxyAiOptimizer = TProxyAiOptimizer(this, prefs)
         Log.d(TAG, "TProxyService created with AI optimizer.")
+        
+        // Initialize ONNX Runtime Manager for TLS SNI optimization
+        try {
+            OnnxRuntimeManager.init(this)
+            if (OnnxRuntimeManager.isReady()) {
+                Log.i(TAG, "TLS SNI optimizer model loaded successfully")
+            } else {
+                Log.w(TAG, "TLS SNI optimizer model failed to load")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize TLS SNI optimizer: ${e.message}", e)
+        }
     }
 
     override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
@@ -189,6 +205,9 @@ class TProxyService : VpnService() {
         // Stop AI optimizer
         tproxyAiOptimizer?.stopOptimization()
         tproxyAiOptimizer = null
+        
+        // Release ONNX Runtime Manager
+        OnnxRuntimeManager.release()
         
         Log.d(TAG, "TProxyService destroyed.")
         // Let Android handle service lifecycle - do not call exitProcess(0)
@@ -584,6 +603,9 @@ class TProxyService : VpnService() {
                                         handler.post(broadcastLogsRunnable)
                                     }
                                     
+                                    // Process SNI for TLS optimization
+                                    processSNIFromLog(line)
+                                    
                                     // Small delay to allow cancellation to be checked
                                     // This ensures we can respond to cancellation requests
                                     delay(10)
@@ -647,7 +669,27 @@ class TProxyService : VpnService() {
                     Log.w(TAG, "Error cancelling stream reading coroutines: ${e.message}", e)
                 }
                 
-                // Ensure process streams are closed
+                // Wait before closing streams to allow process to finish writing
+                // This prevents "closed pipe" errors when Xray is handling UDP traffic
+                // Increased delays to give more time for UDP operations to complete
+                try {
+                    Thread.sleep(200) // Initial delay to let process finish current operations
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+                
+                // Only close streams if process is dead, or add delay if still alive
+                val processAlive = process.isAlive
+                if (processAlive) {
+                    // Process still alive - wait more before closing streams to avoid pipe errors
+                    try {
+                        Thread.sleep(300) // Increased to 300ms for better UDP cleanup
+                    } catch (e: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                    }
+                }
+                
+                // Now close streams - process should have finished writing by now
                 try {
                     process.inputStream?.close()
                 } catch (e: Exception) {
@@ -708,44 +750,64 @@ class TProxyService : VpnService() {
         try {
             Log.d(TAG, "stopXray called, starting cleanup sequence.")
             
-            // Step 1: Cancel coroutine scope first to stop any running operations
+            val processToDestroy = xrayProcess
+            
+            // Step 1: Signal graceful shutdown by closing stdin (if still open)
+            // This gives Xray a chance to finish current operations before termination
+            if (processToDestroy != null && processToDestroy.isAlive) {
+                try {
+                    // Close stdin to signal shutdown (Xray may check for stdin closure)
+                    processToDestroy.outputStream?.close()
+                    Log.d(TAG, "Closed stdin to signal graceful shutdown.")
+                } catch (e: Exception) {
+                    Log.d(TAG, "Error closing stdin (may already be closed): ${e.message}")
+                }
+                
+                // Give Xray a grace period to finish current UDP operations
+                // This prevents "closed pipe" errors when Xray is handling UDP traffic
+                // Increased to 400ms to allow more time for UDP operations to complete
+                try {
+                    Thread.sleep(400) // 400ms grace period
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+            }
+            
+            // Step 2: Cancel coroutine scope to stop stream reading
             // This is non-blocking and prevents new coroutines from starting
             Log.d(TAG, "Cancelling CoroutineScope.")
             serviceScope.cancel()
             Log.d(TAG, "CoroutineScope cancelled.")
             
-            // Step 2: Destroy the xray process (non-blocking, but may take time)
-            // Note: destroy() is non-blocking, destroyForcibly() is also non-blocking
-            val processToDestroy = xrayProcess
+            // Step 3: Destroy the xray process after grace period
             if (processToDestroy != null) {
                 Log.d(TAG, "Destroying xray process.")
                 try {
-                    // Try graceful termination first (non-blocking)
+                    // Try graceful termination first (sends SIGTERM on Unix)
                     processToDestroy.destroy()
-                    // Check if process is still alive and force kill if needed (non-blocking check)
-                    // Note: We don't wait here - the process will be killed asynchronously
+                    // Wait for graceful shutdown - increased to 500ms for better UDP cleanup
+                    try {
+                        Thread.sleep(500) // Wait up to 500ms for graceful shutdown
+                    } catch (e: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                    }
+                    // Force kill if still alive
                     if (processToDestroy.isAlive) {
-                        Log.d(TAG, "Process still alive, forcing destroy.")
+                        Log.d(TAG, "Process still alive after graceful shutdown, forcing destroy.")
                         processToDestroy.destroyForcibly()
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error destroying xray process", e)
                 }
-                // Clear reference immediately (non-blocking)
+                // Clear reference
                 xrayProcess = null
                 Log.d(TAG, "xrayProcess reference nulled.")
             }
             
-            // Step 3: Stop the VPN service (closes TUN interface and native TProxy)
+            // Step 4: Stop the VPN service (closes TUN interface and native TProxy)
             // This is non-blocking and will clean up VPN resources
             Log.d(TAG, "Calling stopService (stopping VPN).")
             stopService()
-            
-            // Note: We don't wait for process destruction or coroutine cleanup
-            // - Process destruction happens asynchronously
-            // - Coroutines are cancelled and will finish when they can
-            // - VPN service cleanup is handled by Android
-            // This prevents ANR by keeping stopXray() non-blocking
             
         } catch (e: Exception) {
             Log.e(TAG, "Error during stopXray cleanup", e)
@@ -1025,6 +1087,159 @@ class TProxyService : VpnService() {
      */
     fun getAiOptimizer(): TProxyAiOptimizer? {
         return tproxyAiOptimizer
+    }
+    
+    /**
+     * Process SNI from Xray logs and make routing decisions using ONNX model.
+     * Called when SNI is detected in log entries.
+     */
+    private fun processSNIFromLog(logEntry: String) {
+        // Try auto-learning optimizer first (v9)
+        try {
+            val sni = extractSNI(logEntry)
+            if (sni != null && sni.isNotEmpty()) {
+                processSNIWithAutoLearner(sni, logEntry)
+                return // Use auto-learner if available
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Auto-learner processing failed, falling back to v5: ${e.message}")
+        }
+        
+        // Fallback to v5 optimizer
+        if (!OnnxRuntimeManager.isReady()) {
+            return // Model not loaded, skip processing
+        }
+        
+        try {
+            // Extract SNI from log entry
+            val sni = extractSNI(logEntry)
+            if (sni == null || sni.isEmpty()) {
+                return // No SNI found in this log entry
+            }
+            
+            // Extract ALPN if available (default to h2)
+            val alpn = extractALPN(logEntry) ?: "h2"
+            
+            // Encode TLS features
+            val features = TLSFeatureEncoder.encode(sni, alpn)
+            
+            // Run ONNX inference
+            val (serviceTypeIndex, routingDecisionIndex) = OnnxRuntimeManager.predict(features)
+            
+            // Log the decision
+            OptimizerLogger.logDecision(sni, serviceTypeIndex, routingDecisionIndex)
+            
+            // Apply routing decision (future: modify Xray routing rules)
+            // For now, we just log the decision
+            applyRoutingDecision(sni, routingDecisionIndex)
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error processing SNI from log: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Process SNI using auto-learning optimizer (v9).
+     */
+    private fun processSNIWithAutoLearner(sni: String, logEntry: String) {
+        try {
+            // Initialize OrtHolder if needed
+            if (!com.hyperxray.an.optimizer.OrtHolder.isReady()) {
+                com.hyperxray.an.optimizer.OrtHolder.init(this)
+            }
+            
+            if (!com.hyperxray.an.optimizer.OrtHolder.isReady()) {
+                return // Auto-learner not available
+            }
+            
+            // Simulate traffic metadata (TODO: get from actual network layer)
+            val latencyMs = 100.0 // Placeholder
+            val throughputKbps = 1000.0 // Placeholder
+            
+            // Run inference (async)
+            serviceScope.launch {
+                val decision = com.hyperxray.an.optimizer.Inference.optimizeSni(
+                    context = this@TProxyService,
+                    sni = sni,
+                    latencyMs = latencyMs,
+                    throughputKbps = throughputKbps
+                )
+                
+                Log.d(TAG, "Auto-learner decision: sni=$sni, svc=${decision.svcClass}, route=${decision.routeDecision}, alpn=${decision.alpn}")
+                
+                // Log feedback (will be used for learning)
+                com.hyperxray.an.optimizer.LearnerLogger.logFeedback(
+                    context = this@TProxyService,
+                    sni = sni,
+                    svcClass = decision.svcClass,
+                    routeDecision = decision.routeDecision,
+                    success = true, // TODO: get from actual connection result
+                    latencyMs = latencyMs.toFloat(),
+                    throughputKbps = throughputKbps.toFloat()
+                )
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in auto-learner processing: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Extract ALPN protocol from log entry.
+     */
+    private fun extractALPN(logEntry: String): String? {
+        // Try to extract ALPN from log patterns
+        val alpnPatterns = listOf(
+            Regex("""alpn\s*[=:]\s*([^\s,}\]]+)""", RegexOption.IGNORE_CASE),
+            Regex("""ALPN\s*[=:]\s*([^\s,}\]]+)""", RegexOption.IGNORE_CASE),
+            Regex("""protocol\s*[=:]\s*(h2|h3|http/1\.1)""", RegexOption.IGNORE_CASE)
+        )
+        
+        for (pattern in alpnPatterns) {
+            pattern.find(logEntry)?.let {
+                val alpn = it.groupValues[1].trim().lowercase()
+                if (alpn.isNotEmpty() && (alpn == "h2" || alpn == "h3" || alpn == "http/1.1")) {
+                    return when (alpn) {
+                        "h3" -> "h3"
+                        "h2" -> "h2"
+                        else -> "h2" // Default
+                    }
+                }
+            }
+        }
+        
+        return null
+    }
+    
+    /**
+     * Apply routing decision based on ONNX model output.
+     * 
+     * @param sni The Server Name Indication
+     * @param routingDecisionIndex 0=proxy, 1=direct, 2=optimized
+     */
+    private fun applyRoutingDecision(sni: String, routingDecisionIndex: Int) {
+        // TODO: Implement actual routing decision application
+        // This could involve:
+        // - Modifying Xray routing rules dynamically
+        // - Updating TProxy configuration
+        // - Applying split tunneling rules
+        
+        when (routingDecisionIndex) {
+            0 -> {
+                // Route via proxy (default behavior)
+                Log.d(TAG, "Routing decision: proxy for $sni")
+            }
+            1 -> {
+                // Route direct (bypass proxy)
+                Log.d(TAG, "Routing decision: direct for $sni")
+                // Future: Add to direct routing rules
+            }
+            2 -> {
+                // Route optimized (special handling)
+                Log.d(TAG, "Routing decision: optimized for $sni")
+                // Future: Apply optimized routing configuration
+            }
+        }
     }
 
     @Suppress("SameParameterValue")
