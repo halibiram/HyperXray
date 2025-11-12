@@ -31,6 +31,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.delay
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
@@ -39,7 +42,6 @@ import java.io.InputStreamReader
 import java.io.InterruptedIOException
 import java.net.ServerSocket
 import kotlin.concurrent.Volatile
-import kotlin.system.exitProcess
 
 /**
  * VPN service that manages Xray-core process execution and TUN interface.
@@ -87,10 +89,15 @@ class TProxyService : VpnService() {
 
     @Volatile
     private var xrayProcess: Process? = null
+    @Volatile
     private var tunFd: ParcelFileDescriptor? = null
+    private val tunFdLock = Any() // Synchronization lock for tunFd access
 
     @Volatile
     private var reloadingRequested = false
+    
+    @Volatile
+    private var isStopping = false
     
     // AI-powered TProxy optimizer
     private var tproxyAiOptimizer: TProxyAiOptimizer? = null
@@ -167,6 +174,12 @@ class TProxyService : VpnService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        Log.d(TAG, "onDestroy called, cleaning up resources.")
+        
+        // Stop Xray and clean up all resources
+        stopXray()
+        
+        // Remove any pending log broadcasts
         handler.removeCallbacks(broadcastLogsRunnable)
         broadcastLogsRunnable.run()
         
@@ -174,9 +187,8 @@ class TProxyService : VpnService() {
         tproxyAiOptimizer?.stopOptimization()
         tproxyAiOptimizer = null
         
-        serviceScope.cancel()
         Log.d(TAG, "TProxyService destroyed.")
-        exitProcess(0)
+        // Let Android handle service lifecycle - do not call exitProcess(0)
     }
 
     override fun onRevoke() {
@@ -234,23 +246,9 @@ class TProxyService : VpnService() {
                 throw e
             }
 
-            // Use use() to ensure BufferedReader is closed
-            BufferedReader(InputStreamReader(currentProcess.inputStream)).use { reader ->
-                var line: String?
-                Log.d(TAG, "Reading xray process output.")
-                while (reader.readLine().also { line = it } != null) {
-                    val logLine = line!!
-                    logFileManager.appendLog(logLine)
-                    // Broadcast immediately without delay for maximum responsiveness
-                    synchronized(logBroadcastBuffer) {
-                        logBroadcastBuffer.add(logLine)
-                        // Remove any pending delayed broadcasts
-                        handler.removeCallbacks(broadcastLogsRunnable)
-                        // Broadcast immediately on main thread
-                        handler.post(broadcastLogsRunnable)
-                    }
-                }
-            }
+            // Use robust stream reading with timeout and health checks
+            Log.d(TAG, "Reading xray process output with timeout protection.")
+            readProcessStreamWithTimeout(currentProcess)
             Log.d(TAG, "xray process output stream finished.")
         } catch (e: InterruptedIOException) {
             Log.d(TAG, "Xray process reading interrupted.")
@@ -258,17 +256,182 @@ class TProxyService : VpnService() {
             Log.e(TAG, "Error executing xray", e)
         } finally {
             Log.d(TAG, "Xray process task finished.")
-            if (reloadingRequested) {
-                Log.d(TAG, "Xray process stopped due to configuration reload.")
-                reloadingRequested = false
-            } else {
-                Log.d(TAG, "Xray process exited unexpectedly or due to stop request. Stopping VPN.")
-                stopXray()
-            }
+            
+            // Clean up process reference
             if (this.xrayProcess === currentProcess) {
                 this.xrayProcess = null
             } else {
                 Log.w(TAG, "Finishing task for an old xray process instance.")
+            }
+            
+            // Only call stopXray if not reloading and not already stopping
+            if (reloadingRequested) {
+                Log.d(TAG, "Xray process stopped due to configuration reload.")
+                reloadingRequested = false
+            } else if (!isStopping) {
+                Log.d(TAG, "Xray process exited unexpectedly or due to stop request. Stopping VPN.")
+                // Use handler to call stopXray on main thread to avoid reentrancy issues
+                handler.post {
+                    if (!isStopping) {
+                        stopXray()
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Reads process output stream with timeout protection and health checks.
+     * Prevents thread hangs when process dies but stream remains open.
+     * Uses a separate interruptible thread with periodic health monitoring.
+     */
+    private fun readProcessStreamWithTimeout(process: Process) {
+        var readThread: Thread? = null
+        var healthCheckThread: Thread? = null
+        var shouldStop = false
+        
+        try {
+            // Health check thread monitors process and can interrupt read thread
+            healthCheckThread = Thread {
+                try {
+                    while (!shouldStop && !Thread.currentThread().isInterrupted) {
+                        Thread.sleep(2000) // Check every 2 seconds
+                        
+                        // Check if we're stopping
+                        if (isStopping) {
+                            Log.d(TAG, "Health check detected stop request, interrupting read thread.")
+                            shouldStop = true
+                            readThread?.interrupt()
+                            break
+                        }
+                        
+                        // Check if process is still alive
+                        if (!process.isAlive) {
+                            val exitValue = try {
+                                process.exitValue()
+                            } catch (e: IllegalThreadStateException) {
+                                -1
+                            }
+                            Log.d(TAG, "Health check detected process death (exit code: $exitValue), interrupting read thread.")
+                            shouldStop = true
+                            readThread?.interrupt()
+                            break
+                        }
+                    }
+                } catch (e: InterruptedException) {
+                    Log.d(TAG, "Health check thread interrupted.")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error in health check thread: ${e.message}", e)
+                }
+            }
+            healthCheckThread.name = "XrayHealthCheck"
+            healthCheckThread.isDaemon = true
+            healthCheckThread.start()
+            
+            // Stream reading thread - can be interrupted by health check
+            readThread = Thread {
+                try {
+                    BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
+                        var lastReadTime = System.currentTimeMillis()
+                        val readTimeout = 10000L // 10 seconds without any read
+                        
+                        while (!shouldStop && !Thread.currentThread().isInterrupted) {
+                            try {
+                                // Check if we've been reading for too long without data
+                                val currentTime = System.currentTimeMillis()
+                                if (currentTime - lastReadTime > readTimeout) {
+                                    // Check if process is still alive
+                                    if (!process.isAlive) {
+                                        val exitValue = try {
+                                            process.exitValue()
+                                        } catch (e: IllegalThreadStateException) {
+                                            -1
+                                        }
+                                        Log.d(TAG, "Read timeout detected, process is dead (exit code: $exitValue)")
+                                        break
+                                    }
+                                    Log.w(TAG, "Read timeout: no data for ${readTimeout}ms, but process is alive. Continuing...")
+                                    lastReadTime = currentTime // Reset to avoid spamming logs
+                                }
+                                
+                                // Check available bytes before blocking read
+                                // This helps detect if stream is closed
+                                val available = try {
+                                    process.inputStream.available()
+                                } catch (e: IOException) {
+                                    Log.d(TAG, "Stream unavailable (likely closed): ${e.message}")
+                                    break
+                                }
+                                
+                                // Read line (this will block, but thread can be interrupted)
+                                val line = reader.readLine()
+                                
+                                if (line == null) {
+                                    // Stream closed or EOF
+                                    Log.d(TAG, "Stream reached EOF (null read)")
+                                    break
+                                }
+                                
+                                // Update last read time on successful read
+                                lastReadTime = System.currentTimeMillis()
+                                
+                                // Process the log line
+                                logFileManager.appendLog(line)
+                                synchronized(logBroadcastBuffer) {
+                                    logBroadcastBuffer.add(line)
+                                    handler.removeCallbacks(broadcastLogsRunnable)
+                                    handler.post(broadcastLogsRunnable)
+                                }
+                                
+                            } catch (e: InterruptedIOException) {
+                                Log.d(TAG, "Stream read interrupted: ${e.message}")
+                                break
+                            } catch (e: IOException) {
+                                // Check if process is still alive
+                                if (!process.isAlive) {
+                                    val exitValue = try {
+                                        process.exitValue()
+                                    } catch (ex: IllegalThreadStateException) {
+                                        -1
+                                    }
+                                    Log.d(TAG, "IOException during read, process is dead (exit code: $exitValue): ${e.message}")
+                                } else {
+                                    Log.e(TAG, "IOException during stream read (process alive): ${e.message}", e)
+                                }
+                                break
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Unexpected error during stream read: ${e.message}", e)
+                                break
+                            }
+                        }
+                    }
+                } catch (e: InterruptedException) {
+                    Log.d(TAG, "Read thread interrupted.")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error in read thread: ${e.message}", e)
+                }
+            }
+            readThread.name = "XrayStreamReader"
+            readThread.isDaemon = true
+            readThread.start()
+            
+            // Wait for read thread to complete (or be interrupted)
+            readThread.join()
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting up stream reading: ${e.message}", e)
+        } finally {
+            // Clean up threads
+            shouldStop = true
+            healthCheckThread?.interrupt()
+            readThread?.interrupt()
+            
+            // Wait a bit for threads to finish
+            try {
+                healthCheckThread?.join(1000)
+                readThread?.join(1000)
+            } catch (e: InterruptedException) {
+                Log.w(TAG, "Interrupted while waiting for threads to finish")
             }
         }
     }
@@ -304,27 +467,80 @@ class TProxyService : VpnService() {
     }
 
     private fun stopXray() {
-        Log.d(TAG, "stopXray called with keepExecutorAlive=" + false)
-        serviceScope.cancel()
-        Log.d(TAG, "CoroutineScope cancelled.")
-
-        xrayProcess?.destroy()
-        xrayProcess = null
-        Log.d(TAG, "xrayProcess reference nulled.")
-
-        Log.d(TAG, "Calling stopService (stopping VPN).")
-        stopService()
+        // Prevent multiple simultaneous stop calls
+        if (isStopping) {
+            Log.d(TAG, "stopXray already in progress, ignoring duplicate call.")
+            return
+        }
+        isStopping = true
+        
+        try {
+            Log.d(TAG, "stopXray called, starting cleanup sequence.")
+            
+            // Step 1: Destroy the xray process first to stop it from producing more output
+            val processToDestroy = xrayProcess
+            if (processToDestroy != null) {
+                Log.d(TAG, "Destroying xray process.")
+                try {
+                    processToDestroy.destroy()
+                    // Give the process a moment to terminate gracefully
+                    Thread.sleep(100)
+                    // Force kill if still alive
+                    if (processToDestroy.isAlive) {
+                        Log.d(TAG, "Process still alive, forcing destroy.")
+                        processToDestroy.destroyForcibly()
+                        // Wait a bit more for forceful termination
+                        Thread.sleep(50)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error destroying xray process", e)
+                }
+                xrayProcess = null
+                Log.d(TAG, "xrayProcess reference nulled.")
+            }
+            
+            // Step 2: Stop the VPN service (closes TUN interface and native TProxy)
+            Log.d(TAG, "Calling stopService (stopping VPN).")
+            stopService()
+            
+            // Step 3: Wait for coroutines to finish cleanup, then cancel scope
+            // Use runBlocking with timeout to wait for coroutines to finish
+            runBlocking {
+                withTimeoutOrNull(1000) {
+                    // Wait a moment for any running coroutines to finish their cleanup
+                    kotlinx.coroutines.delay(200)
+                }
+            }
+            
+            // Step 4: Cancel the coroutine scope after cleanup
+            Log.d(TAG, "Cancelling CoroutineScope.")
+            serviceScope.cancel()
+            Log.d(TAG, "CoroutineScope cancelled.")
+            
+        } finally {
+            isStopping = false
+            Log.d(TAG, "stopXray cleanup completed.")
+        }
     }
 
     private fun startService() {
-        if (tunFd != null) return
+        synchronized(tunFdLock) {
+            if (tunFd != null) return
+        }
+        
         val prefs = Preferences(this)
         val builder = getVpnBuilder(prefs)
-        tunFd = builder.establish()
-        if (tunFd == null) {
+        val newTunFd = builder.establish()
+        
+        synchronized(tunFdLock) {
+            tunFd = newTunFd
+        }
+        
+        if (newTunFd == null) {
             stopXray()
             return
         }
+        
         val tproxyFile = File(cacheDir, "tproxy.conf")
         try {
             tproxyFile.createNewFile()
@@ -337,9 +553,14 @@ class TProxyService : VpnService() {
             stopXray()
             return
         }
-        val tunFdValue = tunFd
-        tunFdValue?.fd?.let { fd ->
-            TProxyStartService(tproxyFile.absolutePath, fd)
+        
+        // Safely get fd with synchronization
+        val fd: Int? = synchronized(tunFdLock) {
+            tunFd?.fd
+        }
+        
+        fd?.let { fileDescriptor ->
+            TProxyStartService(tproxyFile.absolutePath, fileDescriptor)
         } ?: run {
             Log.e(TAG, "tunFd is null after establish()")
             stopXray()
@@ -358,25 +579,91 @@ class TProxyService : VpnService() {
                     // Reload TProxy configuration by recreating the config file and restarting
                     serviceScope.launch {
                         try {
+                            // Check if we're stopping before proceeding
+                            if (isStopping) {
+                                Log.w(TAG, "Skipping TProxy reload - service is stopping")
+                                return@launch
+                            }
+                            
                             val tproxyFile = File(cacheDir, "tproxy.conf")
-                            if (tproxyFile.exists()) {
+                            if (!tproxyFile.exists()) {
+                                Log.w(TAG, "TProxy config file does not exist, skipping reload")
+                                return@launch
+                            }
+                            
+                            // Safely capture tunFd and fd in synchronized block to prevent race condition
+                            val fd: Int? = synchronized(tunFdLock) {
+                                // Double-check if we're stopping
+                                if (isStopping) {
+                                    Log.w(TAG, "Service stopping detected during tunFd access, aborting reload")
+                                    return@synchronized null
+                                }
+                                
+                                val currentTunFd = tunFd
+                                if (currentTunFd == null) {
+                                    Log.w(TAG, "tunFd is null, cannot reload TProxy")
+                                    return@synchronized null
+                                }
+                                
+                                try {
+                                    currentTunFd.fd
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Error accessing tunFd.fd: ${e.message}", e)
+                                    null
+                                }
+                            }
+                            
+                            if (fd == null) {
+                                Log.w(TAG, "Could not get valid file descriptor, skipping TProxy reload")
+                                return@launch
+                            }
+                            
+                            // Update config file with synchronized access
+                            try {
                                 FileOutputStream(tproxyFile, false).use { fos ->
                                     val tproxyConf = getTproxyConf(prefs)
                                     fos.write(tproxyConf.toByteArray())
+                                    fos.flush()
                                 }
                                 Log.i(TAG, "TProxy configuration file updated with AI-optimized settings")
-                                
-                                // Restart TProxy service to apply new configuration
-                                // This is necessary because hev-socks5-tunnel reads config at startup
-                                if (tunFd != null) {
-                                    Log.i(TAG, "Restarting TProxy service to apply AI-optimized configuration...")
-                                    val fd = tunFd!!.fd
-                                    TProxyStopService()
-                                    Thread.sleep(100) // Brief delay to ensure clean shutdown
-                                    TProxyStartService(tproxyFile.absolutePath, fd)
-                                    Log.i(TAG, "TProxy service restarted with AI-optimized configuration")
-                                }
+                            } catch (e: IOException) {
+                                Log.e(TAG, "Error writing TProxy config file: ${e.message}", e)
+                                return@launch
                             }
+                            
+                            // Check again if we're stopping before restarting TProxy
+                            if (isStopping) {
+                                Log.w(TAG, "Service stopping detected before TProxy restart, aborting")
+                                return@launch
+                            }
+                            
+                            // Restart TProxy service to apply new configuration
+                            // This is necessary because hev-socks5-tunnel reads config at startup
+                            try {
+                                Log.i(TAG, "Restarting TProxy service to apply AI-optimized configuration...")
+                                TProxyStopService()
+                                Thread.sleep(100) // Brief delay to ensure clean shutdown
+                                
+                                // Final check before starting
+                                if (isStopping) {
+                                    Log.w(TAG, "Service stopping detected after TProxy stop, aborting start")
+                                    return@launch
+                                }
+                                
+                                // Verify tunFd is still valid before using fd
+                                synchronized(tunFdLock) {
+                                    if (tunFd == null || isStopping) {
+                                        Log.w(TAG, "tunFd became null or service stopping, cannot restart TProxy")
+                                        return@launch
+                                    }
+                                }
+                                
+                                TProxyStartService(tproxyFile.absolutePath, fd)
+                                Log.i(TAG, "TProxy service restarted with AI-optimized configuration")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error restarting TProxy service: ${e.message}", e)
+                            }
+                            
                         } catch (e: Exception) {
                             Log.e(TAG, "Error updating TProxy configuration", e)
                         }
@@ -437,19 +724,43 @@ class TProxyService : VpnService() {
     }
 
     private fun stopService() {
-        // Stop AI optimizer before stopping service
+        Log.d(TAG, "stopService called, cleaning up VPN resources.")
+        
+        // Step 1: Stop AI optimizer before stopping service
         tproxyAiOptimizer?.stopOptimization()
         
-        tunFd?.let {
-            try {
-                it.close()
-            } catch (ignored: IOException) {
-            } finally {
-                tunFd = null
-            }
-            stopForeground(Service.STOP_FOREGROUND_REMOVE)
+        // Step 2: Stop native TProxy service first
+        try {
             TProxyStopService()
+            Log.d(TAG, "Native TProxy service stopped.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping native TProxy service", e)
         }
+        
+        // Step 3: Close TUN file descriptor (VPN interface) with synchronization
+        synchronized(tunFdLock) {
+            tunFd?.let { fd ->
+                try {
+                    Log.d(TAG, "Closing TUN file descriptor.")
+                    fd.close()
+                    Log.d(TAG, "TUN file descriptor closed.")
+                } catch (e: IOException) {
+                    Log.e(TAG, "Error closing TUN file descriptor", e)
+                } finally {
+                    tunFd = null
+                }
+            }
+        }
+        
+        // Step 4: Stop foreground service
+        try {
+            stopForeground(Service.STOP_FOREGROUND_REMOVE)
+            Log.d(TAG, "Foreground service stopped.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping foreground service", e)
+        }
+        
+        // Step 5: Exit the service
         exit()
     }
     

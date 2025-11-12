@@ -92,7 +92,46 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
     }
 
     override fun close() {
-        channel.shutdown().awaitTermination(5, TimeUnit.SECONDS)
+        try {
+            // Initiate graceful shutdown
+            channel.shutdown()
+            
+            // Wait for graceful shutdown with timeout
+            val terminated = channel.awaitTermination(5, TimeUnit.SECONDS)
+            
+            if (!terminated) {
+                // Graceful shutdown timed out, force shutdown
+                Log.w("CoreStatsClient", "Channel graceful shutdown timed out, forcing shutdown now.")
+                channel.shutdownNow()
+                
+                // Wait for forced shutdown with another timeout
+                val forceTerminated = channel.awaitTermination(2, TimeUnit.SECONDS)
+                if (!forceTerminated) {
+                    Log.e("CoreStatsClient", "Channel force shutdown also timed out. Channel may not be fully closed.")
+                } else {
+                    Log.d("CoreStatsClient", "Channel force shutdown completed successfully.")
+                }
+            } else {
+                Log.d("CoreStatsClient", "Channel graceful shutdown completed successfully.")
+            }
+        } catch (e: InterruptedException) {
+            Log.e("CoreStatsClient", "Channel shutdown interrupted, forcing shutdown now.", e)
+            Thread.currentThread().interrupt()
+            try {
+                channel.shutdownNow()
+                channel.awaitTermination(2, TimeUnit.SECONDS)
+            } catch (ex: Exception) {
+                Log.e("CoreStatsClient", "Error during forced channel shutdown", ex)
+            }
+        } catch (e: Exception) {
+            Log.e("CoreStatsClient", "Error during channel shutdown", e)
+            // Try to force shutdown as last resort
+            try {
+                channel.shutdownNow()
+            } catch (ex: Exception) {
+                Log.e("CoreStatsClient", "Error during emergency channel shutdown", ex)
+            }
+        }
     }
 
     companion object {
