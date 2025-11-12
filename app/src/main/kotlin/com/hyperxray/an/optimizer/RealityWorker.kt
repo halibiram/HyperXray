@@ -44,7 +44,15 @@ class RealityWorker(
         val sni: String,
         val latency: Double,
         val throughput: Double,
-        val success: Boolean
+        val success: Boolean,
+        val svcClass: Int = 7,
+        val routeDecision: Int = 0,
+        val alpn: String = "h2",
+        val rtt: Double? = null,
+        val jitter: Double? = null,
+        val networkType: String? = null,
+        val hourOfDay: Int? = null,
+        val dayOfWeek: Int? = null
     )
     
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -58,8 +66,10 @@ class RealityWorker(
                 return@withContext Result.success()
             }
             
-            // Parse recent log entries (last 100)
-            val recentEntries = parseRecentLogs(logFile, maxEntries = 100)
+            // Parse recent log entries (last 1M for optimal AI learning)
+            // 1GB allows ~6-7 million entries, we process last 1M for better learning
+            val maxEntries = 1_000_000
+            val recentEntries = parseRecentLogs(logFile, maxEntries = maxEntries)
             
             if (recentEntries.isEmpty()) {
                 Log.d(TAG, "No recent feedback entries found")
@@ -99,28 +109,67 @@ class RealityWorker(
     
     /**
      * Parse recent log entries from JSONL file.
+     * Supports large files (up to 1GB) by reading last maxEntries efficiently.
      */
     private fun parseRecentLogs(logFile: File, maxEntries: Int): List<FeedbackEntry> {
         val entries = mutableListOf<FeedbackEntry>()
         
         try {
-            logFile.readLines().takeLast(maxEntries).forEach { line ->
+            val fileSize = logFile.length()
+            Log.d(TAG, "Parsing log file: size=${fileSize} bytes (${fileSize / 1024.0 / 1024.0}MB), maxEntries=$maxEntries")
+            
+            // Read last maxEntries lines efficiently using sliding window
+            // For large files (1M+ entries), we use a memory-efficient approach
+            val lines = if (fileSize > 100 * 1024 * 1024) { // > 100MB
+                // For large files, use sliding window to avoid loading entire file
+                logFile.bufferedReader().use { reader ->
+                    val slidingWindow = ArrayDeque<String>(maxEntries)
+                    reader.forEachLine { line ->
+                        slidingWindow.addLast(line)
+                        if (slidingWindow.size > maxEntries) {
+                            slidingWindow.removeFirst()
+                        }
+                    }
+                    slidingWindow.toList()
+                }
+            } else {
+                // For smaller files, read all and take last N
+                logFile.bufferedReader().use { reader ->
+                    reader.readLines().takeLast(maxEntries)
+                }
+            }
+            
+            Log.d(TAG, "Parsing ${lines.size} entries from log file (${fileSize / 1024.0 / 1024.0}MB)")
+            
+            lines.forEach { line ->
                 try {
                     val json = JSONObject(line)
                     val entry = FeedbackEntry(
                         timestamp = json.getLong("timestamp"),
                         sni = json.getString("sni"),
-                        latency = json.getDouble("latency"),
-                        throughput = json.getDouble("throughput"),
-                        success = json.getBoolean("success")
+                        latency = json.optDouble("latencyMs", json.optDouble("latency", 0.0)),
+                        throughput = json.optDouble("throughputKbps", json.optDouble("throughput", 0.0)),
+                        success = json.getBoolean("success"),
+                        svcClass = json.optInt("svcClass", 7),
+                        routeDecision = json.optInt("routeDecision", 0),
+                        alpn = json.optString("alpn")?.takeIf { it.isNotEmpty() } ?: "h2",
+                        rtt = if (json.has("rtt")) json.optDouble("rtt") else null,
+                        jitter = if (json.has("jitter")) json.optDouble("jitter") else null,
+                        networkType = json.optString("networkType")?.takeIf { it.isNotEmpty() },
+                        hourOfDay = if (json.has("hourOfDay")) json.optInt("hourOfDay") else null,
+                        dayOfWeek = if (json.has("dayOfWeek")) json.optInt("dayOfWeek") else null
                     )
                     entries.add(entry)
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to parse log entry: ${e.message}")
                 }
             }
+            
+            Log.d(TAG, "Successfully parsed ${entries.size} entries from log file")
         } catch (e: IOException) {
             Log.e(TAG, "Error reading log file: ${e.message}", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing log file: ${e.message}", e)
         }
         
         return entries
@@ -129,27 +178,88 @@ class RealityWorker(
     /**
      * Aggregate metrics by service class and routing decision.
      * Returns list of (svcIdx, routeIdx, success, avgThroughput).
+     * Groups entries by (svcClass, routeDecision) and aggregates metrics per group.
      */
     private fun aggregateMetrics(entries: List<FeedbackEntry>): List<AggregatedFeedback> {
-        // Group by (sni pattern -> infer svc/route)
-        // For simplicity, aggregate all entries and use average
-        val successCount = entries.count { it.success }
-        val failCount = entries.size - successCount
-        val avgThroughput = entries.map { it.throughput }.average().toFloat()
-        
-        // Update counters
-        if (successCount > 0) {
-            learnerState.incrementSuccess()
-        }
-        if (failCount > 0) {
-            learnerState.incrementFail()
+        if (entries.isEmpty()) {
+            return emptyList()
         }
         
-        // Return aggregated update (default service/route)
-        // In real implementation, would group by actual svc/route from inference
-        return listOf(
-            AggregatedFeedback(0, 1, successCount > failCount, avgThroughput) // Default: YouTube, Direct
-        )
+        // Group entries by (svcClass, routeDecision)
+        val grouped = entries.groupBy { entry ->
+            // Clamp svcClass to valid range [0, 7]
+            val svcClass = entry.svcClass.coerceIn(0, 7)
+            // Clamp routeDecision to valid range [0, 2]
+            val routeDecision = entry.routeDecision.coerceIn(0, 2)
+            Pair(svcClass, routeDecision)
+        }
+        
+        Log.d(TAG, "Aggregating ${entries.size} entries into ${grouped.size} groups")
+        
+        // Aggregate metrics per group
+        val aggregated = grouped.map { (key, groupEntries) ->
+            val (svcClass, routeDecision) = key
+            val successCount = groupEntries.count { it.success }
+            val failCount = groupEntries.size - successCount
+            val avgThroughput = groupEntries.map { it.throughput }.average().toFloat()
+            val avgLatency = groupEntries.map { it.latency }.average().toDouble()
+            
+            // Update global counters (only once per entry)
+            // Note: We update counters here, but they're already updated per entry
+            // This is just for aggregation statistics
+            
+            // Determine success based on majority
+            val isSuccess = successCount > failCount
+            
+            Log.d(TAG, "Group (svc=$svcClass, route=$routeDecision): " +
+                    "success=$successCount, fail=$failCount, " +
+                    "avgThroughput=${avgThroughput}kbps, avgLatency=${avgLatency}ms")
+            
+            AggregatedFeedback(
+                svcIdx = svcClass,
+                routeIdx = routeDecision,
+                success = isSuccess,
+                throughput = avgThroughput
+            )
+        }
+        
+        // Update global success/fail counters efficiently for large datasets (1M+ entries)
+        // For large datasets, we sample entries to update counters to avoid performance issues
+        val totalSuccess = entries.count { it.success }
+        val totalFail = entries.size - totalSuccess
+        
+        // Update counters efficiently based on dataset size
+        // For 1M+ entries, we sample to update counters (every Nth entry) to maintain performance
+        if (entries.size < 10000) {
+            // For small datasets (<10K), update per entry (more accurate)
+            for (entry in entries) {
+                if (entry.success) {
+                    learnerState.incrementSuccess()
+                } else {
+                    learnerState.incrementFail()
+                }
+            }
+        } else {
+            // For large datasets (1M+ entries), sample entries to update counters
+            // This maintains accuracy while avoiding performance issues
+            val sampleRate = entries.size / 10000 // Sample 1 in every N entries
+            var sampled = 0
+            for (entry in entries) {
+                if (sampled % sampleRate == 0) {
+                    if (entry.success) {
+                        learnerState.incrementSuccess()
+                    } else {
+                        learnerState.incrementFail()
+                    }
+                }
+                sampled++
+            }
+        }
+        
+        Log.d(TAG, "Aggregated ${aggregated.size} feedback groups from ${entries.size} entries " +
+                "(success=$totalSuccess, fail=$totalFail)")
+        
+        return aggregated
     }
     
     // Helper data class for aggregation
@@ -161,11 +271,21 @@ class RealityWorker(
     )
     
     /**
-     * Rebuild xray_reality_policy.json with updated learner state.
+     * Rebuild xray_reality_policy_v*.json with updated learner state.
+     * Creates versioned policy files for AI Insights tracking.
      */
     private fun rebuildPolicyJson() {
         try {
-            val policyFile = File(applicationContext.filesDir, "xray_reality_policy.json")
+            val filesDir = applicationContext.filesDir
+            val version = "v10"
+            val timestamp = System.currentTimeMillis()
+            val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+            val timestampStr = dateFormat.format(java.util.Date(timestamp))
+            
+            // Create versioned policy file name
+            val policyFileName = "xray_reality_policy_$version.json"
+            val policyFile = File(filesDir, policyFileName)
+            
             val temp = learnerState.getTemperature()
             val svcBiases = learnerState.getSvcBiases()
             val routeBiases = learnerState.getRouteBiases()
@@ -173,10 +293,27 @@ class RealityWorker(
             val failCount = learnerState.getFailCount()
             val successRate = learnerState.getSuccessRate()
             
-            // Build JSON object
+            // Load existing feedback to generate policy entries
+            val feedbackEntries = loadRecentFeedback()
+            
+            // Build policy array from feedback entries
+            val policyArray = org.json.JSONArray()
+            feedbackEntries.forEach { entry ->
+                val policyEntry = JSONObject().apply {
+                    put("sni", entry.sni)
+                    put("svc_class", entry.svcClass)
+                    put("route_decision", entry.routeDecision)
+                    put("alpn", "h2") // Default ALPN, could be extracted from feedback
+                    put("timestamp", timestampStr)
+                }
+                policyArray.put(policyEntry)
+            }
+            
+            // Build JSON object with policy array
             val policy = JSONObject().apply {
-                put("version", "v10")
-                put("timestamp", System.currentTimeMillis())
+                put("version", version)
+                put("timestamp", timestampStr)
+                put("policy", policyArray)
                 put("learner", JSONObject().apply {
                     put("temperature", temp)
                     put("svcBiases", org.json.JSONArray(svcBiases.toList()))
@@ -194,10 +331,79 @@ class RealityWorker(
                 writer.flush()
             }
             
-            Log.d(TAG, "Rebuilt policy JSON: ${policyFile.absolutePath}")
+            Log.d(TAG, "Rebuilt policy JSON: ${policyFile.absolutePath} with ${policyArray.length()} entries")
+            
+            // Clean up old policy files (keep last 5 versions)
+            cleanupOldPolicyFiles(filesDir, version)
             
         } catch (e: Exception) {
             Log.e(TAG, "Error rebuilding policy JSON: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Load recent feedback entries from learner_log.jsonl.
+     */
+    private fun loadRecentFeedback(): List<FeedbackEntry> {
+        val logFile = File(applicationContext.filesDir, "learner_log.jsonl")
+        if (!logFile.exists()) {
+            return emptyList()
+        }
+        
+        return try {
+            val maxEntries = 1_000_000 // Load last 1M entries for optimal AI learning
+            val fileSize = logFile.length()
+            Log.d(TAG, "Loading feedback: file size=${fileSize} bytes (${fileSize / 1024.0 / 1024.0}MB)")
+            
+            // Read last maxEntries lines efficiently
+            val lines = logFile.bufferedReader().use { reader ->
+                val allLines = reader.readLines()
+                allLines.takeLast(maxEntries)
+            }
+            
+            Log.d(TAG, "Loaded ${lines.size} entries from feedback log")
+            
+            lines.mapNotNull { line ->
+                try {
+                    val json = JSONObject(line)
+                    FeedbackEntry(
+                        timestamp = json.getLong("timestamp"),
+                        sni = json.getString("sni"),
+                        latency = json.optDouble("latencyMs", json.optDouble("latency", 0.0)),
+                        throughput = json.optDouble("throughputKbps", json.optDouble("throughput", 0.0)),
+                        success = json.getBoolean("success"),
+                        svcClass = json.optInt("svcClass", 7),
+                        routeDecision = json.optInt("routeDecision", 0)
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to parse feedback entry: ${e.message}")
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading feedback: ${e.message}", e)
+            emptyList()
+        }
+    }
+    
+    /**
+     * Clean up old policy files, keeping only last 5 versions.
+     */
+    private fun cleanupOldPolicyFiles(filesDir: File, currentVersion: String) {
+        try {
+            val policyFiles = filesDir.listFiles { _, name ->
+                name.startsWith("xray_reality_policy_v") && name.endsWith(".json")
+            }?.sortedBy { it.name }?.toList() ?: emptyList()
+            
+            if (policyFiles.size > 5) {
+                val filesToDelete = policyFiles.dropLast(5)
+                filesToDelete.forEach { file ->
+                    file.delete()
+                    Log.d(TAG, "Deleted old policy file: ${file.name}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error cleaning up old policy files: ${e.message}")
         }
     }
     

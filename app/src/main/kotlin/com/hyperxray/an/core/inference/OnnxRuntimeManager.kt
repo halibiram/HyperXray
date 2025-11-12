@@ -10,7 +10,7 @@ import java.io.IOException
 /**
  * OnnxRuntimeManager: Manages ONNX model loading and inference for TLS SNI optimization.
  * 
- * Loads tls_sni_optimizer_v2.onnx from assets and provides inference capabilities
+ * Loads tls_sni_optimizer_v9.onnx from assets and provides inference capabilities
  * for routing decisions based on TLS features.
  * 
  * Model I/O:
@@ -20,7 +20,7 @@ import java.io.IOException
  */
 object OnnxRuntimeManager {
     private const val TAG = "OnnxRuntimeManager"
-    private const val MODEL_PATH = "tls_sni_optimizer_v2.onnx"
+    private const val MODEL_PATH = "tls_sni_optimizer_v9.onnx"
     
     private lateinit var env: OrtEnvironment
     private var session: OrtSession? = null

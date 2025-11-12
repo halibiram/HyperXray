@@ -33,13 +33,15 @@ object SniFeatureEncoder {
      * @param alpn The ALPN protocol (default: "h2")
      * @param latencyMs Optional latency in milliseconds (for normalization)
      * @param throughputKbps Optional throughput in kbps (for normalization)
+     * @param timestamp Optional timestamp for temporal features (milliseconds since epoch)
      * @return 32-element float array
      */
     fun encode(
         sni: String, 
         alpn: String = "h2",
         latencyMs: Double? = null,
-        throughputKbps: Double? = null
+        throughputKbps: Double? = null,
+        timestamp: Long? = null
     ): FloatArray {
         if (sni.isEmpty()) {
             Log.w(TAG, "Empty SNI provided, using default features")
@@ -103,7 +105,26 @@ object SniFeatureEncoder {
             // Feature 11: ClientHello length (normalized, approximation)
             val chLen = (domainLength / 200f).coerceIn(0f, 1f)
             
-            // Build feature vector with first 11 features
+            // Feature 12: Hour of day (0-23, normalized to 0-1)
+            val hourOfDay = if (timestamp != null) {
+                val calendar = java.util.Calendar.getInstance()
+                calendar.timeInMillis = timestamp
+                (calendar.get(java.util.Calendar.HOUR_OF_DAY) / 23f).coerceIn(0f, 1f)
+            } else {
+                0.5f // Default middle value (noon)
+            }
+            
+            // Feature 13: Day of week (1-7, normalized to 0-1)
+            val dayOfWeek = if (timestamp != null) {
+                val calendar = java.util.Calendar.getInstance()
+                calendar.timeInMillis = timestamp
+                // Calendar.DAY_OF_WEEK: 1=Sunday, 7=Saturday
+                ((calendar.get(java.util.Calendar.DAY_OF_WEEK) - 1) / 6f).coerceIn(0f, 1f)
+            } else {
+                0.5f // Default middle value (Wednesday)
+            }
+            
+            // Build feature vector with first 13 features (expanded from 11)
             val vec = mutableListOf<Float>(
                 lenNorm,         // 0: domain length
                 dotsNorm,        // 1: dots count
@@ -116,7 +137,9 @@ object SniFeatureEncoder {
                 throughputNorm,  // 8: throughput normalization
                 cipherDiv,       // 9: cipher diversity
                 extCount,        // 10: extension count
-                chLen            // 11: ClientHello length
+                chLen,           // 11: ClientHello length
+                hourOfDay,       // 12: hour of day (temporal)
+                dayOfWeek        // 13: day of week (temporal)
             )
             
             // Pad to 32 elements with deterministic values (same as Colab)

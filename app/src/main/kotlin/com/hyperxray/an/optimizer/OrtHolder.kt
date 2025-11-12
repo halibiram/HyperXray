@@ -110,6 +110,9 @@ object OrtHolder {
                 val routingDecisionValue = routingDecisionTensor.value
                 val routingDecisionArray = parseOutputArray(routingDecisionValue, 3)
                 
+                // Log raw ONNX output for debugging
+                Log.d(TAG, "Raw routingDecisionArray from ONNX: [${routingDecisionArray.joinToString(", ")}]")
+                
                 inputTensor.close()
                 outputs.close()
                 
@@ -132,13 +135,49 @@ object OrtHolder {
     private fun parseOutputArray(value: Any?, expectedSize: Int): FloatArray {
         return when (value) {
             is Array<*> -> {
-                (value[0] as? FloatArray) ?: 
-                (value[0] as? Array<*>)?.map { (it as? Number)?.toFloat() ?: 0f }?.toFloatArray() ?:
-                FloatArray(expectedSize) { 0f }
+                // Handle nested arrays: Array<Array<Float>> or Array<FloatArray>
+                val result = when {
+                    value[0] is FloatArray -> (value[0] as FloatArray)
+                    value[0] is Array<*> -> {
+                        (value[0] as Array<*>).map { (it as? Number)?.toFloat() ?: 0f }.toFloatArray()
+                    }
+                    else -> {
+                        // Try to extract from first element
+                        value.mapNotNull { (it as? Number)?.toFloat() }.toFloatArray()
+                    }
+                }
+                
+                // Ensure correct size
+                if (result.size == expectedSize) {
+                    result
+                } else if (result.size > expectedSize) {
+                    result.take(expectedSize).toFloatArray()
+                } else {
+                    // Pad with zeros if smaller
+                    val padded = FloatArray(expectedSize) { i ->
+                        if (i < result.size) result[i] else 0f
+                    }
+                    Log.w(TAG, "ONNX output size mismatch: expected=$expectedSize, got=${result.size}, padded to $expectedSize")
+                    padded
+                }
             }
-            is FloatArray -> value
+            is FloatArray -> {
+                // Ensure correct size
+                if (value.size == expectedSize) {
+                    value
+                } else if (value.size > expectedSize) {
+                    value.take(expectedSize).toFloatArray()
+                } else {
+                    // Pad with zeros if smaller
+                    val padded = FloatArray(expectedSize) { i ->
+                        if (i < value.size) value[i] else 0f
+                    }
+                    Log.w(TAG, "ONNX output size mismatch: expected=$expectedSize, got=${value.size}, padded to $expectedSize")
+                    padded
+                }
+            }
             else -> {
-                Log.w(TAG, "Unexpected output type: ${value?.javaClass}")
+                Log.w(TAG, "Unexpected output type: ${value?.javaClass}, value: $value")
                 FloatArray(expectedSize) { 0f }
             }
         }

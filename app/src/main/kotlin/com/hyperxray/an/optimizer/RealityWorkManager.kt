@@ -38,7 +38,11 @@ class RealityWorkManager(
         val routeDecision: Int,
         val success: Boolean,
         val latencyMs: Float,
-        val throughputKbps: Float
+        val throughputKbps: Float,
+        val alpn: String = "h2",
+        val rtt: Double? = null,
+        val jitter: Double? = null,
+        val networkType: String? = null
     )
     
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -52,8 +56,9 @@ class RealityWorkManager(
                 return@withContext Result.success()
             }
             
-            // Parse recent log entries
-            val recentEntries = parseRecentLogs(logFile, maxEntries = 100)
+            // Parse recent log entries (last 10K for worker performance)
+            // Full 1M entries are processed in RealityWorker for policy generation
+            val recentEntries = parseRecentLogs(logFile, maxEntries = 10_000)
             
             if (recentEntries.isEmpty()) {
                 Log.d(TAG, "No recent feedback entries found")
@@ -95,11 +100,15 @@ class RealityWorkManager(
                     val entry = FeedbackLogEntry(
                         timestamp = json.getLong("timestamp"),
                         sni = json.getString("sni"),
-                        svcClass = json.getInt("svcClass"),
-                        routeDecision = json.getInt("routeDecision"),
+                        svcClass = json.optInt("svcClass", 7),
+                        routeDecision = json.optInt("routeDecision", 0),
                         success = json.getBoolean("success"),
-                        latencyMs = json.getDouble("latencyMs").toFloat(),
-                        throughputKbps = json.getDouble("throughputKbps").toFloat()
+                        latencyMs = json.optDouble("latencyMs", json.optDouble("latency", 0.0)).toFloat(),
+                        throughputKbps = json.optDouble("throughputKbps", json.optDouble("throughput", 0.0)).toFloat(),
+                        alpn = json.optString("alpn")?.takeIf { it.isNotEmpty() } ?: "h2",
+                        rtt = if (json.has("rtt")) json.optDouble("rtt") else null,
+                        jitter = if (json.has("jitter")) json.optDouble("jitter") else null,
+                        networkType = json.optString("networkType")?.takeIf { it.isNotEmpty() }
                     )
                     entries.add(entry)
                 } catch (e: Exception) {

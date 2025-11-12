@@ -18,6 +18,18 @@ object LearnerLogger {
     
     /**
      * Log a feedback event.
+     * 
+     * @param context Android context
+     * @param sni Server Name Indication
+     * @param svcClass Service class (0-7)
+     * @param routeDecision Routing decision (0=Proxy, 1=Direct, 2=Optimized)
+     * @param success Whether the connection was successful
+     * @param latencyMs Latency in milliseconds
+     * @param throughputKbps Throughput in kbps
+     * @param alpn ALPN protocol (default: "h2")
+     * @param rtt Round-trip time in milliseconds (optional)
+     * @param jitter Jitter (RTT variance) in milliseconds (optional)
+     * @param networkType Network type (WiFi/4G/5G, optional)
      */
     fun logFeedback(
         context: Context,
@@ -26,7 +38,11 @@ object LearnerLogger {
         routeDecision: Int,
         success: Boolean,
         latencyMs: Float,
-        throughputKbps: Float
+        throughputKbps: Float,
+        alpn: String = "h2",
+        rtt: Double? = null,
+        jitter: Double? = null,
+        networkType: String? = null
     ) {
         try {
             val logFile = File(context.filesDir, LOG_FILE_NAME)
@@ -34,27 +50,54 @@ object LearnerLogger {
             // Redact SNI for privacy (keep only domain structure)
             val redactedSni = redactSni(sni)
             
+            // Get current timestamp
+            val timestamp = System.currentTimeMillis()
+            
+            // Extract temporal features from timestamp
+            val calendar = java.util.Calendar.getInstance()
+            calendar.timeInMillis = timestamp
+            val hourOfDay = calendar.get(java.util.Calendar.HOUR_OF_DAY) // 0-23
+            val dayOfWeek = calendar.get(java.util.Calendar.DAY_OF_WEEK) // 1-7 (Sunday=1)
+            
             // Append to JSONL file
             FileWriter(logFile, true).use { writer ->
                 val json = JSONObject().apply {
-                    put("timestamp", System.currentTimeMillis())
+                    put("timestamp", timestamp)
                     put("sni", redactedSni)
                     put("svcClass", svcClass)
                     put("routeDecision", routeDecision)
                     put("success", success)
                     put("latencyMs", latencyMs)
                     put("throughputKbps", throughputKbps)
+                    put("alpn", alpn)
+                    
+                    // Temporal features
+                    put("hourOfDay", hourOfDay)
+                    put("dayOfWeek", dayOfWeek)
+                    
+                    // Network context (optional)
+                    if (rtt != null) {
+                        put("rtt", rtt)
+                    }
+                    if (jitter != null) {
+                        put("jitter", jitter)
+                    }
+                    if (networkType != null) {
+                        put("networkType", networkType)
+                    }
                 }
                 writer.appendLine(json.toString())
                 writer.flush()
             }
             
-            // Rotate log if too large (10MB)
-            if (logFile.length() > 10 * 1024 * 1024) {
+            // Rotate log if too large (1GB)
+            val maxLogSize = 1024L * 1024L * 1024L // 1GB
+            if (logFile.length() > maxLogSize) {
                 rotateLog(logFile)
+                Log.i(TAG, "Log file exceeded 1GB limit, rotated to archive")
             }
             
-            Log.d(TAG, "Logged feedback: sni=$redactedSni, svc=$svcClass, route=$routeDecision")
+            Log.d(TAG, "Logged feedback: sni=$redactedSni, svc=$svcClass, route=$routeDecision, alpn=$alpn, rtt=$rtt, jitter=$jitter, networkType=$networkType")
             
         } catch (e: IOException) {
             Log.e(TAG, "Error writing log entry: ${e.message}", e)

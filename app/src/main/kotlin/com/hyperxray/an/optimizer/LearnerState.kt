@@ -25,6 +25,10 @@ class LearnerState(context: Context) {
     // Default values
     private val DEFAULT_TEMPERATURE = 1.0f
     private val DEFAULT_BIAS = 0.0f
+    // Give route decision 2 (optimized) a very large positive initial bias to encourage exploration
+    // ONNX model gives route 2 very low scores (-1.8 to -2.0), so we need a very strong bias
+    // With 10x scaling, 0.6 bias = 6.0 logit boost, which should make route 2 competitive or preferred
+    private val DEFAULT_ROUTE_BIAS_OPTIMIZED = 0.6f
     
     // Keys
     private val KEY_TEMPERATURE = "temperature"
@@ -51,11 +55,27 @@ class LearnerState(context: Context) {
     
     /**
      * Get routing decision biases (3 elements).
+     * Route decision 2 (optimized) gets a larger positive initial bias to encourage exploration.
+     * Migration: If route_bias_2 is < 0.2 (too low), automatically boost it to encourage exploration.
      */
     fun getRouteBiases(): FloatArray {
-        return FloatArray(3) { i ->
-            prefs.getFloat("$KEY_ROUTE_BIAS_PREFIX$i", DEFAULT_BIAS)
+        val biases = FloatArray(3) { i ->
+            val defaultValue = if (i == 2) DEFAULT_ROUTE_BIAS_OPTIMIZED else DEFAULT_BIAS
+            val currentBias = prefs.getFloat("$KEY_ROUTE_BIAS_PREFIX$i", defaultValue)
+            currentBias
         }
+        
+        // Migration: If route_bias_2 is < 0.55 (too low), boost it to encourage exploration
+        // This fixes the chicken-egg problem where route 2 never gets selected because bias is too low
+        // ONNX model gives route 2 very low scores (-1.8 to -2.0), so we need a very strong initial bias
+        // With 10x scaling, 0.6 bias = 6.0 logit boost, which should make route 2 competitive or preferred
+        if (biases[2] < 0.55f) {
+            Log.i(TAG, "Route bias 2 is ${biases[2]}, migrating to ${DEFAULT_ROUTE_BIAS_OPTIMIZED} to encourage exploration")
+            updateRouteBias(2, DEFAULT_ROUTE_BIAS_OPTIMIZED)
+            biases[2] = DEFAULT_ROUTE_BIAS_OPTIMIZED
+        }
+        
+        return biases
     }
     
     /**
@@ -183,6 +203,7 @@ class LearnerState(context: Context) {
     
     /**
      * Reset all parameters to defaults.
+     * Route decision 2 (optimized) gets a small positive initial bias.
      */
     fun reset() {
         val editor = prefs.edit()
@@ -191,12 +212,13 @@ class LearnerState(context: Context) {
             editor.putFloat("$KEY_SVC_BIAS_PREFIX$i", DEFAULT_BIAS)
         }
         for (i in 0..2) {
-            editor.putFloat("$KEY_ROUTE_BIAS_PREFIX$i", DEFAULT_BIAS)
+            val defaultValue = if (i == 2) DEFAULT_ROUTE_BIAS_OPTIMIZED else DEFAULT_BIAS
+            editor.putFloat("$KEY_ROUTE_BIAS_PREFIX$i", defaultValue)
         }
         editor.putInt(KEY_SUCCESS_COUNT, 0)
         editor.putInt(KEY_FAIL_COUNT, 0)
         editor.apply()
-        Log.i(TAG, "Reset all learner parameters to defaults")
+        Log.i(TAG, "Reset all learner parameters to defaults (route_bias_2=${DEFAULT_ROUTE_BIAS_OPTIMIZED})")
     }
 }
 

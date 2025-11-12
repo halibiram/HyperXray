@@ -72,9 +72,11 @@ object FeedbackLogger {
                 learnerState.incrementFail()
             }
             
-            // Rotate log if too large (10MB)
-            if (logFile.length() > 10 * 1024 * 1024) {
+            // Rotate log if too large (1GB)
+            val maxLogSize = 1024L * 1024L * 1024L // 1GB
+            if (logFile.length() > maxLogSize) {
                 rotateLog(logFile)
+                Log.i(TAG, "Log file exceeded 1GB limit, rotated to archive")
             }
             
             Log.d(TAG, "Logged feedback: sni=$redactedSni, latency=${latency}ms, throughput=${throughput}kbps, success=$success")
