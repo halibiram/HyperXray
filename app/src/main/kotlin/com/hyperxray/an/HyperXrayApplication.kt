@@ -55,6 +55,16 @@ class HyperXrayApplication : Application() {
         applicationScope.launch {
             initializeOptimizer()
         }
+        
+        // Initialize TLS SNI Optimizer v5
+        applicationScope.launch {
+            initializeTlsSniOptimizer()
+        }
+        
+        // Initialize Auto-Learning TLS SNI Optimizer v9
+        applicationScope.launch {
+            initializeAutoLearningOptimizer()
+        }
     }
     
     /**
@@ -410,6 +420,41 @@ class HyperXrayApplication : Application() {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to create sample Reality arms", e)
             emptyList()
+        }
+    }
+    
+    /**
+     * Initialize TLS SNI Optimizer v5 components.
+     */
+    private suspend fun initializeTlsSniOptimizer() {
+        try {
+            Log.d(TAG, "Initializing TLS SNI Optimizer v5")
+            
+            // Schedule periodic work
+            com.hyperxray.an.workers.TlsRuntimeWorker.schedule(this)
+            
+            Log.i(TAG, "TLS SNI Optimizer v5 initialized")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize TLS SNI Optimizer v5: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Initialize Auto-Learning TLS SNI Optimizer v10 components.
+     */
+    private suspend fun initializeAutoLearningOptimizer() {
+        try {
+            Log.d(TAG, "Initializing Auto-Learning TLS SNI Optimizer v10")
+            
+            // Initialize OrtHolder
+            com.hyperxray.an.optimizer.OrtHolder.init(this)
+            
+            // Schedule periodic learning work (RealityWorker)
+            com.hyperxray.an.optimizer.RealityWorker.schedule(this)
+            
+            Log.i(TAG, "Auto-Learning TLS SNI Optimizer v10 initialized")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize Auto-Learning Optimizer v10: ${e.message}", e)
         }
     }
     
