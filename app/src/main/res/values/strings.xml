@@ -22,6 +22,18 @@
     <string name="configuration">Configuration</string>
     <string name="bypass_lan_title">Bypass LAN</string>
     <string name="bypass_lan_summary">When enabled, LAN traffic will not go through the proxy.</string>
+    <string name="bypass_domains_title">Bypass Domains</string>
+    <string name="bypass_domains_summary">Domains that will bypass VPN and use your original IP address. One domain per line.</string>
+    <string name="bypass_ips_title">Bypass IPs</string>
+    <string name="bypass_ips_summary">IP addresses that will bypass VPN and use your original IP address. One IP per line.</string>
+    <string name="add_domain">Add Domain</string>
+    <string name="add_ip">Add IP</string>
+    <string name="edit_domain">Edit Domain</string>
+    <string name="edit_ip">Edit IP</string>
+    <string name="domain_placeholder">example.com</string>
+    <string name="ip_placeholder">192.168.1.1</string>
+    <string name="invalid_domain">Invalid domain format</string>
+    <string name="invalid_ip">Invalid IP address format</string>
     <string name="use_template_title">Create new config from template</string>
     <string name="use_template_summary">When enabled, new configs will be pre-filled with template content.</string>
     <string name="vpn_interface">VPN Interface</string>
@@ -124,4 +136,5 @@
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
     <string name="auto">Auto</string>
+    <string name="vpn_disconnected">VPN Disconnected</string>
 </resources>
