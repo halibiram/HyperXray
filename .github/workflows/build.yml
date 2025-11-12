@@ -94,6 +94,24 @@ jobs:
           mkdir -p ../app/src/main/jniLibs/x86_64
           mv xray ../app/src/main/jniLibs/x86_64/libxray.so
 
+      - name: Set up Python for Model Training
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Train Policy Model
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip setuptools wheel
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install onnx onnxoptimizer tqdm numpy || true
+          mkdir -p app/src/main/assets/models
+          # Try to train model, but don't fail build if it fails
+          python tools/train_hyperxray_policy_loss02_gpu.py || echo "Model training failed, continuing with build..."
+        continue-on-error: true
+
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
