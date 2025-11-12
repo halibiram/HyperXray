@@ -177,11 +177,14 @@ class TelemetryStore(
             val rttP95Index = (sortedRtts.size * 0.95).toInt().coerceAtMost(sortedRtts.size - 1)
             val rttP95 = if (sortedRtts.isNotEmpty()) sortedRtts[rttP95Index] else 0.0
             
+            val avgLoss = losses.average()
+            android.util.Log.d("TelemetryStore", "getAggregated: sampleCount=${entries.size}, losses=${losses.takeLast(5)}, avgLoss=${avgLoss * 100}%")
+            
             AggregatedTelemetry(
                 avgThroughput = avgThroughput,
                 rttP95 = rttP95,
                 avgHandshakeTime = handshakeTimes.average(),
-                avgLoss = losses.average(),
+                avgLoss = avgLoss,
                 sampleCount = entries.size,
                 windowStart = entries.first().timestamp,
                 windowEnd = entries.last().timestamp
