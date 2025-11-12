@@ -207,11 +207,60 @@ class TProxyService : VpnService() {
             Log.d(TAG, "Attempting to start xray process.")
             val libraryDir = getNativeLibraryDir(applicationContext)
             val prefs = Preferences(applicationContext)
-            val selectedConfigPath = prefs.selectedConfigPath ?: return
+            if (libraryDir == null) {
+                val errorMessage = "Failed to get native library directory."
+                Log.e(TAG, errorMessage)
+                // Broadcast error to UI
+                val errorIntent = Intent(ACTION_ERROR)
+                errorIntent.setPackage(application.packageName)
+                errorIntent.putExtra(EXTRA_ERROR_MESSAGE, errorMessage)
+                sendBroadcast(errorIntent)
+                // Stop the service since we can't proceed without library directory
+                handler.post {
+                    if (!isStopping) {
+                        stopXray()
+                    }
+                }
+                return
+            }
+            val selectedConfigPath = prefs.selectedConfigPath
+            if (selectedConfigPath == null) {
+                val errorMessage = "No configuration file selected."
+                Log.e(TAG, errorMessage)
+                // Broadcast error to UI
+                val errorIntent = Intent(ACTION_ERROR)
+                errorIntent.setPackage(application.packageName)
+                errorIntent.putExtra(EXTRA_ERROR_MESSAGE, errorMessage)
+                sendBroadcast(errorIntent)
+                // Stop the service since we can't proceed without a config
+                handler.post {
+                    if (!isStopping) {
+                        stopXray()
+                    }
+                }
+                return
+            }
             // Use libxray.so directly with Android linker
             val xrayPath = "$libraryDir/libxray.so"
             val configContent = File(selectedConfigPath).readText()
-            val apiPort = findAvailablePort(extractPortsFromJson(configContent)) ?: return
+            val excludedPorts = extractPortsFromJson(configContent)
+            val apiPort = findAvailablePort(excludedPorts)
+            if (apiPort == null) {
+                val errorMessage = "Failed to find available port. All ports in range 10000-65535 are in use or excluded."
+                Log.e(TAG, errorMessage)
+                // Broadcast error to UI
+                val errorIntent = Intent(ACTION_ERROR)
+                errorIntent.setPackage(application.packageName)
+                errorIntent.putExtra(EXTRA_ERROR_MESSAGE, errorMessage)
+                sendBroadcast(errorIntent)
+                // Stop the service since we can't proceed without a port
+                handler.post {
+                    if (!isStopping) {
+                        stopXray()
+                    }
+                }
+                return
+            }
             prefs.apiPort = apiPort
             Log.d(TAG, "Found and set API port: $apiPort")
 
@@ -817,9 +866,11 @@ class TProxyService : VpnService() {
         const val ACTION_DISCONNECT: String = "com.hyperxray.an.DISCONNECT"
         const val ACTION_START: String = "com.hyperxray.an.START"
         const val ACTION_STOP: String = "com.hyperxray.an.STOP"
+        const val ACTION_ERROR: String = "com.hyperxray.an.ERROR"
         const val ACTION_LOG_UPDATE: String = "com.hyperxray.an.LOG_UPDATE"
         const val ACTION_RELOAD_CONFIG: String = "com.hyperxray.an.RELOAD_CONFIG"
         const val EXTRA_LOG_DATA: String = "log_data"
+        const val EXTRA_ERROR_MESSAGE: String = "error_message"
         private const val TAG = "VpnService"
         private const val BROADCAST_DELAY_MS: Long = 10
         private const val BROADCAST_BUFFER_SIZE_THRESHOLD: Int = 1

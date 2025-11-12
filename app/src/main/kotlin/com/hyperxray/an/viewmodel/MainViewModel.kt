@@ -42,6 +42,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Callback
@@ -84,6 +86,7 @@ class MainViewModel(application: Application) :
     private var compressedBackupData: ByteArray? = null
 
     private var coreStatsClient: CoreStatsClient? = null
+    private val coreStatsClientMutex = Mutex()
     
     // Throughput calculation state
     private var lastUplink: Long = 0L
@@ -210,8 +213,29 @@ class MainViewModel(application: Application) :
             lastUplink = 0L
             lastDownlink = 0L
             lastStatsTime = 0L
-            coreStatsClient?.close()
-            coreStatsClient = null
+            // Synchronize client closure to prevent race conditions
+            viewModelScope.launch {
+                coreStatsClientMutex.withLock {
+                    try {
+                        coreStatsClient?.close()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error closing coreStatsClient in stopReceiver", e)
+                    }
+                    coreStatsClient = null
+                }
+            }
+        }
+    }
+
+    private val errorReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val errorMessage = intent.getStringExtra(TProxyService.EXTRA_ERROR_MESSAGE)
+                ?: "An error occurred while starting the VPN service."
+            Log.e(TAG, "Service error: $errorMessage")
+            _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(errorMessage))
+            // Also stop the service state since it failed to start
+            setServiceEnabled(false)
+            setControlMenuClickable(true)
         }
     }
 
@@ -414,16 +438,65 @@ class MainViewModel(application: Application) :
 
     suspend fun updateCoreStats() {
         if (!_isServiceEnabled.value) return
-        if (coreStatsClient == null)
-            coreStatsClient = CoreStatsClient.create("127.0.0.1", prefs.apiPort)
-
-        val stats = coreStatsClient?.getSystemStats()
-        val traffic = coreStatsClient?.getTraffic()
+        
+        // Synchronize access to coreStatsClient to prevent race conditions
+        val client = coreStatsClientMutex.withLock {
+            // Double-check pattern: create client if needed
+            if (coreStatsClient == null) {
+                try {
+                    coreStatsClient = CoreStatsClient.create("127.0.0.1", prefs.apiPort)
+                    Log.d(TAG, "Created new CoreStatsClient")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to create CoreStatsClient", e)
+                    return
+                }
+            }
+            coreStatsClient
+        }
+        
+        // Use the client reference outside the lock to avoid holding lock during I/O
+        val stats = try {
+            client?.getSystemStats()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting system stats", e)
+            // If client is closed or invalid, close it and return
+            coreStatsClientMutex.withLock {
+                try {
+                    coreStatsClient?.close()
+                } catch (closeException: Exception) {
+                    Log.w(TAG, "Error closing client", closeException)
+                }
+                coreStatsClient = null
+            }
+            return
+        }
+        
+        val traffic = try {
+            client?.getTraffic()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting traffic stats", e)
+            // If client is closed or invalid, close it and return
+            coreStatsClientMutex.withLock {
+                try {
+                    coreStatsClient?.close()
+                } catch (closeException: Exception) {
+                    Log.w(TAG, "Error closing client", closeException)
+                }
+                coreStatsClient = null
+            }
+            return
+        }
 
         if (stats == null && traffic == null) {
             Log.w(TAG, "Both stats and traffic are null, closing client")
-            coreStatsClient?.close()
-            coreStatsClient = null
+            coreStatsClientMutex.withLock {
+                try {
+                    coreStatsClient?.close()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error closing client", e)
+                }
+                coreStatsClient = null
+            }
             return
         }
 
@@ -1339,6 +1412,18 @@ class MainViewModel(application: Application) :
             @Suppress("UnspecifiedRegisterReceiverFlag")
             application.registerReceiver(stopReceiver, stopSuccessFilter)
         }
+
+        val errorFilter = IntentFilter(TProxyService.ACTION_ERROR)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            application.registerReceiver(
+                errorReceiver,
+                errorFilter,
+                Context.RECEIVER_NOT_EXPORTED
+            )
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            application.registerReceiver(errorReceiver, errorFilter)
+        }
         Log.d(TAG, "TProxyService receivers registered.")
     }
 
@@ -1346,6 +1431,7 @@ class MainViewModel(application: Application) :
         val application = application
         application.unregisterReceiver(startReceiver)
         application.unregisterReceiver(stopReceiver)
+        application.unregisterReceiver(errorReceiver)
         Log.d(TAG, "TProxyService receivers unregistered.")
     }
 

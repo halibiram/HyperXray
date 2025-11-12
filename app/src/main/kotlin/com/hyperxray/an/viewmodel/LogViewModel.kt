@@ -57,6 +57,10 @@ class LogViewModel(application: Application) :
     private val _hasLogsToExport = MutableStateFlow(false)
     val hasLogsToExport: StateFlow<Boolean> = _hasLogsToExport.asStateFlow()
 
+    // Maximum number of log entries to keep in memory to prevent unbounded growth
+    // When limit is reached, oldest entries are automatically removed
+    private val MAX_LOG_ENTRIES = 10000
+    
     private val logEntrySet: MutableSet<String> = Collections.synchronizedSet(HashSet())
     private val logMutex = Mutex()
 
@@ -136,7 +140,17 @@ class LogViewModel(application: Application) :
     private suspend fun processInitialLogs(initialLogs: List<String>) {
         logMutex.withLock {
             logEntrySet.clear()
-            _logEntries.value = initialLogs.filter { logEntrySet.add(it) }.reversed()
+            val uniqueLogs = initialLogs.filter { logEntrySet.add(it) }.reversed()
+            // Trim to max size if needed
+            _logEntries.value = if (uniqueLogs.size > MAX_LOG_ENTRIES) {
+                val trimmed = uniqueLogs.take(MAX_LOG_ENTRIES)
+                // Remove trimmed entries from set to keep them in sync
+                val removedEntries = uniqueLogs.drop(MAX_LOG_ENTRIES)
+                removedEntries.forEach { logEntrySet.remove(it) }
+                trimmed
+            } else {
+                uniqueLogs
+            }
         }
         Log.d(TAG, "Processed initial logs: ${_logEntries.value.size} unique entries.")
     }
@@ -145,11 +159,28 @@ class LogViewModel(application: Application) :
         val uniqueNewLogs = logMutex.withLock {
             newLogs.filter { it.trim().isNotEmpty() && logEntrySet.add(it) }
         }
+        
         if (uniqueNewLogs.isNotEmpty()) {
             withContext(Dispatchers.Main) {
-                _logEntries.value = uniqueNewLogs + _logEntries.value
+                logMutex.withLock {
+                    val updatedList = uniqueNewLogs + _logEntries.value
+                    
+                    // Trim to max size if exceeded
+                    if (updatedList.size > MAX_LOG_ENTRIES) {
+                        val trimmed = updatedList.take(MAX_LOG_ENTRIES)
+                        val removedEntries = updatedList.drop(MAX_LOG_ENTRIES)
+                        
+                        // Remove trimmed entries from set to keep them in sync
+                        removedEntries.forEach { logEntrySet.remove(it) }
+                        
+                        _logEntries.value = trimmed
+                        Log.d(TAG, "Added ${uniqueNewLogs.size} new unique log entries. Trimmed ${removedEntries.size} old entries to maintain max size of $MAX_LOG_ENTRIES.")
+                    } else {
+                        _logEntries.value = updatedList
+                        Log.d(TAG, "Added ${uniqueNewLogs.size} new unique log entries.")
+                    }
+                }
             }
-            Log.d(TAG, "Added ${uniqueNewLogs.size} new unique log entries.")
         } else {
             Log.d(TAG, "No unique log entries from broadcast to add.")
         }
