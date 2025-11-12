@@ -420,12 +420,13 @@ task generateHyperXrayPolicyModel {
     }
 }
 
-// Download geo files and generate model before processing assets
+// Download geo files before processing assets
 android.applicationVariants.all { variant ->
     variant.mergeAssetsProvider.get().dependsOn downloadGeoFiles
-    // Train model first, then generate if needed
-    generateHyperXrayPolicyModel.dependsOn trainOnnxModel
-    variant.mergeAssetsProvider.get().dependsOn generateHyperXrayPolicyModel
+    // Model training disabled during build - use existing models in assets/
+    // To train model manually, run: ./gradlew trainOnnxModel
+    // generateHyperXrayPolicyModel.dependsOn trainOnnxModel
+    // variant.mergeAssetsProvider.get().dependsOn generateHyperXrayPolicyModel
 }
 
 // Copy xray-wrapper executable to jniLibs as .so file (Android only packages .so files)
@@ -636,4 +637,8 @@ dependencies {
     kapt 'androidx.room:room-compiler:2.6.1'
     implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3'
     implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.20.0'
+    
+    // TLS SNI Optimizer v5 dependencies
+    implementation 'androidx.work:work-runtime-ktx:2.9.0'
+    implementation 'androidx.concurrent:concurrent-futures-ktx:1.2.0'
 }
