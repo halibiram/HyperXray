@@ -184,6 +184,7 @@ task trainOnnxModel {
                 
                 def torchOutput = new StringBuilder()
                 def torchReader = new BufferedReader(new InputStreamReader(installTorchProcess.inputStream))
+                def torchLine
                 while ((torchLine = torchReader.readLine()) != null) {
                     println torchLine
                 }
@@ -312,6 +313,7 @@ task trainLoss02GPU {
                 
                 def torchOutput = new StringBuilder()
                 def torchReader = new BufferedReader(new InputStreamReader(installTorchProcess.inputStream))
+                def torchLine
                 while ((torchLine = torchReader.readLine()) != null) {
                     println torchLine
                 }
