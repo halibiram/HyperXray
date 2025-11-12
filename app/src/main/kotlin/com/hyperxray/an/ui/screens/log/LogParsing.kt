@@ -41,6 +41,26 @@ fun parseLogLevel(logEntry: String): LogLevel {
 }
 
 /**
+ * Checks if log entry contains AI-related information.
+ * AI logs typically contain keywords like "DeepPolicyModel", "AI Optimizer", "ONNX", "inference", "model".
+ */
+fun isAiLog(logEntry: String): Boolean {
+    val upperEntry = logEntry.uppercase()
+    return upperEntry.contains("DEEPPOLICYMODEL") ||
+           upperEntry.contains("AI OPTIMIZER") ||
+           upperEntry.contains("HYPERXRAY AI OPTIMIZER") ||
+           upperEntry.contains("ONNX") ||
+           upperEntry.contains("INFERENCE") ||
+           (upperEntry.contains("MODEL") && (upperEntry.contains("LOADED") || upperEntry.contains("VERIFIED") || upperEntry.contains("TENSOR"))) ||
+           (upperEntry.contains("OPTIMIZER") && (upperEntry.contains("READY") || upperEntry.contains("INITIALIZ") || upperEntry.contains("STATUS"))) ||
+           upperEntry.contains("MODELVERIFIER") ||
+           upperEntry.contains("MODELFALLBACK") ||
+           upperEntry.contains("REALITYARM") ||
+           upperEntry.contains("BANDIT") ||
+           (upperEntry.contains("TELEMETRY") && (upperEntry.contains("METRICS") || upperEntry.contains("CONTEXT")))
+}
+
+/**
  * Checks if log entry contains sniffing information.
  * Sniffing logs typically contain keywords like "sniffed", "sniffing", "domain", "target".
  * Xray sniffing logs can appear in various formats.

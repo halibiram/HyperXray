@@ -21,9 +21,11 @@ fun LogFilters(
     selectedLogLevel: LogLevel?,
     selectedConnectionType: ConnectionType?,
     showSniffingOnly: Boolean,
+    showAiOnly: Boolean,
     onLogLevelSelected: (LogLevel?) -> Unit,
     onConnectionTypeSelected: (ConnectionType?) -> Unit,
-    onShowSniffingOnlyChanged: (Boolean) -> Unit
+    onShowSniffingOnlyChanged: (Boolean) -> Unit,
+    onShowAiOnlyChanged: (Boolean) -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -71,7 +73,7 @@ fun LogFilters(
         
         Spacer(modifier = Modifier.height(8.dp))
         
-        // Connection Type filters - bottom row
+        // Connection Type filters - middle row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -96,10 +98,27 @@ fun LogFilters(
                 label = { Text("All", style = MaterialTheme.typography.labelSmall) },
                 modifier = Modifier.height(32.dp)
             )
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        // Log Categories filters - bottom row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
             FilterChip(
                 selected = showSniffingOnly,
                 onClick = { onShowSniffingOnlyChanged(!showSniffingOnly) },
                 label = { Text("🔍 Sniffing", style = MaterialTheme.typography.labelSmall) },
+                modifier = Modifier.height(32.dp)
+            )
+            FilterChip(
+                selected = showAiOnly,
+                onClick = { onShowAiOnlyChanged(!showAiOnly) },
+                label = { Text("🤖 AI", style = MaterialTheme.typography.labelSmall) },
                 modifier = Modifier.height(32.dp)
             )
         }

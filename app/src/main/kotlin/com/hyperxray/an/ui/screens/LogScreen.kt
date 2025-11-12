@@ -41,6 +41,7 @@ import com.hyperxray.an.ui.screens.log.LogDetailSheet
 import com.hyperxray.an.ui.screens.log.LogEntryItem
 import com.hyperxray.an.ui.screens.log.LogFilters
 import com.hyperxray.an.ui.screens.log.LogLevel
+import com.hyperxray.an.ui.screens.log.isAiLog
 import com.hyperxray.an.ui.screens.log.isSniffingLog
 import com.hyperxray.an.ui.screens.log.parseConnectionType
 import com.hyperxray.an.ui.screens.log.parseLogLevel
@@ -67,20 +68,23 @@ fun LogScreen(
     var selectedLogLevel by remember { mutableStateOf<LogLevel?>(null) }
     var selectedConnectionType by remember { mutableStateOf<ConnectionType?>(null) }
     var showSniffingOnly by remember { mutableStateOf(false) }
+    var showAiOnly by remember { mutableStateOf(false) }
     
-    // Apply filters (including search query and sniffing)
-    val filteredEntries = remember(allEntries, selectedLogLevel, selectedConnectionType, searchQuery, showSniffingOnly) {
+    // Apply filters (including search query, sniffing, and AI)
+    val filteredEntries = remember(allEntries, selectedLogLevel, selectedConnectionType, searchQuery, showSniffingOnly, showAiOnly) {
         allEntries.filter { entry ->
             val level = parseLogLevel(entry)
             val connType = parseConnectionType(entry)
             val isSniffing = try { isSniffingLog(entry) } catch (e: Exception) { false }
+            val isAi = try { isAiLog(entry) } catch (e: Exception) { false }
             
             val levelMatch = selectedLogLevel == null || level == selectedLogLevel
             val typeMatch = selectedConnectionType == null || connType == selectedConnectionType
             val searchMatch = searchQuery.isBlank() || entry.contains(searchQuery, ignoreCase = true)
             val sniffingMatch = !showSniffingOnly || isSniffing
+            val aiMatch = !showAiOnly || isAi
             
-            levelMatch && typeMatch && searchMatch && sniffingMatch
+            levelMatch && typeMatch && searchMatch && sniffingMatch && aiMatch
         }
     }
 
@@ -132,9 +136,11 @@ fun LogScreen(
                 selectedLogLevel = selectedLogLevel,
                 selectedConnectionType = selectedConnectionType,
                 showSniffingOnly = showSniffingOnly,
+                showAiOnly = showAiOnly,
                 onLogLevelSelected = { selectedLogLevel = it },
                 onConnectionTypeSelected = { selectedConnectionType = it },
-                onShowSniffingOnlyChanged = { showSniffingOnly = it }
+                onShowSniffingOnlyChanged = { showSniffingOnly = it },
+                onShowAiOnlyChanged = { showAiOnly = it }
             )
             
             // Log list
