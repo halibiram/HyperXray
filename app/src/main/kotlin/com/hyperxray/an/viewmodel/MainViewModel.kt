@@ -45,6 +45,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.TimeoutCancellationException
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
@@ -86,7 +88,15 @@ class MainViewModel(application: Application) :
     private var compressedBackupData: ByteArray? = null
 
     private var coreStatsClient: CoreStatsClient? = null
-    private val coreStatsClientMutex = Mutex()
+    private val coreStatsClientMutex = Mutex() // For suspend functions (updateCoreStats)
+    // Separate lock object for synchronous operations (used in closeCoreStatsClient)
+    private val coreStatsClientLock = Any()
+    
+    // Broadcast receiver registration state
+    @Volatile
+    private var receiversRegistered = false
+    // Lock object for synchronous operations (used in init and onCleared)
+    private val receiversLock = Any()
     
     // Throughput calculation state
     private var lastUplink: Long = 0L
@@ -213,16 +223,9 @@ class MainViewModel(application: Application) :
             lastUplink = 0L
             lastDownlink = 0L
             lastStatsTime = 0L
-            // Synchronize client closure to prevent race conditions
+            // Close client when service stops (non-blocking, uses helper function)
             viewModelScope.launch {
-                coreStatsClientMutex.withLock {
-                    try {
-                        coreStatsClient?.close()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error closing coreStatsClient in stopReceiver", e)
-                    }
-                    coreStatsClient = null
-                }
+                closeCoreStatsClient()
             }
         }
     }
@@ -241,6 +244,8 @@ class MainViewModel(application: Application) :
 
     init {
         Log.d(TAG, "MainViewModel initialized.")
+        // Register broadcast receivers in init to ensure they're always registered
+        registerTProxyServiceReceivers()
         viewModelScope.launch(Dispatchers.IO) {
             _isServiceEnabled.value = isServiceRunning(application, TProxyService::class.java)
 
@@ -248,6 +253,16 @@ class MainViewModel(application: Application) :
             loadKernelVersion()
             refreshConfigFileList()
         }
+    }
+
+    /**
+     * Called when the ViewModel is about to be destroyed.
+     * Ensures broadcast receivers are unregistered to prevent memory leaks.
+     */
+    override fun onCleared() {
+        super.onCleared()
+        Log.d(TAG, "MainViewModel cleared, unregistering receivers.")
+        unregisterTProxyServiceReceivers()
     }
 
     private fun updateSettingsState() {
@@ -324,23 +339,44 @@ class MainViewModel(application: Application) :
             
             // Try to execute with linker (Android way)
             val process = Runtime.getRuntime().exec(arrayOf("/system/bin/linker64", xrayPath, "-version"))
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            val firstLine = reader.readLine()
-            process.destroy()
-            
-            if (firstLine != null && firstLine.isNotEmpty()) {
-                _settingsState.value = _settingsState.value.copy(
-                    info = _settingsState.value.info.copy(
-                        kernelVersion = firstLine
-                    )
-                )
-            } else {
-                // Fallback: show that file exists but version couldn't be read
-                _settingsState.value = _settingsState.value.copy(
-                    info = _settingsState.value.info.copy(
-                        kernelVersion = "Available (BoringSSL)"
-                    )
-                )
+            try {
+                BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
+                    val firstLine = reader.readLine()
+                    
+                    if (firstLine != null && firstLine.isNotEmpty()) {
+                        _settingsState.value = _settingsState.value.copy(
+                            info = _settingsState.value.info.copy(
+                                kernelVersion = firstLine
+                            )
+                        )
+                    } else {
+                        // Fallback: show that file exists but version couldn't be read
+                        _settingsState.value = _settingsState.value.copy(
+                            info = _settingsState.value.info.copy(
+                                kernelVersion = "Available (BoringSSL)"
+                            )
+                        )
+                    }
+                }
+            } finally {
+                // Ensure all process streams are closed
+                try {
+                    process.inputStream?.close()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error closing process input stream", e)
+                }
+                try {
+                    process.errorStream?.close()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error closing process error stream", e)
+                }
+                try {
+                    process.outputStream?.close()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error closing process output stream", e)
+                }
+                // Destroy the process
+                process.destroy()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get xray version", e)
@@ -436,8 +472,38 @@ class MainViewModel(application: Application) :
         return filePath
     }
 
+    /**
+     * Closes the CoreStatsClient and clears the reference.
+     * This is a thread-safe operation that should be called when:
+     * - Service is stopped
+     * - Client encounters an error
+     * - Timeout occurs during gRPC calls
+     * - Service is disabled
+     * 
+     * Note: This method is synchronous and can be called from any thread.
+     */
+    private fun closeCoreStatsClient() {
+        // Use synchronized block for thread safety (non-suspend)
+        // Since this may be called from onCleared() or other non-suspend contexts,
+        // we use a simple synchronized block instead of Mutex
+        synchronized(coreStatsClientLock) {
+            try {
+                coreStatsClient?.close()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error closing CoreStatsClient: ${e.message}", e)
+            } finally {
+                coreStatsClient = null
+            }
+        }
+    }
+
     suspend fun updateCoreStats() {
-        if (!_isServiceEnabled.value) return
+        // Check if service is enabled before proceeding
+        if (!_isServiceEnabled.value) {
+            // Service is not enabled, ensure client is closed if it exists
+            closeCoreStatsClient()
+            return
+        }
         
         // Synchronize access to coreStatsClient to prevent race conditions
         val client = coreStatsClientMutex.withLock {
@@ -448,55 +514,95 @@ class MainViewModel(application: Application) :
                     Log.d(TAG, "Created new CoreStatsClient")
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to create CoreStatsClient", e)
-                    return
+                    return // Exit early if client creation fails
                 }
             }
             coreStatsClient
         }
         
-        // Use the client reference outside the lock to avoid holding lock during I/O
-        val stats = try {
-            client?.getSystemStats()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error getting system stats", e)
-            // If client is closed or invalid, close it and return
-            coreStatsClientMutex.withLock {
-                try {
-                    coreStatsClient?.close()
-                } catch (closeException: Exception) {
-                    Log.w(TAG, "Error closing client", closeException)
-                }
-                coreStatsClient = null
-            }
+        // Validate client was created
+        if (client == null) {
+            Log.w(TAG, "CoreStatsClient is null, cannot update stats")
             return
         }
         
-        val traffic = try {
-            client?.getTraffic()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error getting traffic stats", e)
-            // If client is closed or invalid, close it and return
-            coreStatsClientMutex.withLock {
-                try {
-                    coreStatsClient?.close()
-                } catch (closeException: Exception) {
-                    Log.w(TAG, "Error closing client", closeException)
+        // Use withTimeoutOrNull to prevent hanging if Xray crashes or is unresponsive
+        // Timeout of 5 seconds should be sufficient for gRPC calls
+        // Note: withTimeoutOrNull catches all exceptions (including TimeoutCancellationException)
+        // and returns null, so we catch exceptions inside to log them
+        val statsResult = withTimeoutOrNull(5000L) {
+            try {
+                // Check if service is still enabled before making gRPC call
+                if (!_isServiceEnabled.value) {
+                    return@withTimeoutOrNull null
                 }
-                coreStatsClient = null
+                // Make gRPC call - may throw exception or timeout
+                client.getSystemStats()
+            } catch (e: Exception) {
+                // Exception occurred during gRPC call - log it
+                // Note: This exception will be caught by withTimeoutOrNull and null will be returned
+                // but we catch it here to log it before that happens
+                Log.e(TAG, "Error getting system stats: ${e.message}", e)
+                // Return null to indicate failure (withTimeoutOrNull will return null)
+                null
             }
+        }
+        
+        // Handle timeout, exception, or service disabled
+        if (statsResult == null) {
+            // Timeout, exception, or service disabled occurred
+            Log.w(TAG, "Stats query failed (timeout/exception/disabled), closing client")
+            closeCoreStatsClient()
             return
         }
+        
+        // Check if service is still enabled after first gRPC call
+        if (!_isServiceEnabled.value) {
+            Log.d(TAG, "Service disabled during stats update, skipping")
+            closeCoreStatsClient()
+            return
+        }
+        
+        val trafficResult = withTimeoutOrNull(5000L) {
+            try {
+                // Check if service is still enabled before making gRPC call
+                if (!_isServiceEnabled.value) {
+                    return@withTimeoutOrNull null
+                }
+                // Make gRPC call - may throw exception or timeout
+                client.getTraffic()
+            } catch (e: Exception) {
+                // Exception occurred during gRPC call - log it
+                // Note: This exception will be caught by withTimeoutOrNull and null will be returned
+                // but we catch it here to log it before that happens
+                Log.e(TAG, "Error getting traffic stats: ${e.message}", e)
+                // Return null to indicate failure (withTimeoutOrNull will return null)
+                null
+            }
+        }
+        
+        // Handle timeout, exception, or service disabled
+        if (trafficResult == null) {
+            // Timeout, exception, or service disabled occurred
+            Log.w(TAG, "Traffic query failed (timeout/exception/disabled), closing client")
+            closeCoreStatsClient()
+            return
+        }
+        
+        // Check if service is still enabled after both gRPC calls
+        if (!_isServiceEnabled.value) {
+            Log.d(TAG, "Service disabled during stats update, skipping")
+            closeCoreStatsClient()
+            return
+        }
+        
+        val stats = statsResult
+        val traffic = trafficResult
 
+        // Validate that we got some data
         if (stats == null && traffic == null) {
             Log.w(TAG, "Both stats and traffic are null, closing client")
-            coreStatsClientMutex.withLock {
-                try {
-                    coreStatsClient?.close()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error closing client", e)
-                }
-                coreStatsClient = null
-            }
+            closeCoreStatsClient()
             return
         }
 
@@ -1387,52 +1493,132 @@ class MainViewModel(application: Application) :
         }
     }
 
+    /**
+     * Registers broadcast receivers for TProxyService events.
+     * This method is idempotent - it will not register receivers multiple times.
+     * Called in init block to ensure receivers are always registered when ViewModel is created.
+     * 
+     * Note: This method is synchronous and can be called from init.
+     * The registration happens immediately on the calling thread.
+     */
     fun registerTProxyServiceReceivers() {
-        val application = application
-        val startSuccessFilter = IntentFilter(TProxyService.ACTION_START)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            application.registerReceiver(
-                startReceiver,
-                startSuccessFilter,
-                Context.RECEIVER_NOT_EXPORTED
-            )
-        } else {
-            @Suppress("UnspecifiedRegisterReceiverFlag")
-            application.registerReceiver(startReceiver, startSuccessFilter)
+        // Check if receivers are already registered to prevent double registration
+        // Note: @Volatile ensures visibility across threads
+        if (receiversRegistered) {
+            Log.d(TAG, "Receivers already registered, skipping.")
+            return
         }
+        
+        // Use synchronized block for thread safety
+        // Since this is called from init, we use a simple lock
+        synchronized(receiversLock) {
+            // Double-check pattern: check again after acquiring lock
+            if (receiversRegistered) {
+                Log.d(TAG, "Receivers already registered (double-check), skipping.")
+                return@synchronized
+            }
+            
+            try {
+                val application = application
+                val startSuccessFilter = IntentFilter(TProxyService.ACTION_START)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    application.registerReceiver(
+                        startReceiver,
+                        startSuccessFilter,
+                        Context.RECEIVER_NOT_EXPORTED
+                    )
+                } else {
+                    @Suppress("UnspecifiedRegisterReceiverFlag")
+                    application.registerReceiver(startReceiver, startSuccessFilter)
+                }
 
-        val stopSuccessFilter = IntentFilter(TProxyService.ACTION_STOP)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            application.registerReceiver(
-                stopReceiver,
-                stopSuccessFilter,
-                Context.RECEIVER_NOT_EXPORTED
-            )
-        } else {
-            @Suppress("UnspecifiedRegisterReceiverFlag")
-            application.registerReceiver(stopReceiver, stopSuccessFilter)
-        }
+                val stopSuccessFilter = IntentFilter(TProxyService.ACTION_STOP)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    application.registerReceiver(
+                        stopReceiver,
+                        stopSuccessFilter,
+                        Context.RECEIVER_NOT_EXPORTED
+                    )
+                } else {
+                    @Suppress("UnspecifiedRegisterReceiverFlag")
+                    application.registerReceiver(stopReceiver, stopSuccessFilter)
+                }
 
-        val errorFilter = IntentFilter(TProxyService.ACTION_ERROR)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            application.registerReceiver(
-                errorReceiver,
-                errorFilter,
-                Context.RECEIVER_NOT_EXPORTED
-            )
-        } else {
-            @Suppress("UnspecifiedRegisterReceiverFlag")
-            application.registerReceiver(errorReceiver, errorFilter)
+                val errorFilter = IntentFilter(TProxyService.ACTION_ERROR)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    application.registerReceiver(
+                        errorReceiver,
+                        errorFilter,
+                        Context.RECEIVER_NOT_EXPORTED
+                    )
+                } else {
+                    @Suppress("UnspecifiedRegisterReceiverFlag")
+                    application.registerReceiver(errorReceiver, errorFilter)
+                }
+                
+                receiversRegistered = true
+                Log.d(TAG, "TProxyService receivers registered.")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error registering receivers: ${e.message}", e)
+                // Don't set receiversRegistered = true on error
+            }
         }
-        Log.d(TAG, "TProxyService receivers registered.")
     }
 
+    /**
+     * Unregisters broadcast receivers for TProxyService events.
+     * This method is idempotent - it will not throw if receivers are not registered.
+     * Called in onCleared() to ensure receivers are always unregistered when ViewModel is destroyed.
+     * 
+     * Note: This method is synchronous and can be called from onCleared().
+     * The unregistration happens immediately on the calling thread.
+     */
     fun unregisterTProxyServiceReceivers() {
-        val application = application
-        application.unregisterReceiver(startReceiver)
-        application.unregisterReceiver(stopReceiver)
-        application.unregisterReceiver(errorReceiver)
-        Log.d(TAG, "TProxyService receivers unregistered.")
+        // Check if receivers are already unregistered to prevent double unregistration
+        // Note: @Volatile ensures visibility across threads
+        if (!receiversRegistered) {
+            Log.d(TAG, "Receivers already unregistered, skipping.")
+            return
+        }
+        
+        // Use synchronized block for thread safety
+        // Since onCleared() is called synchronously on the main thread, we use a simple lock
+        synchronized(receiversLock) {
+            // Double-check pattern: check again after acquiring lock
+            if (!receiversRegistered) {
+                Log.d(TAG, "Receivers already unregistered (double-check), skipping.")
+                return@synchronized
+            }
+            
+            try {
+                val application = application
+                // Unregister each receiver, handling IllegalArgumentException if not registered
+                try {
+                    application.unregisterReceiver(startReceiver)
+                } catch (e: IllegalArgumentException) {
+                    Log.w(TAG, "startReceiver not registered: ${e.message}")
+                }
+                
+                try {
+                    application.unregisterReceiver(stopReceiver)
+                } catch (e: IllegalArgumentException) {
+                    Log.w(TAG, "stopReceiver not registered: ${e.message}")
+                }
+                
+                try {
+                    application.unregisterReceiver(errorReceiver)
+                } catch (e: IllegalArgumentException) {
+                    Log.w(TAG, "errorReceiver not registered: ${e.message}")
+                }
+                
+                receiversRegistered = false
+                Log.d(TAG, "TProxyService receivers unregistered.")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error unregistering receivers: ${e.message}", e)
+                // Set receiversRegistered = false even on error to allow retry
+                receiversRegistered = false
+            }
+        }
     }
 
     fun restoreDefaultGeoip(callback: () -> Unit) {

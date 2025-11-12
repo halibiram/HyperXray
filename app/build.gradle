@@ -168,6 +168,7 @@ task trainOnnxModel {
                 
                 def installOutput = new StringBuilder()
                 def installReader = new BufferedReader(new InputStreamReader(installProcess.inputStream))
+                def installLine
                 while ((installLine = installReader.readLine()) != null) {
                     installOutput.append(installLine).append("\n")
                 }
@@ -295,6 +296,7 @@ task trainLoss02GPU {
                 
                 def installOutput = new StringBuilder()
                 def installReader = new BufferedReader(new InputStreamReader(installProcess.inputStream))
+                def installLine
                 while ((installLine = installReader.readLine()) != null) {
                     installOutput.append(installLine).append("\n")
                 }

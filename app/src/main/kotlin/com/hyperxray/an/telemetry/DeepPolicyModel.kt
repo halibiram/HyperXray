@@ -413,7 +413,8 @@ class DeepPolicyModel(
         banditArm: RealityArm? = null
     ): RealityArm? {
         // If model not loaded, use fallback
-        if (!isLoaded || ortSession == null) {
+        val session = ortSession
+        if (!isLoaded || session == null) {
             Log.w(TAG, "Model not loaded, using fallback")
             return fallbackHandler?.selectFallbackArm(availableArms, banditArm)
         }
@@ -434,24 +435,39 @@ class DeepPolicyModel(
             val inputData = Array(1) { normalizedContext }
             val inputTensor = OnnxTensor.createTensor(ortEnv, inputData)
             
-            // Run inference
-            val inputs = mapOf((inputName ?: ortSession!!.inputNames.first()) to inputTensor)
-            val outputs = ortSession!!.run(inputs)
-            
-            // Extract output (assuming single output tensor)
-            val outputTensor = outputs.get(0)
-            val outputValue = outputTensor.value
-            
-            // Close resources
-            inputTensor.close()
-            outputs.close()
-            
-            // Parse output to select arm
-            val selectedArm = parseOutput(outputValue, availableArms)
-            
-            Log.d(TAG, "Inference completed, selected arm: ${selectedArm?.armId}")
-            selectedArm ?: fallbackHandler?.selectFallbackArm(availableArms, banditArm)
-            
+            try {
+                // Run inference
+                val inputNameToUse = inputName ?: session.inputNames.firstOrNull()
+                if (inputNameToUse == null) {
+                    Log.e(TAG, "No input names available in session")
+                    inputTensor.close()
+                    return fallbackHandler?.selectFallbackArm(availableArms, banditArm)
+                }
+                val inputs = mapOf(inputNameToUse to inputTensor)
+                val outputs = session.run(inputs)
+                
+                // Extract output (assuming single output tensor)
+                val outputTensor = outputs.get(0)
+                val outputValue = outputTensor.value
+                
+                // Close resources
+                inputTensor.close()
+                outputs.close()
+                
+                // Parse output to select arm
+                val selectedArm = parseOutput(outputValue, availableArms)
+                
+                Log.d(TAG, "Inference completed, selected arm: ${selectedArm?.armId}")
+                selectedArm ?: fallbackHandler?.selectFallbackArm(availableArms, banditArm)
+            } catch (e: Exception) {
+                // Ensure inputTensor is closed on error
+                try {
+                    inputTensor.close()
+                } catch (closeEx: Exception) {
+                    Log.w(TAG, "Error closing input tensor", closeEx)
+                }
+                throw e
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error during ONNX inference, using fallback", e)
             fallbackHandler?.selectFallbackArm(availableArms, banditArm)
@@ -613,7 +629,7 @@ class DeepPolicyModel(
                     availableArms.getOrNull(index)
                 }
                 else -> {
-                    Log.w(TAG, "Unexpected output type: ${outputValue::class.simpleName}")
+                    Log.w(TAG, "Unexpected output type: ${outputValue?.javaClass?.simpleName ?: "null"}")
                     // Fallback: return first arm
                     availableArms.firstOrNull()
                 }

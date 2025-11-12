@@ -24,13 +24,17 @@ object AiLogHelper {
     
     private val broadcastLogsRunnable = Runnable {
         synchronized(logBroadcastBuffer) {
-            if (logBroadcastBuffer.isNotEmpty() && context != null) {
+            if (logBroadcastBuffer.isNotEmpty()) {
+                val ctx = context ?: run {
+                    Log.e("AiLogHelper", "Context is null, cannot broadcast logs")
+                    return@Runnable
+                }
                 val logUpdateIntent = Intent(TProxyService.ACTION_LOG_UPDATE)
-                logUpdateIntent.setPackage(context!!.packageName)
+                logUpdateIntent.setPackage(ctx.packageName)
                 logUpdateIntent.putStringArrayListExtra(
                     TProxyService.EXTRA_LOG_DATA, ArrayList(logBroadcastBuffer)
                 )
-                context!!.sendBroadcast(logUpdateIntent)
+                ctx.sendBroadcast(logUpdateIntent)
                 logBroadcastBuffer.clear()
             }
         }

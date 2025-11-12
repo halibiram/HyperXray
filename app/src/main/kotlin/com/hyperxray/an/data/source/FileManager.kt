@@ -315,32 +315,32 @@ class FileManager(private val application: Application, private val prefs: Prefe
 
                     value = preferencesMap[Preferences.DNS_IPV4]
                     if (value is String) {
-                        prefs.dnsIpv4 = (value as String?)!!
+                        prefs.dnsIpv4 = value
                     }
 
                     value = preferencesMap[Preferences.DNS_IPV6]
                     if (value is String) {
-                        prefs.dnsIpv6 = (value as String?)!!
+                        prefs.dnsIpv6 = value
                     }
 
                     value = preferencesMap[Preferences.IPV6]
                     if (value is Boolean) {
-                        prefs.ipv6 = (value as Boolean?)!!
+                        prefs.ipv6 = value
                     }
 
                     value = preferencesMap[Preferences.BYPASS_LAN]
                     if (value is Boolean) {
-                        prefs.bypassLan = (value as Boolean?)!!
+                        prefs.bypassLan = value
                     }
 
                     value = preferencesMap[Preferences.USE_TEMPLATE]
                     if (value is Boolean) {
-                        prefs.useTemplate = (value as Boolean?)!!
+                        prefs.useTemplate = value
                     }
 
                     value = preferencesMap[Preferences.HTTP_PROXY_ENABLED]
                     if (value is Boolean) {
-                        prefs.httpProxyEnabled = (value as Boolean?)!!
+                        prefs.httpProxyEnabled = value
                     }
 
                     value = preferencesMap[Preferences.APPS]
