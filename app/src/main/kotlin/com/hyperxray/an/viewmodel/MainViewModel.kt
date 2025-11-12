@@ -20,6 +20,7 @@ import androidx.lifecycle.viewModelScope
 import com.hyperxray.an.BuildConfig
 import com.hyperxray.an.R
 import com.hyperxray.an.common.CoreStatsClient
+import com.hyperxray.an.common.ROUTE_AI_INSIGHTS
 import com.hyperxray.an.common.ROUTE_APP_LIST
 import com.hyperxray.an.common.formatBytes
 import com.hyperxray.an.common.formatThroughput
@@ -1326,6 +1327,12 @@ class MainViewModel(application: Application) :
         viewModelScope.launch {
             appListViewModel = AppListViewModel(application)
             _uiEvent.trySend(MainViewUiEvent.Navigate(ROUTE_APP_LIST))
+        }
+    }
+
+    fun navigateToAiInsights() {
+        viewModelScope.launch {
+            _uiEvent.trySend(MainViewUiEvent.Navigate(ROUTE_AI_INSIGHTS))
         }
     }
 
