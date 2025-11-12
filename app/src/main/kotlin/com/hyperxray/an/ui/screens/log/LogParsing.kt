@@ -278,6 +278,20 @@ fun extractSNI(logEntry: String): String? {
         
         val upperEntry = logEntry.uppercase()
         
+        // Pattern 0: sniffed domain: example.com (from Xray sniffing logs)
+        // This is the most common pattern in Xray logs for TLS connections
+        try {
+            val sniffedDomainPattern = Regex("""sniffed\s+domain[:\s]+([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})""", RegexOption.IGNORE_CASE)
+            sniffedDomainPattern.find(logEntry)?.let {
+                val domain = it.groupValues[1].trim()
+                if (domain.isNotEmpty() && !domain.matches(Regex("""^\d+\.\d+\.\d+\.\d+$"""))) {
+                    return domain
+                }
+            }
+        } catch (e: Exception) {
+            // Continue to next pattern
+        }
+        
         // Pattern 1: serverName=example.com (from TLS handshake logs)
         try {
             val serverNamePattern = Regex("""serverName\s*[=:]\s*([^\s,}\]]+)""", RegexOption.IGNORE_CASE)
@@ -364,6 +378,56 @@ fun extractSNI(logEntry: String): String? {
             }
         } catch (e: Exception) {
             // Continue to next pattern
+        }
+        
+        // Pattern 7: destinationOverride or destOverride (Xray sniffing with destination override)
+        try {
+            val destOverridePattern = Regex("""(?:destinationOverride|destOverride|dest)[:\s=]+([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})""", RegexOption.IGNORE_CASE)
+            destOverridePattern.find(logEntry)?.let {
+                val domain = it.groupValues[1].trim()
+                if (domain.isNotEmpty() && !domain.matches(Regex("""^\d+\.\d+\.\d+\.\d+$"""))) {
+                    return domain
+                }
+            }
+        } catch (e: Exception) {
+            // Continue to next pattern
+        }
+        
+        // Pattern 8: HTTP Host header (for HTTP/2 and HTTP/3 connections)
+        // Format: "host: example.com" or "host=example.com"
+        try {
+            val hostHeaderPattern = Regex("""(?:^|\s)host\s*[=:]\s*([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})""", RegexOption.IGNORE_CASE)
+            hostHeaderPattern.find(logEntry)?.let {
+                val domain = it.groupValues[1].trim()
+                if (domain.isNotEmpty() && !domain.matches(Regex("""^\d+\.\d+\.\d+\.\d+$"""))) {
+                    // Only extract if it looks like a domain (contains TLD)
+                    if (domain.matches(Regex("""^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$"""))) {
+                        return domain
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Continue to next pattern
+        }
+        
+        // Pattern 9: Generic domain pattern in log (last resort)
+        // Try to find any domain-like pattern that might be an SNI
+        // This is more permissive and should be last
+        try {
+            // Look for domain patterns that might indicate SNI
+            // Format: any text followed by a domain pattern
+            val genericDomainPattern = Regex("""(?:^|[^a-zA-Z0-9])([a-zA-Z0-9][a-zA-Z0-9.-]*\.(?:instagram|tiktok|facebook|google|youtube|twitter|netflix|twitch|amazon|apple|microsoft|cloudflare|akamai|fastly)[a-zA-Z0-9.-]*\.[a-zA-Z]{2,})(?:[^a-zA-Z0-9]|$)""", RegexOption.IGNORE_CASE)
+            genericDomainPattern.find(logEntry)?.let {
+                val domain = it.groupValues[1].trim()
+                if (domain.isNotEmpty() && !domain.matches(Regex("""^\d+\.\d+\.\d+\.\d+$"""))) {
+                    // Additional validation: check if it's a valid domain format
+                    if (domain.matches(Regex("""^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$"""))) {
+                        return domain
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Continue - this is last resort pattern
         }
         
         // Note: We don't extract SNI from general connection logs (tcp:example.com:443)
