@@ -1,0 +1,6 @@
+{
+  "policy": "BANDIT_ONLY",
+  "description": "Baseline policy: Uses bandit algorithm when model is unavailable",
+  "fallback_enabled": true,
+  "conservative_mode": false
+}

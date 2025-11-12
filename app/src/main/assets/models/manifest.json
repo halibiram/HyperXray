@@ -1,0 +1,23 @@
+{
+  "model": {
+    "name": "hyperxray_policy",
+    "version": "1.0.0",
+    "format": "onnx",
+    "path": "models/hyperxray_policy.onnx",
+    "sha256": "c4030c640995a600add3da190b6cc940643fbf98bc5c6c3b84a5e89c6b14f065",
+    "ed25519_signature": "",
+    "ed25519_public_key": "",
+    "description": "HyperXray AI Optimizer Policy Model for Reality server selection",
+    "input_shape": [1, 8],
+    "output_shape": [1, 5],
+    "created_at": "2025-01-10T00:00:00Z",
+    "updated_at": "2025-11-11T18:04:28Z"
+  },
+  "metadata": {
+    "onnx_version": "1.13.0",
+    "runtime_version": "1.20.1",
+    "architecture": "neural_network",
+    "training_data_version": "N/A",
+    "baseline_config": "baseline_policy"
+  }
+}
