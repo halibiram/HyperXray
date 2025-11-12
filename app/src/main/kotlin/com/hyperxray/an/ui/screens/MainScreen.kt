@@ -19,6 +19,7 @@ import androidx.navigation.compose.rememberNavController
 import com.hyperxray.an.common.NAVIGATION_DEBOUNCE_DELAY
 import com.hyperxray.an.common.ROUTE_CONFIG
 import com.hyperxray.an.common.ROUTE_LOG
+import com.hyperxray.an.common.ROUTE_OPTIMIZER
 import com.hyperxray.an.common.ROUTE_SETTINGS
 import com.hyperxray.an.common.ROUTE_STATS
 import com.hyperxray.an.common.rememberMainScreenCallbacks
@@ -112,7 +113,7 @@ fun MainScreen(
     val navBackStackEntry by bottomNavController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
-    val mainScreenRoutes = listOf(ROUTE_STATS, ROUTE_CONFIG, ROUTE_LOG, ROUTE_SETTINGS)
+    val mainScreenRoutes = listOf(ROUTE_STATS, ROUTE_CONFIG, ROUTE_LOG, ROUTE_OPTIMIZER, ROUTE_SETTINGS)
 
     if (currentRoute in mainScreenRoutes) {
         AppScaffold(

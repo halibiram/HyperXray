@@ -61,7 +61,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hyperxray.an.R
 import com.hyperxray.an.common.ThemeMode
 import com.hyperxray.an.viewmodel.MainViewModel
-import com.hyperxray.an.ui.screens.LearnerDebugScreen
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -1162,62 +1161,6 @@ fun SettingsScreen(
             )
         }
 
-        // TLS SNI Learner Debug Section
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        SettingsCategoryCard(title = "TLS SNI Optimizer") {
-            var showLearnerDebug by remember { mutableStateOf(false) }
-            
-            ListItem(
-                modifier = Modifier.clickable {
-                    showLearnerDebug = true
-                },
-                headlineContent = { Text("Learner Debug") },
-                supportingContent = { Text("View and reset learner state") },
-                trailingContent = {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null
-                    )
-                },
-                colors = ListItemDefaults.colors(
-                    containerColor = Color.Transparent
-                )
-            )
-            
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 16.dp),
-                color = MaterialTheme.colorScheme.outlineVariant
-            )
-            
-            ListItem(
-                modifier = Modifier.clickable {
-                    mainViewModel.navigateToAiInsights()
-                },
-                headlineContent = { Text("AI Insights") },
-                supportingContent = { Text("View AI learner dashboard with biases, policies, and feedback") },
-                trailingContent = {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null
-                    )
-                },
-                colors = ListItemDefaults.colors(
-                    containerColor = Color.Transparent
-                )
-            )
-            
-            if (showLearnerDebug) {
-                androidx.compose.material3.ModalBottomSheet(
-                    onDismissRequest = { showLearnerDebug = false },
-                    sheetState = sheetState
-                ) {
-                    com.hyperxray.an.ui.screens.LearnerDebugScreen()
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 

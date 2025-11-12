@@ -28,6 +28,9 @@ class AiInsightsViewModel(application: Application) : AndroidViewModel(applicati
     private val TAG = "AiInsightsViewModel"
     private val gson = Gson()
     
+    // Maximum entries to load (1GB limit allows ~6-7 million entries, we load last 1M for optimal AI learning)
+    private val MAX_ENTRIES_TO_LOAD = 1_000_000
+    
     private val _uiState = MutableStateFlow(AiInsightsUiState())
     val uiState: StateFlow<AiInsightsUiState> = _uiState.asStateFlow()
     
@@ -39,7 +42,34 @@ class AiInsightsViewModel(application: Application) : AndroidViewModel(applicati
     }
     
     fun refresh() {
-        loadData()
+        // First trigger RealityWorker to create/update policy files
+        triggerRealityWorker()
+        // Then reload data after a short delay to allow RealityWorker to finish
+        viewModelScope.launch {
+            kotlinx.coroutines.delay(1000) // Wait 1 second for RealityWorker to complete
+            loadData()
+        }
+    }
+    
+    private fun triggerRealityWorker() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    // Use WorkManager to trigger RealityWorker immediately
+                    val workRequest = androidx.work.OneTimeWorkRequestBuilder<com.hyperxray.an.optimizer.RealityWorker>()
+                        .build()
+                    
+                    androidx.work.WorkManager.getInstance(context)
+                        .enqueue(workRequest)
+                    
+                    Log.d(TAG, "Triggered RealityWorker to create policy files")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error triggering RealityWorker: ${e.message}", e)
+                    // If WorkManager fails, still try to load data
+                    loadData()
+                }
+            }
+        }
     }
     
     fun resetLearner() {
@@ -214,17 +244,51 @@ class AiInsightsViewModel(application: Application) : AndroidViewModel(applicati
         }
         
         return try {
-            val lines = logFile.readLines()
-            lines.takeLast(100) // Last 100 entries
-                .mapNotNull { line ->
+            val fileSize = logFile.length()
+            Log.d(TAG, "Loading feedback log: size=${fileSize} bytes (${fileSize / 1024 / 1024}MB)")
+            
+            // For large files, read efficiently without loading everything into memory
+            val lines = if (fileSize > 100 * 1024 * 1024) { // If file > 100MB, use buffered reading
+                readLastLinesBuffered(logFile, MAX_ENTRIES_TO_LOAD)
+            } else {
+                logFile.readLines().takeLast(MAX_ENTRIES_TO_LOAD)
+            }
+            
+            Log.d(TAG, "Loaded ${lines.size} entries from feedback log")
+            
+            lines.mapNotNull { line ->
                     try {
                         val json = gson.fromJson(line, Map::class.java)
+                        // Parse timestamp - can be Long (millis) or String
+                        val timestampValue = json["timestamp"]
+                        val timestampStr = when (timestampValue) {
+                            is Number -> {
+                                // Convert Long timestamp to string
+                                val date = Date(timestampValue.toLong())
+                                SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(date)
+                            }
+                            is String -> timestampValue
+                            else -> ""
+                        }
+                        
                         FeedbackEntry(
                             sni = json["sni"] as? String ?: "",
-                            latency = (json["latency"] as? Number)?.toLong() ?: 0L,
-                            throughput = (json["throughput"] as? Number)?.toFloat() ?: 0f,
+                            latency = ((json["latencyMs"] as? Number)?.toLong() 
+                                ?: (json["latency"] as? Number)?.toLong() 
+                                ?: 0L),
+                            throughput = ((json["throughputKbps"] as? Number)?.toFloat()
+                                ?: (json["throughput"] as? Number)?.toFloat()
+                                ?: 0f),
                             success = (json["success"] as? Boolean) ?: false,
-                            timestamp = (json["timestamp"] as? String) ?: ""
+                            timestamp = timestampStr,
+                            svcClass = (json["svcClass"] as? Number)?.toInt() ?: 7,
+                            routeDecision = (json["routeDecision"] as? Number)?.toInt() ?: 0,
+                            alpn = (json["alpn"] as? String) ?: "h2",
+                            rtt = (json["rtt"] as? Number)?.toDouble(),
+                            jitter = (json["jitter"] as? Number)?.toDouble(),
+                            networkType = (json["networkType"] as? String)?.takeIf { it.isNotEmpty() },
+                            hourOfDay = (json["hourOfDay"] as? Number)?.toInt(),
+                            dayOfWeek = (json["dayOfWeek"] as? Number)?.toInt()
                         )
                     } catch (e: Exception) {
                         Log.w(TAG, "Failed to parse feedback line: $line", e)
@@ -240,22 +304,38 @@ class AiInsightsViewModel(application: Application) : AndroidViewModel(applicati
     
     private fun loadRealityPolicy(): Pair<List<PolicyEntry>, List<PolicyChange>> {
         // Find all xray_reality_policy_v*.json files
-        val policyFilesList = filesDir.listFiles { _, name ->
-            name.startsWith("xray_reality_policy_v") && name.endsWith(".json")
-        }?.sortedBy { it.name }?.toList() ?: emptyList<File>()
+        val policyFilesList = try {
+            filesDir.listFiles { _, name ->
+                name.startsWith("xray_reality_policy_v") && name.endsWith(".json")
+            }?.sortedBy { it.name }?.toList() ?: emptyList<File>()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error listing policy files: ${e.message}", e)
+            emptyList<File>()
+        }
         
         if (policyFilesList.isEmpty()) {
-            Log.d(TAG, "No xray_reality_policy files found")
+            Log.d(TAG, "No xray_reality_policy files found in ${filesDir.absolutePath}")
+            // List all files for debugging
+            try {
+                val allFiles = filesDir.listFiles()?.map { it.name }?.take(20) ?: emptyList()
+                Log.d(TAG, "Files in directory: ${allFiles.joinToString(", ")}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error listing directory: ${e.message}", e)
+            }
             return Pair(emptyList(), emptyList())
         }
+        
+        Log.d(TAG, "Found ${policyFilesList.size} policy files: ${policyFilesList.map { it.name }.joinToString(", ")}")
         
         val latestFile = policyFilesList.last()
         val previousFile = if (policyFilesList.size > 1) policyFilesList[policyFilesList.size - 2] else null
         
+        Log.d(TAG, "Loading latest policy file: ${latestFile.name}")
+        
         val currentPolicy = try {
             val json = gson.fromJson(FileReader(latestFile.absolutePath), Map::class.java)
             val policyArray = json["policy"] as? List<Map<*, *>> ?: emptyList()
-            policyArray.mapNotNull { entry ->
+            val parsedEntries = policyArray.mapNotNull { entry ->
                 try {
                     PolicyEntry(
                         sni = entry["sni"] as? String ?: "",
@@ -269,6 +349,15 @@ class AiInsightsViewModel(application: Application) : AndroidViewModel(applicati
                     null
                 }
             }
+            
+            // Log route decision distribution for debugging
+            val route2Count = parsedEntries.count { it.routeDecision == 2 }
+            val route1Count = parsedEntries.count { it.routeDecision == 1 }
+            val route0Count = parsedEntries.count { it.routeDecision == 0 }
+            Log.d(TAG, "Policy entries: route_2=$route2Count, route_1=$route1Count, route_0=$route0Count, total=${parsedEntries.size}")
+            
+            // Return entries in original order (no sorting)
+            parsedEntries
         } catch (e: Exception) {
             Log.e(TAG, "Error reading latest policy file", e)
             emptyList()
@@ -307,6 +396,32 @@ class AiInsightsViewModel(application: Application) : AndroidViewModel(applicati
         }
         
         return Pair(currentPolicy, changes)
+    }
+    
+    /**
+     * Read last N lines from a file efficiently for large files.
+     * Uses sliding window (ArrayDeque) to avoid loading entire file into memory.
+     * Optimized for files up to 1GB (1M+ entries).
+     */
+    private fun readLastLinesBuffered(file: File, maxLines: Int): List<String> {
+        return try {
+            val fileSize = file.length()
+            // Use sliding window for efficient reading of large files
+            // ArrayDeque provides O(1) add/remove operations
+            file.bufferedReader().use { reader ->
+                val slidingWindow = ArrayDeque<String>(maxLines)
+                reader.forEachLine { line ->
+                    slidingWindow.addLast(line)
+                    if (slidingWindow.size > maxLines) {
+                        slidingWindow.removeFirst()
+                    }
+                }
+                slidingWindow.toList()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error reading file buffered: ${e.message}", e)
+            emptyList()
+        }
     }
 }
 
@@ -374,14 +489,33 @@ data class FeedbackEntry(
     val latency: Long,
     val throughput: Float,
     val success: Boolean,
-    val timestamp: String
+    val timestamp: String,
+    val svcClass: Int = 7,
+    val routeDecision: Int = 0,
+    val alpn: String = "h2",
+    val rtt: Double? = null,
+    val jitter: Double? = null,
+    val networkType: String? = null,
+    val hourOfDay: Int? = null,
+    val dayOfWeek: Int? = null
 ) {
     fun toMap(): Map<String, Any> = mapOf(
         "sni" to sni,
         "latency" to latency,
         "throughput" to throughput,
         "success" to success,
-        "timestamp" to timestamp
+        "timestamp" to timestamp,
+        "svcClass" to svcClass,
+        "routeDecision" to routeDecision,
+        "alpn" to alpn
+    ).plus(
+        listOfNotNull(
+            rtt?.let { "rtt" to it },
+            jitter?.let { "jitter" to it },
+            networkType?.let { "networkType" to it },
+            hourOfDay?.let { "hourOfDay" to it },
+            dayOfWeek?.let { "dayOfWeek" to it }
+        )
     )
 }
 

@@ -64,6 +64,14 @@ fun AiInsightsScreen(
     
     var showResetDialog by remember { mutableStateOf(false) }
     
+    // Auto-refresh every 30 seconds
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30000) // 30 seconds
+            viewModel.refresh()
+        }
+    }
+    
     LaunchedEffect(uiState.error) {
         uiState.error?.let { error ->
             scope.launch {
@@ -93,150 +101,177 @@ fun AiInsightsScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
-        if (uiState.isLoading) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+        AiInsightsContent(
+            viewModel = viewModel,
+            showResetDialog = remember { mutableStateOf(showResetDialog) },
+            onShowResetDialogChange = { showResetDialog = it },
+            onResetLearner = {
+                viewModel.resetLearner()
+                showResetDialog = false
+            },
+            paddingValues = paddingValues
+        )
+    }
+}
+
+/**
+ * AiInsightsContent: Content of AI Insights (without Scaffold).
+ * Can be used in tabs or standalone.
+ */
+@Composable
+fun AiInsightsContent(
+    viewModel: AiInsightsViewModel,
+    showResetDialog: androidx.compose.runtime.MutableState<Boolean>,
+    onShowResetDialogChange: (Boolean) -> Unit,
+    onResetLearner: () -> Unit,
+    paddingValues: androidx.compose.foundation.layout.PaddingValues = androidx.compose.foundation.layout.PaddingValues(0.dp)
+) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    
+    if (uiState.isLoading) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            CircularProgressIndicator()
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("Loading AI insights...")
+        }
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Action Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                CircularProgressIndicator()
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("Loading AI insights...")
+                Button(
+                    onClick = { viewModel.refresh() },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("🔄 Refresh")
+                }
+                Button(
+                    onClick = { onShowResetDialogChange(true) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("🧹 Reset")
+                }
+                Button(
+                    onClick = { viewModel.exportReport() },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("📤 Export")
+                }
             }
-        } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+            
+            // Summary Cards
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Action Buttons
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = { viewModel.refresh() },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("🔄 Refresh")
-                    }
-                    Button(
-                        onClick = { showResetDialog = true },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("🧹 Reset")
-                    }
-                    Button(
-                        onClick = { viewModel.exportReport() },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("📤 Export")
-                    }
-                }
-                
-                // Summary Cards
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    SummaryCard(
-                        title = "Temperature",
-                        value = String.format("%.3f", uiState.temperature),
-                        modifier = Modifier.weight(1f)
-                    )
-                    SummaryCard(
-                        title = "Success Rate",
-                        value = String.format("%.1f%%", uiState.successRate * 100),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    SummaryCard(
-                        title = "Total Feedback",
-                        value = uiState.totalFeedback.toString(),
-                        modifier = Modifier.weight(1f)
-                    )
-                    SummaryCard(
-                        title = "Last Updated",
-                        value = if (uiState.lastUpdated.isNotEmpty()) {
-                            uiState.lastUpdated.take(19) // Truncate to reasonable length
-                        } else "Never",
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                
-                // Service Type Biases
-                BiasSectionCard(
-                    title = "Service Type Biases",
-                    biases = uiState.svcBias,
-                    labels = listOf("YouTube", "Netflix", "Twitter", "Instagram", "TikTok", "Twitch", "Spotify", "Other"),
+                SummaryCard(
+                    title = "Temperature",
+                    value = String.format("%.3f", uiState.temperature),
+                    modifier = Modifier.weight(1f)
+                )
+                SummaryCard(
+                    title = "Success Rate",
+                    value = String.format("%.1f%%", uiState.successRate * 100),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SummaryCard(
+                    title = "Total Feedback",
+                    value = uiState.totalFeedback.toString(),
+                    modifier = Modifier.weight(1f)
+                )
+                SummaryCard(
+                    title = "Last Updated",
+                    value = if (uiState.lastUpdated.isNotEmpty()) {
+                        uiState.lastUpdated.take(19) // Truncate to reasonable length
+                    } else "Never",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            
+            // Service Type Biases
+            BiasSectionCard(
+                title = "Service Type Biases",
+                biases = uiState.svcBias,
+                labels = listOf("YouTube", "Netflix", "Twitter", "Instagram", "TikTok", "Twitch", "Spotify", "Other"),
+                modifier = Modifier.fillMaxWidth()
+            )
+            
+            // Route Biases
+            BiasSectionCard(
+                title = "Route Decision Biases",
+                biases = uiState.routeBias,
+                labels = listOf("🔵 Proxy", "🟢 Direct", "🟣 Optimized"),
+                modifier = Modifier.fillMaxWidth()
+            )
+            
+            // Current REALITY Policy
+            if (uiState.currentPolicy.isNotEmpty()) {
+                PolicyTableCard(
+                    title = "Current REALITY Policy",
+                    entries = uiState.currentPolicy,
                     modifier = Modifier.fillMaxWidth()
                 )
-                
-                // Route Biases
-                BiasSectionCard(
-                    title = "Route Decision Biases",
-                    biases = uiState.routeBias,
-                    labels = listOf("🔵 Proxy", "🟢 Direct", "🟣 Optimized"),
+            }
+            
+            // Policy Changes
+            if (uiState.policyChanges.isNotEmpty()) {
+                PolicyChangesCard(
+                    title = "Policy Changes (Delta)",
+                    changes = uiState.policyChanges,
                     modifier = Modifier.fillMaxWidth()
                 )
-                
-                // Current REALITY Policy
-                if (uiState.currentPolicy.isNotEmpty()) {
-                    PolicyTableCard(
-                        title = "Current REALITY Policy",
-                        entries = uiState.currentPolicy,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                
-                // Policy Changes
-                if (uiState.policyChanges.isNotEmpty()) {
-                    PolicyChangesCard(
-                        title = "Policy Changes (Delta)",
-                        changes = uiState.policyChanges,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                
-                // Recent Feedback
-                if (uiState.recentFeedback.isNotEmpty()) {
-                    FeedbackListCard(
-                        title = "Recent Feedback",
-                        feedback = uiState.recentFeedback,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
+            }
+            
+            // Recent Feedback
+            if (uiState.recentFeedback.isNotEmpty()) {
+                FeedbackListCard(
+                    title = "Recent Feedback",
+                    feedback = uiState.recentFeedback,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }
     
-    if (showResetDialog) {
+    // Reset Dialog
+    if (showResetDialog.value) {
         AlertDialog(
-            onDismissRequest = { showResetDialog = false },
+            onDismissRequest = { onShowResetDialogChange(false) },
             title = { Text("Reset Learner") },
             text = { Text("Are you sure you want to reset all learner biases and temperature to defaults? This action cannot be undone.") },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.resetLearner()
-                        showResetDialog = false
+                        onResetLearner()
+                        onShowResetDialogChange(false)
                     }
                 ) {
                     Text("Reset")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showResetDialog = false }) {
+                TextButton(onClick = { onShowResetDialogChange(false) }) {
                     Text("Cancel")
                 }
             }
