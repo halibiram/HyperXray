@@ -3,6 +3,8 @@ plugins {
     id 'org.jetbrains.kotlin.android'
     id 'org.jetbrains.kotlin.plugin.compose' version "${kotlin_version}"
     id 'com.google.protobuf' version '0.9.4'
+    id 'org.jetbrains.kotlin.plugin.serialization' version "${kotlin_version}"
+    id 'kotlin-kapt'
 }
 
 protobuf {
@@ -28,6 +30,444 @@ protobuf {
 
 def versionProps = new Properties()
 file("$rootDir/version.properties").withInputStream { versionProps.load(it) }
+
+// Download geoip.dat and geosite.dat from GitHub releases
+def geoipVersion = versionProps.GEOIP_VERSION ?: '202507212216'
+def geositeVersion = versionProps.GEOSITE_VERSION ?: '202507212216'
+def geoipUrl = "https://github.com/lhear/v2ray-rules-dat/releases/download/${geoipVersion}/geoip.dat"
+def geositeUrl = "https://github.com/lhear/v2ray-rules-dat/releases/download/${geositeVersion}/geosite.dat"
+def geoipTarget = new File("$projectDir/src/main/assets/geoip.dat")
+def geositeTarget = new File("$projectDir/src/main/assets/geosite.dat")
+
+task downloadGeoFiles {
+    group = 'build'
+    description = 'Download geoip.dat and geosite.dat from GitHub releases'
+    
+    onlyIf { !geoipTarget.exists() || !geositeTarget.exists() }
+    
+    doLast {
+        geoipTarget.parentFile.mkdirs()
+        geositeTarget.parentFile.mkdirs()
+        
+        println "Downloading geoip.dat from ${geoipUrl}..."
+        def geoipConnection = new URL(geoipUrl).openConnection()
+        geoipConnection.setRequestProperty("User-Agent", "Gradle")
+        geoipConnection.setInstanceFollowRedirects(true)
+        geoipConnection.connect()
+        
+        def geoipInput = geoipConnection.getInputStream()
+        def geoipOutput = new FileOutputStream(geoipTarget)
+        try {
+            byte[] buffer = new byte[4096]
+            int bytesRead
+            while ((bytesRead = geoipInput.read(buffer)) != -1) {
+                geoipOutput.write(buffer, 0, bytesRead)
+            }
+        } finally {
+            geoipInput.close()
+            geoipOutput.close()
+        }
+        
+        println "Downloading geosite.dat from ${geositeUrl}..."
+        def geositeConnection = new URL(geositeUrl).openConnection()
+        geositeConnection.setRequestProperty("User-Agent", "Gradle")
+        geositeConnection.setInstanceFollowRedirects(true)
+        geositeConnection.connect()
+        
+        def geositeInput = geositeConnection.getInputStream()
+        def geositeOutput = new FileOutputStream(geositeTarget)
+        try {
+            byte[] buffer = new byte[4096]
+            int bytesRead
+            while ((bytesRead = geositeInput.read(buffer)) != -1) {
+                geositeOutput.write(buffer, 0, bytesRead)
+            }
+        } finally {
+            geositeInput.close()
+            geositeOutput.close()
+        }
+        
+        println "Downloaded geoip.dat and geosite.dat"
+    }
+}
+
+// Train ONNX model with synthetic data
+task trainOnnxModel {
+    group = 'build'
+    description = 'Train and export real ONNX model with synthetic telemetry data'
+    
+    def trainScript = new File("${rootDir}/tools/train_hyperxray_policy.py")
+    def modelFile = new File("${projectDir}/src/main/assets/models/hyperxray_policy.onnx")
+    
+    onlyIf {
+        trainScript.exists()
+    }
+    
+    doLast {
+        println "[AI] 🧠 Training HyperXray policy model..."
+        modelFile.parentFile.mkdirs()
+        
+        // Try python3 first, then python
+        def pythonCmd = null
+        def pythonCommands = ["python3", "python"]
+        for (cmd in pythonCommands) {
+            try {
+                def testProcess = new ProcessBuilder(cmd, "--version")
+                    .redirectErrorStream(true)
+                    .start()
+                def exitCode = testProcess.waitFor()
+                if (exitCode == 0) {
+                    pythonCmd = cmd
+                    break
+                }
+            } catch (Exception e) {
+                // Continue to next command
+            }
+        }
+        
+        if (pythonCmd == null) {
+            println "[AI] ✗ Error: Python not found. Please install Python 3.7+"
+            println "[AI] Install dependencies with:"
+            println "[AI]   pip install torch torchvision onnx onnxruntime onnxoptimizer tqdm numpy"
+            return
+        }
+        
+        println "[AI] Using Python: ${pythonCmd}"
+        
+        try {
+            // Check if required packages are available
+            def checkProcess = new ProcessBuilder(
+                pythonCmd, "-c", 
+                "import torch, onnx, onnxruntime, onnxoptimizer, tqdm, numpy; print('OK')"
+            )
+                .directory(rootDir)
+                .redirectErrorStream(true)
+                .start()
+            
+            def checkOutput = new StringBuilder()
+            def checkReader = new BufferedReader(new InputStreamReader(checkProcess.inputStream))
+            def checkLine
+            while ((checkLine = checkReader.readLine()) != null) {
+                checkOutput.append(checkLine).append("\n")
+            }
+            def checkExitCode = checkProcess.waitFor()
+            
+            if (checkExitCode != 0) {
+                println "[AI] ✗ Missing required Python packages"
+                println "[AI] Installing dependencies... (this may take a few minutes)"
+                println "[AI] Run manually: pip install torch torchvision onnx onnxruntime onnxoptimizer tqdm numpy"
+                
+                // Try to install packages
+                def installProcess = new ProcessBuilder(
+                    pythonCmd, "-m", "pip", "install", 
+                    "--upgrade", "pip", "setuptools", "wheel"
+                )
+                    .directory(rootDir)
+                    .redirectErrorStream(true)
+                    .start()
+                
+                def installOutput = new StringBuilder()
+                def installReader = new BufferedReader(new InputStreamReader(installProcess.inputStream))
+                while ((installLine = installReader.readLine()) != null) {
+                    installOutput.append(installLine).append("\n")
+                }
+                installProcess.waitFor()
+                
+                def installTorchProcess = new ProcessBuilder(
+                    pythonCmd, "-m", "pip", "install",
+                    "torch", "torchvision", "onnx", "onnxruntime", "onnxoptimizer", "tqdm", "numpy"
+                )
+                    .directory(rootDir)
+                    .redirectErrorStream(true)
+                    .start()
+                
+                def torchOutput = new StringBuilder()
+                def torchReader = new BufferedReader(new InputStreamReader(installTorchProcess.inputStream))
+                while ((torchLine = torchReader.readLine()) != null) {
+                    println torchLine
+                }
+                installTorchProcess.waitFor()
+            }
+            
+            // Run training script
+            println "[AI] Starting model training..."
+            def process = new ProcessBuilder(pythonCmd, trainScript.absolutePath)
+                .directory(rootDir)
+                .redirectErrorStream(true)
+                .start()
+            
+            def output = new StringBuilder()
+            def reader = new BufferedReader(new InputStreamReader(process.inputStream))
+            def line
+            while ((line = reader.readLine()) != null) {
+                println line
+                output.append(line).append("\n")
+            }
+            
+            def exitCode = process.waitFor()
+            if (exitCode == 0 && modelFile.exists() && modelFile.length() > 100) {
+                println "[AI] ✓ Model trained successfully (${modelFile.length()} bytes)"
+            } else {
+                println "[AI] ⚠ Training completed but model may be invalid"
+                println "[AI] Check output above for errors"
+            }
+        } catch (Exception e) {
+            println "[AI] ✗ Training error: ${e.message}"
+            e.printStackTrace()
+        }
+    }
+}
+
+// Train large-capacity GPU-accelerated ONNX model (Loss ≤ 0.2)
+task trainLoss02GPU {
+    group = 'build'
+    description = 'Train large GPU policy model (target loss < 0.2)'
+    
+    def trainScript = new File("${rootDir}/tools/train_hyperxray_policy_loss02_gpu.py")
+    def modelFile = new File("${projectDir}/src/main/assets/models/hyperxray_policy_loss02.onnx")
+    
+    onlyIf {
+        trainScript.exists()
+    }
+    
+    doLast {
+        println "[AI] 🚀 Training large-capacity GPU policy model (Loss ≤ 0.2)..."
+        modelFile.parentFile.mkdirs()
+        
+        // Try python3 first, then python
+        def pythonCmd = null
+        def pythonCommands = ["python3", "python"]
+        for (cmd in pythonCommands) {
+            try {
+                def testProcess = new ProcessBuilder(cmd, "--version")
+                    .redirectErrorStream(true)
+                    .start()
+                def exitCode = testProcess.waitFor()
+                if (exitCode == 0) {
+                    pythonCmd = cmd
+                    break
+                }
+            } catch (Exception e) {
+                // Continue to next command
+            }
+        }
+        
+        if (pythonCmd == null) {
+            println "[AI] ✗ Error: Python not found. Please install Python 3.7+"
+            println "[AI] Install dependencies with:"
+            println "[AI]   pip install torch torchvision onnx onnxruntime onnxoptimizer tqdm numpy"
+            return
+        }
+        
+        println "[AI] Using Python: ${pythonCmd}"
+        
+        try {
+            // Check if required packages are available
+            def checkProcess = new ProcessBuilder(
+                pythonCmd, "-c", 
+                "import torch, onnx, onnxruntime, onnxoptimizer, tqdm, numpy; print('OK')"
+            )
+                .directory(rootDir)
+                .redirectErrorStream(true)
+                .start()
+            
+            def checkOutput = new StringBuilder()
+            def checkReader = new BufferedReader(new InputStreamReader(checkProcess.inputStream))
+            def checkLine
+            while ((checkLine = checkReader.readLine()) != null) {
+                checkOutput.append(checkLine).append("\n")
+            }
+            def checkExitCode = checkProcess.waitFor()
+            
+            if (checkExitCode != 0) {
+                println "[AI] ✗ Missing required Python packages"
+                println "[AI] Installing dependencies... (this may take a few minutes)"
+                println "[AI] Run manually: pip install torch torchvision onnx onnxruntime onnxoptimizer tqdm numpy"
+                
+                // Try to install packages
+                def installProcess = new ProcessBuilder(
+                    pythonCmd, "-m", "pip", "install", 
+                    "--upgrade", "pip", "setuptools", "wheel"
+                )
+                    .directory(rootDir)
+                    .redirectErrorStream(true)
+                    .start()
+                
+                def installOutput = new StringBuilder()
+                def installReader = new BufferedReader(new InputStreamReader(installProcess.inputStream))
+                while ((installLine = installReader.readLine()) != null) {
+                    installOutput.append(installLine).append("\n")
+                }
+                installProcess.waitFor()
+                
+                def installTorchProcess = new ProcessBuilder(
+                    pythonCmd, "-m", "pip", "install",
+                    "torch", "torchvision", "onnx", "onnxruntime", "onnxoptimizer", "tqdm", "numpy"
+                )
+                    .directory(rootDir)
+                    .redirectErrorStream(true)
+                    .start()
+                
+                def torchOutput = new StringBuilder()
+                def torchReader = new BufferedReader(new InputStreamReader(installTorchProcess.inputStream))
+                while ((torchLine = torchReader.readLine()) != null) {
+                    println torchLine
+                }
+                installTorchProcess.waitFor()
+            }
+            
+            // Run training script
+            println "[AI] Starting GPU-accelerated model training..."
+            println "[AI] This may take several minutes (target: loss < 0.2)..."
+            def process = new ProcessBuilder(pythonCmd, trainScript.absolutePath)
+                .directory(rootDir)
+                .redirectErrorStream(true)
+                .start()
+            
+            def output = new StringBuilder()
+            def reader = new BufferedReader(new InputStreamReader(process.inputStream))
+            def line
+            while ((line = reader.readLine()) != null) {
+                println line
+                output.append(line).append("\n")
+            }
+            
+            def exitCode = process.waitFor()
+            if (exitCode == 0 && modelFile.exists() && modelFile.length() > 100) {
+                println "[AI] ✓ GPU model trained successfully (${modelFile.length()} bytes)"
+                def int8File = new File("${projectDir}/src/main/assets/models/hyperxray_policy_loss02_int8.onnx")
+                if (int8File.exists()) {
+                    println "[AI] ✓ INT8 quantized model also available (${int8File.length()} bytes)"
+                }
+            } else {
+                println "[AI] ⚠ Training completed but model may be invalid"
+                println "[AI] Check output above for errors"
+            }
+        } catch (Exception e) {
+            println "[AI] ✗ Training error: ${e.message}"
+            e.printStackTrace()
+        }
+    }
+}
+
+// Generate ONNX model if it doesn't exist (fallback)
+task generateHyperXrayPolicyModel {
+    group = 'build'
+    description = 'Generate hyperxray_policy.onnx model if missing'
+    
+    def modelFile = new File("${projectDir}/src/main/assets/models/hyperxray_policy.onnx")
+    def modelScript = new File("${rootDir}/tools/gen_hyperxray_policy.py")
+    def modelScriptSimple = new File("${rootDir}/tools/gen_hyperxray_policy_simple.py")
+    
+    onlyIf { 
+        !modelFile.exists()
+    }
+    
+    doLast {
+        println "[AI] Generating HyperXray policy ONNX model..."
+        modelFile.parentFile.mkdirs()
+        
+        // Try PyTorch-based generator first, fallback to simple generator
+        def scripts = [
+            [script: modelScript, name: "PyTorch"],
+            [script: modelScriptSimple, name: "Simple (ONNX only)"]
+        ]
+        
+        def success = false
+        for (scriptInfo in scripts) {
+            if (!scriptInfo.script.exists()) {
+                continue
+            }
+            
+            try {
+                println "[AI] Trying ${scriptInfo.name} generator..."
+                def process = new ProcessBuilder("python", scriptInfo.script.absolutePath)
+                    .directory(rootDir)
+                    .redirectErrorStream(true)
+                    .start()
+                
+                def output = new StringBuilder()
+                def reader = new BufferedReader(new InputStreamReader(process.inputStream))
+                def line
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n")
+                    println line
+                }
+                
+                def exitCode = process.waitFor()
+                if (exitCode == 0 && modelFile.exists() && modelFile.length() > 100) {
+                    println "[AI] ✓ Model generated successfully using ${scriptInfo.name} generator (${modelFile.length()} bytes)"
+                    success = true
+                    break
+                } else {
+                    println "[AI] ${scriptInfo.name} generator failed or produced invalid model"
+                }
+            } catch (Exception e) {
+                println "[AI] ${scriptInfo.name} generator error: ${e.message}"
+            }
+        }
+        
+        if (!success) {
+            println "[AI] Warning: All model generators failed"
+            println "[AI] Please install Python dependencies:"
+            println "[AI]   pip install onnx numpy  # for simple generator"
+            println "[AI]   pip install torch onnx  # for PyTorch generator (optional)"
+        }
+    }
+}
+
+// Download geo files and generate model before processing assets
+android.applicationVariants.all { variant ->
+    variant.mergeAssetsProvider.get().dependsOn downloadGeoFiles
+    // Train model first, then generate if needed
+    generateHyperXrayPolicyModel.dependsOn trainOnnxModel
+    variant.mergeAssetsProvider.get().dependsOn generateHyperXrayPolicyModel
+}
+
+// Copy xray-wrapper executable to jniLibs as .so file (Android only packages .so files)
+afterEvaluate {
+    // Copy from build output to jniLibs after NDK build, rename to .so extension
+    tasks.matching { it.name.startsWith("externalNativeBuild") && !it.name.contains("Clean") }.configureEach { task ->
+        task.finalizedBy {
+            tasks.create("copyXrayWrapper${task.name.capitalize()}") {
+                doLast {
+                    // Skip if build directory doesn't exist (e.g., during clean)
+                    if (!file("${project.buildDir}/intermediates/cxx").exists()) {
+                        return
+                    }
+                    
+                    ["arm64-v8a", "x86_64"].each { abi ->
+                        // Find wrapper in any cxx build directory
+                        def wrapperSource = null
+                        def cxxDir = file("${project.buildDir}/intermediates/cxx")
+                        if (cxxDir.exists()) {
+                            cxxDir.eachDirRecurse { dir ->
+                                def wrapperFile = new File(dir, "obj/local/${abi}/xray-wrapper")
+                                if (wrapperFile.exists()) {
+                                    wrapperSource = wrapperFile
+                                    return true
+                                }
+                            }
+                        }
+
+                        if (wrapperSource && wrapperSource.exists()) {
+                            // Copy as libxray-wrapper.so so Android packages it
+                            def wrapperDest = file("${projectDir}/src/main/jniLibs/${abi}/libxray-wrapper.so")
+                            wrapperDest.parentFile.mkdirs()
+                            project.copy {
+                                from wrapperSource
+                                into wrapperDest.parentFile
+                                rename { "libxray-wrapper.so" }
+                                fileMode 0755
+                            }
+                            println "Copied xray-wrapper from ${wrapperSource} to ${wrapperDest}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 android {
     namespace "com.hyperxray.an"
@@ -97,12 +537,6 @@ android {
         }
     }
 
-    lintOptions {
-        checkReleaseBuilds false
-        // Or, if you prefer, you can continue to check for errors in release builds,
-        // but continue the build even when errors are found:
-        abortOnError false
-    }
 
     packagingOptions {
         jniLibs {
@@ -117,8 +551,14 @@ android {
         includeInBundle = false
     }
     ndkVersion versionProps.NDK_VERSION
+    
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_22
+        targetCompatibility JavaVersion.VERSION_22
+    }
+    
     kotlinOptions {
-        jvmTarget = '1.8'
+        jvmTarget = '22'
     }
 
     splits {
@@ -156,6 +596,10 @@ android {
             }
         }
     }
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
 }
 
 dependencies {
@@ -181,4 +625,11 @@ dependencies {
     implementation 'com.github.nanihadesuka:LazyColumnScrollbar:2.2.0'
     implementation 'sh.calvin.reorderable:reorderable:2.5.1'
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
+
+    // HyperXray-AI Optimizer dependencies
+    implementation 'androidx.datastore:datastore-preferences:1.1.1'
+    implementation 'androidx.room:room-runtime:2.6.1'
+    kapt 'androidx.room:room-compiler:2.6.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3'
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.20.0'
 }
