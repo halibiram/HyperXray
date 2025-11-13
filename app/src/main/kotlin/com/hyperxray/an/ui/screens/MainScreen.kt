@@ -141,7 +141,8 @@ fun MainScreen(
                 geositeFilePickerLauncher = launchers.geositeFilePickerLauncher,
                 logListState = logListState,
                 configListState = configListState,
-                settingsScrollState = settingsScrollState
+                settingsScrollState = settingsScrollState,
+                onSwitchVpnService = callbacks.onSwitchVpnService
             )
         }
     } else {
@@ -155,7 +156,8 @@ fun MainScreen(
             geositeFilePickerLauncher = launchers.geositeFilePickerLauncher,
             logListState = logListState,
             configListState = configListState,
-            settingsScrollState = settingsScrollState
+            settingsScrollState = settingsScrollState,
+            onSwitchVpnService = callbacks.onSwitchVpnService
         )
     }
 }

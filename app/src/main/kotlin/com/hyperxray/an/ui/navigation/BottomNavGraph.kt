@@ -108,7 +108,8 @@ fun BottomNavHost(
     geositeFilePickerLauncher: ActivityResultLauncher<Array<String>>,
     logListState: LazyListState,
     configListState: LazyListState,
-    settingsScrollState: ScrollState
+    settingsScrollState: ScrollState,
+    onSwitchVpnService: () -> Unit = {}
 ) {
     NavHost(
         navController = navController,
@@ -122,7 +123,10 @@ fun BottomNavHost(
             popEnterTransition = { popEnterTransition() },
             popExitTransition = { popExitTransition() }
         ) {
-            DashboardScreen(mainViewModel = mainViewModel)
+            DashboardScreen(
+                mainViewModel = mainViewModel,
+                onSwitchVpnService = onSwitchVpnService
+            )
         }
 
         composable(

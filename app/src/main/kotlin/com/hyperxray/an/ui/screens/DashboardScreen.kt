@@ -1,26 +1,27 @@
 package com.hyperxray.an.ui.screens
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -33,15 +34,25 @@ import com.hyperxray.an.common.formatThroughput
 import com.hyperxray.an.common.formatRtt
 import com.hyperxray.an.common.formatLoss
 import com.hyperxray.an.common.formatHandshakeTime
+import com.hyperxray.an.ui.screens.dashboard.AnimatedStatCard
+import com.hyperxray.an.ui.screens.dashboard.ConnectionStatusCard
+import com.hyperxray.an.ui.screens.dashboard.ModernStatCard
+import com.hyperxray.an.ui.screens.dashboard.PerformanceIndicator
+import com.hyperxray.an.ui.screens.dashboard.QuickStatsCard
+import com.hyperxray.an.ui.screens.dashboard.StatRow
+import com.hyperxray.an.ui.screens.dashboard.TrafficChartCard
 import com.hyperxray.an.viewmodel.MainViewModel
 import kotlinx.coroutines.delay
 
 @Composable
 fun DashboardScreen(
-    mainViewModel: MainViewModel
+    mainViewModel: MainViewModel,
+    onSwitchVpnService: () -> Unit = {}
 ) {
     val coreStats by mainViewModel.coreStatsState.collectAsState()
     val telemetryState by mainViewModel.telemetryState.collectAsState()
+    val isServiceEnabled by mainViewModel.isServiceEnabled.collectAsState()
+    val controlMenuClickable by mainViewModel.controlMenuClickable.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     LaunchedEffect(Unit) {
@@ -56,28 +67,118 @@ fun DashboardScreen(
         }
     }
 
+    // Stabilize: Use debounced check to prevent flickering
+    // Only show/hide when connection state changes, not on every throughput update
+    val showTrafficChart = remember(isServiceEnabled) {
+        isServiceEnabled
+    }
+    
+    // Stabilize traffic chart visibility - only hide when disconnected
+    // Once shown, keep it visible even if throughput temporarily drops to 0
+    val shouldShowTrafficChart = remember(isServiceEnabled) {
+        isServiceEnabled
+    }
+    
+    // LazyListState with increased prefetch distance for smoother scrolling
+    val lazyListState = rememberLazyListState()
+    
+    val performanceMetrics = remember(coreStats) {
+        derivedStateOf {
+            val totalThroughput = coreStats.uplinkThroughput + coreStats.downlinkThroughput
+            val maxThroughput = 10_000_000.0
+            val throughputRatio = (totalThroughput / maxThroughput).toFloat().coerceIn(0f, 1f)
+            val memoryUsage = if (coreStats.sys > 0) {
+                (coreStats.alloc.toFloat() / coreStats.sys.toFloat()).coerceIn(0f, 1f)
+            } else 0f
+            Triple(totalThroughput, throughputRatio, memoryUsage)
+        }
+    }
+    
+    // Cache gradient colors to avoid recreation
+    val performanceGradient = remember { listOf(Color(0xFF06B6D4), Color(0xFF3B82F6), Color(0xFF6366F1)) }
+    val trafficGradient = remember { listOf(Color(0xFF6366F1), Color(0xFF8B5CF6), Color(0xFFA855F7)) }
+    val systemGradient = remember { listOf(Color(0xFF10B981), Color(0xFF059669), Color(0xFF047857)) }
+    val memoryGradient = remember { listOf(Color(0xFFF59E0B), Color(0xFFEF4444), Color(0xFFDC2626)) }
+    val telemetryGradient = remember { listOf(Color(0xFFEC4899), Color(0xFFDB2777), Color(0xFFBE185D)) }
+
     LazyColumn(
+        state = lazyListState,
         modifier = Modifier
             .fillMaxSize()
-            .padding(start = 16.dp, end = 16.dp),
-        contentPadding = PaddingValues(bottom = 16.dp, top = 16.dp)
+            .padding(horizontal = 20.dp),
+        contentPadding = PaddingValues(vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+        // Optimize: Pre-compose items that are about to become visible
+        // This is handled automatically by LazyColumn, but we ensure keys are stable
     ) {
-
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.extraLarge),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+            // Connection Status Hero Card
+            item(key = "connection_status") {
+                ConnectionStatusCard(
+                    isConnected = isServiceEnabled,
+                    isClickable = controlMenuClickable,
+                    onToggleConnection = onSwitchVpnService,
+                    uptime = coreStats.uptime
                 )
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = "Traffic",
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.padding(bottom = 8.dp)
+            }
+
+            // Quick Stats Summary
+            item(key = "quick_stats") {
+                QuickStatsCard(
+                    uplink = coreStats.uplink,
+                    downlink = coreStats.downlink,
+                    uplinkThroughput = coreStats.uplinkThroughput,
+                    downlinkThroughput = coreStats.downlinkThroughput
+                )
+            }
+            
+            // Traffic Chart (always show if connected, prevents flickering)
+            if (shouldShowTrafficChart) {
+                item(key = "traffic_chart") {
+                    TrafficChartCard(
+                        uplinkThroughput = coreStats.uplinkThroughput,
+                        downlinkThroughput = coreStats.downlinkThroughput
                     )
+                }
+            }
+            
+            // Performance Indicators (always show if connected, prevents flickering)
+            if (shouldShowTrafficChart) {
+                item(key = "performance") {
+                    val (totalThroughput, throughputRatio, memoryUsage) = performanceMetrics.value
+                    
+                    ModernStatCard(
+                        title = "Performance",
+                        iconRes = R.drawable.dashboard,
+                        gradientColors = performanceGradient,
+                        content = {
+                            // Always show throughput indicator if connected (even if 0)
+                            PerformanceIndicator(
+                                label = "Total Throughput",
+                                value = throughputRatio,
+                                displayValue = formatThroughput(totalThroughput),
+                                color = Color(0xFF06B6D4)
+                            )
+                            
+                            Spacer(modifier = Modifier.height(16.dp))
+                            
+                            PerformanceIndicator(
+                                label = "Memory Usage",
+                                value = memoryUsage,
+                                displayValue = "${(memoryUsage * 100).toInt()}%",
+                                color = if (memoryUsage > 0.8f) Color(0xFFEF4444) else Color(0xFF10B981)
+                            )
+                        }
+                    )
+                }
+            }
+
+        item(key = "traffic") {
+            AnimatedStatCard(
+                title = "Traffic",
+                iconRes = R.drawable.cloud_download,
+                gradientColors = trafficGradient,
+                animationDelay = 100,
+                content = {
                     StatRow(
                         label = stringResource(id = R.string.stats_uplink),
                         value = formatBytes(coreStats.uplink)
@@ -95,25 +196,16 @@ fun DashboardScreen(
                         value = formatThroughput(coreStats.downlinkThroughput)
                     )
                 }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
+            )
         }
 
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.extraLarge),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                )
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = "System Stats",
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
+        item(key = "system_stats") {
+            AnimatedStatCard(
+                title = "System Stats",
+                iconRes = R.drawable.dashboard,
+                gradientColors = systemGradient,
+                animationDelay = 200,
+                content = {
                     StatRow(
                         label = stringResource(id = R.string.stats_num_goroutine),
                         value = formatNumber(coreStats.numGoroutine.toLong())
@@ -127,25 +219,16 @@ fun DashboardScreen(
                         value = formatUptime(coreStats.uptime)
                     )
                 }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
+            )
         }
 
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.extraLarge),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                )
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = "Memory Stats",
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
+        item(key = "memory_stats") {
+            AnimatedStatCard(
+                title = "Memory Stats",
+                iconRes = R.drawable.settings,
+                gradientColors = memoryGradient,
+                animationDelay = 300,
+                content = {
                     StatRow(
                         label = stringResource(id = R.string.stats_alloc),
                         value = formatBytes(coreStats.alloc)
@@ -175,25 +258,16 @@ fun DashboardScreen(
                         value = formatUptime((coreStats.pauseTotalNs / 1_000_000_000).toInt())
                     )
                 }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
+            )
         }
 
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.extraLarge),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                )
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        text = "AI Telemetry",
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
+        item(key = "ai_telemetry") {
+            AnimatedStatCard(
+                title = "AI Telemetry",
+                iconRes = R.drawable.optimizer,
+                gradientColors = telemetryGradient,
+                animationDelay = 400,
+                content = {
                     if (telemetryState != null) {
                         StatRow(
                             label = "Avg Throughput",
@@ -219,33 +293,12 @@ fun DashboardScreen(
                         Text(
                             text = stringResource(id = R.string.vpn_disconnected),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 8.dp)
                         )
                     }
                 }
-            }
+            )
         }
-    }
-}
-
-@Composable
-fun StatRow(label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f)
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-            fontFamily = FontFamily.Monospace
-        )
     }
 }

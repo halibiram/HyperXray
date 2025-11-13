@@ -20,20 +20,21 @@ import androidx.compose.ui.unit.sp
 /**
  * Material 3 Expressive Color Scheme - Light Theme
  * Features more vibrant colors, higher contrast, and expressive design tokens
+ * Modern purple/indigo gradient theme for premium feel
  */
 private val ExpressiveLightColorScheme = lightColorScheme(
-    primary = Color(0xFF006C4C), // Vibrant green
+    primary = Color(0xFF6366F1), // Modern indigo
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFF8CF5C8), // Bright green container
-    onPrimaryContainer = Color(0xFF002114),
-    secondary = Color(0xFF4C6329),
+    primaryContainer = Color(0xFFE0E7FF), // Light indigo container
+    onPrimaryContainer = Color(0xFF1E1B4B),
+    secondary = Color(0xFF8B5CF6), // Purple accent
     onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFCEE9A6),
-    onSecondaryContainer = Color(0xFF0F2000),
-    tertiary = Color(0xFF3D6373),
+    secondaryContainer = Color(0xFFEDE9FE), // Light purple container
+    onSecondaryContainer = Color(0xFF3B1F5C),
+    tertiary = Color(0xFFA855F7), // Vibrant purple
     onTertiary = Color(0xFFFFFFFF),
-    tertiaryContainer = Color(0xFFC1E8FB),
-    onTertiaryContainer = Color(0xFF001F29),
+    tertiaryContainer = Color(0xFFF3E8FF), // Light purple container
+    onTertiaryContainer = Color(0xFF4A1F6B),
     error = Color(0xFFBA1A1A),
     onError = Color(0xFFFFFFFF),
     errorContainer = Color(0xFFFFDAD6),
@@ -62,20 +63,21 @@ private val ExpressiveLightColorScheme = lightColorScheme(
 /**
  * Material 3 Expressive Color Scheme - Dark Theme
  * Features more vibrant colors, higher contrast, and expressive design tokens
+ * Modern purple/indigo gradient theme for premium feel
  */
 private val ExpressiveDarkColorScheme = darkColorScheme(
-    primary = Color(0xFF6FD9AC), // Bright green
-    onPrimary = Color(0xFF003826),
-    primaryContainer = Color(0xFF005139),
-    onPrimaryContainer = Color(0xFF8CF5C8),
-    secondary = Color(0xFFB2CC8C),
-    onSecondary = Color(0xFF1F3700),
-    secondaryContainer = Color(0xFF354F15),
-    onSecondaryContainer = Color(0xFFCEE9A6),
-    tertiary = Color(0xFFA5CCDF),
-    onTertiary = Color(0xFF0A3444),
-    tertiaryContainer = Color(0xFF244A5B),
-    onTertiaryContainer = Color(0xFFC1E8FB),
+    primary = Color(0xFF818CF8), // Bright indigo
+    onPrimary = Color(0xFF1E1B4B),
+    primaryContainer = Color(0xFF4338CA), // Dark indigo container
+    onPrimaryContainer = Color(0xFFE0E7FF),
+    secondary = Color(0xFFA78BFA), // Bright purple
+    onSecondary = Color(0xFF3B1F5C),
+    secondaryContainer = Color(0xFF6D28D9), // Dark purple container
+    onSecondaryContainer = Color(0xFFEDE9FE),
+    tertiary = Color(0xFFC084FC), // Vibrant purple
+    onTertiary = Color(0xFF4A1F6B),
+    tertiaryContainer = Color(0xFF7C3AED), // Dark purple container
+    onTertiaryContainer = Color(0xFFF3E8FF),
     error = Color(0xFFFFB4AB),
     onError = Color(0xFF690005),
     errorContainer = Color(0xFF93000A),
