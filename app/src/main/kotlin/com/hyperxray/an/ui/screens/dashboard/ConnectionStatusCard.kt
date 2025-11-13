@@ -104,13 +104,14 @@ fun ConnectionStatusCard(
             .fillMaxWidth()
             .scale(cardScale)
             .alpha(cardAlpha)
-            .clip(RoundedCornerShape(28.dp)),
+            .clip(RoundedCornerShape(32.dp)),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
         ),
         elevation = CardDefaults.cardElevation(
-            defaultElevation = 12.dp,
-            pressedElevation = 16.dp
+            defaultElevation = 16.dp,
+            pressedElevation = 20.dp,
+            hoveredElevation = 18.dp
         )
     ) {
         Box(
@@ -128,25 +129,52 @@ fun ConnectionStatusCard(
                     .padding(28.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Status Indicator
+                // Status Indicator with enhanced styling
                 Box(
-                    modifier = Modifier
-                        .size(80.dp)
-                        .scale(indicatorScale)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.radialGradient(statusGradient)
-                        ),
-                    contentAlignment = Alignment.Center
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.size(96.dp)
                 ) {
-                    androidx.compose.foundation.Image(
-                        painter = painterResource(
-                            id = if (isConnected) R.drawable.play else R.drawable.pause
-                        ),
-                        contentDescription = null,
-                        modifier = Modifier.size(40.dp),
-                        colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(Color.White)
+                    // Outer glow ring
+                    Box(
+                        modifier = Modifier
+                            .size(96.dp)
+                            .scale(indicatorScale * 1.15f)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        statusGradient.first().copy(alpha = 0.2f),
+                                        Color.Transparent
+                                    ),
+                                    center = androidx.compose.ui.geometry.Offset(48f, 48f),
+                                    radius = 50f
+                                )
+                            )
                     )
+                    // Main indicator
+                    Box(
+                        modifier = Modifier
+                            .size(80.dp)
+                            .scale(indicatorScale)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.radialGradient(
+                                    colors = statusGradient,
+                                    center = androidx.compose.ui.geometry.Offset(40f, 40f),
+                                    radius = 40f
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        androidx.compose.foundation.Image(
+                            painter = painterResource(
+                                id = if (isConnected) R.drawable.play else R.drawable.pause
+                            ),
+                            contentDescription = null,
+                            modifier = Modifier.size(40.dp),
+                            colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(Color.White)
+                        )
+                    }
                 }
                 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -171,13 +199,13 @@ fun ConnectionStatusCard(
                 
                 Spacer(modifier = Modifier.height(24.dp))
                 
-                // Toggle Button
+                // Toggle Button with enhanced styling
                 Button(
                     onClick = onToggleConnection,
                     enabled = isClickable,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(56.dp),
+                        .height(58.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (isConnected) {
                             Color(0xFFEF4444)
@@ -187,7 +215,12 @@ fun ConnectionStatusCard(
                         contentColor = Color.White,
                         disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant
                     ),
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(18.dp),
+                    elevation = ButtonDefaults.buttonElevation(
+                        defaultElevation = 4.dp,
+                        pressedElevation = 2.dp,
+                        disabledElevation = 0.dp
+                    )
                 ) {
                     if (!isClickable) {
                         CircularProgressIndicator(

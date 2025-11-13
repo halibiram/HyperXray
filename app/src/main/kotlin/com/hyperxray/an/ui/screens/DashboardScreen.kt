@@ -1,11 +1,13 @@
 package com.hyperxray.an.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -105,12 +108,36 @@ fun DashboardScreen(
         state = lazyListState,
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
             .padding(horizontal = 20.dp),
-        contentPadding = PaddingValues(vertical = 24.dp),
+        contentPadding = PaddingValues(
+            top = 16.dp,
+            bottom = 24.dp
+        ),
         verticalArrangement = Arrangement.spacedBy(20.dp),
         // Optimize: Pre-compose items that are about to become visible
         // This is handled automatically by LazyColumn, but we ensure keys are stable
     ) {
+            // Modern Header Section
+            item(key = "header") {
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Dashboard",
+                        style = MaterialTheme.typography.displaySmall.copy(
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    Text(
+                        text = if (isServiceEnabled) "Connected and secured" else "Ready to connect",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             // Connection Status Hero Card
             item(key = "connection_status") {
                 ConnectionStatusCard(
