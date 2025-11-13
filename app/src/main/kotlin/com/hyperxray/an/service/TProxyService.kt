@@ -202,9 +202,12 @@ class TProxyService : VpnService() {
         // Stop Xray and clean up all resources
         stopXray()
         
-        // Remove any pending log broadcasts
+        // Remove any pending log broadcasts and flush remaining logs
         handler.removeCallbacks(broadcastLogsRunnable)
         broadcastLogsRunnable.run()
+        
+        // Flush log file buffer before shutdown
+        logFileManager.flush()
         
         // Stop AI optimizer
         tproxyAiOptimizer?.stopOptimization()
@@ -604,7 +607,12 @@ class TProxyService : VpnService() {
                                     synchronized(logBroadcastBuffer) {
                                         logBroadcastBuffer.add(line)
                                         handler.removeCallbacks(broadcastLogsRunnable)
-                                        handler.post(broadcastLogsRunnable)
+                                        // Only broadcast immediately if buffer threshold reached, otherwise delay
+                                        if (logBroadcastBuffer.size >= BROADCAST_BUFFER_SIZE_THRESHOLD) {
+                                            handler.post(broadcastLogsRunnable)
+                                        } else {
+                                            handler.postDelayed(broadcastLogsRunnable, BROADCAST_DELAY_MS)
+                                        }
                                     }
                                     
                                     // Process SNI for TLS optimization
@@ -1508,8 +1516,10 @@ class TProxyService : VpnService() {
         const val EXTRA_LOG_DATA: String = "log_data"
         const val EXTRA_ERROR_MESSAGE: String = "error_message"
         private const val TAG = "VpnService"
-        private const val BROADCAST_DELAY_MS: Long = 10
-        private const val BROADCAST_BUFFER_SIZE_THRESHOLD: Int = 1
+        // Ultra-optimized broadcast settings for maximum performance
+        // Larger batches = fewer broadcasts = better performance
+        private const val BROADCAST_DELAY_MS: Long = 1000 // 1 second delay for larger batches
+        private const val BROADCAST_BUFFER_SIZE_THRESHOLD: Int = 100 // Larger batches (100 entries)
 
         init {
             System.loadLibrary("hev-socks5-tunnel")

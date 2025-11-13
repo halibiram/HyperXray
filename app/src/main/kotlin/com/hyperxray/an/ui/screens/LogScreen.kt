@@ -24,6 +24,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,22 +71,18 @@ fun LogScreen(
     var showSniffingOnly by remember { mutableStateOf(false) }
     var showAiOnly by remember { mutableStateOf(false) }
     
-    // Apply filters (including search query, sniffing, and AI)
-    val filteredEntries = remember(allEntries, selectedLogLevel, selectedConnectionType, searchQuery, showSniffingOnly, showAiOnly) {
-        allEntries.filter { entry ->
-            val level = parseLogLevel(entry)
-            val connType = parseConnectionType(entry)
-            val isSniffing = try { isSniffingLog(entry) } catch (e: Exception) { false }
-            val isAi = try { isAiLog(entry) } catch (e: Exception) { false }
-            
-            val levelMatch = selectedLogLevel == null || level == selectedLogLevel
-            val typeMatch = selectedConnectionType == null || connType == selectedConnectionType
-            val searchMatch = searchQuery.isBlank() || entry.contains(searchQuery, ignoreCase = true)
-            val sniffingMatch = !showSniffingOnly || isSniffing
-            val aiMatch = !showAiOnly || isAi
-            
-            levelMatch && typeMatch && searchMatch && sniffingMatch && aiMatch
-        }
+    // Use ViewModel's index-based filtered entries (ultra-fast for 100K entries)
+    // MegaLogBuffer handles all filtering with index-based O(1) lookups
+    val filteredEntries = logViewModel.filteredEntries.collectAsStateWithLifecycle().value
+    
+    // Update ViewModel filters when UI filters change
+    LaunchedEffect(selectedLogLevel, selectedConnectionType, showSniffingOnly, showAiOnly) {
+        logViewModel.updateFilters(
+            level = selectedLogLevel,
+            type = selectedConnectionType,
+            sniffingOnly = showSniffingOnly,
+            aiOnly = showAiOnly
+        )
     }
 
     DisposableEffect(key1 = Unit) {

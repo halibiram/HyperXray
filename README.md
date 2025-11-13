@@ -58,8 +58,21 @@ The project **includes a simplified version** with basic rules (`"geoip:private"
     cd HyperXray
     ```
 3.  **📂 Import**: Open the project in Android Studio.
-4.  **🔨 Integrate Core**: Place the Xray-core binary (`libxray.so`) for your target architecture in `app/src/main/jniLibs/[architecture directory]`. E.g., `app/src/main/jniLibs/arm64-v8a/libxray.so`.
-5.  **📄 Add Data Files**: The build process automatically downloads `geoip.dat` and `geosite.dat` files during the build. These are required for routing.
+4.  **📦 Download Dependencies**: Run Gradle tasks to download required dependencies:
+    ```bash
+    # Update hev-socks5-tunnel submodule
+    ./gradlew updateHevSocks5Tunnel
+    
+    # Download geo files (auto-downloaded during build)
+    ./gradlew downloadGeoFiles
+    
+    # Check/download Xray-core binaries (may require manual build)
+    ./gradlew downloadXrayCore
+    ```
+5.  **🔨 Integrate Core**: 
+    - If Xray-core binaries were downloaded, they are already in place.
+    - Otherwise, manually place the Xray-core binary (`libxray.so`) for your target architecture in `app/src/main/jniLibs/[architecture directory]`. E.g., `app/src/main/jniLibs/arm64-v8a/libxray.so`.
+    - Note: Xray-core binaries may need to be built from source (see `.github/workflows/build.yml` for reference).
 6.  **🏗️ Build**: Sync Gradle and run the build task. The app will be built with the new logo and branding.
 
 ## 🤝 Contributing

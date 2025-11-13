@@ -3,6 +3,7 @@ package com.hyperxray.an.data.source
 import android.content.Context
 import android.util.Log
 import java.io.BufferedReader
+import java.io.BufferedWriter
 import java.io.File
 import java.io.FileOutputStream
 import java.io.FileReader
@@ -14,9 +15,13 @@ import java.io.RandomAccessFile
 /**
  * Manages log file operations with automatic size-based truncation.
  * Ensures log file doesn't exceed MAX_LOG_SIZE_BYTES by truncating oldest entries.
+ * Uses buffered writes to improve performance.
  */
 class LogFileManager(context: Context) {
     val logFile: File
+    private var bufferedWriter: BufferedWriter? = null
+    private var writeCount = 0
+    private val flushThreshold = 50 // Flush after 50 writes (larger batches = better performance)
 
     init {
         val filesDir = context.filesDir
@@ -27,17 +32,53 @@ class LogFileManager(context: Context) {
     @Synchronized
     fun appendLog(logEntry: String?) {
         try {
-            FileWriter(logFile, true).use { fileWriter ->
-                PrintWriter(fileWriter).use { printWriter ->
-                    if (logEntry != null) {
-                        printWriter.println(logEntry)
-                    }
+            if (logEntry == null) return
+            
+            // Use buffered writer for better performance
+            if (bufferedWriter == null) {
+                bufferedWriter = BufferedWriter(FileWriter(logFile, true), 8192) // 8KB buffer
+            }
+            
+            bufferedWriter?.let { writer ->
+                writer.write(logEntry)
+                writer.newLine()
+                writeCount++
+                
+                // Flush periodically instead of every write
+                if (writeCount >= flushThreshold) {
+                    writer.flush()
+                    writeCount = 0
+                    // Check truncation only after flush to reduce I/O
+                    checkAndTruncateLogFile()
                 }
             }
         } catch (e: IOException) {
             Log.e(TAG, "Error appending log to file", e)
+            // Close and reset writer on error
+            closeWriter()
+        }
+    }
+    
+    @Synchronized
+    private fun closeWriter() {
+        try {
+            bufferedWriter?.flush()
+            bufferedWriter?.close()
+        } catch (e: IOException) {
+            Log.e(TAG, "Error closing buffered writer", e)
         } finally {
+            bufferedWriter = null
+            writeCount = 0
+        }
+    }
+    
+    @Synchronized
+    fun flush() {
+        try {
+            bufferedWriter?.flush()
             checkAndTruncateLogFile()
+        } catch (e: IOException) {
+            Log.e(TAG, "Error flushing log file", e)
         }
     }
 
@@ -65,6 +106,9 @@ class LogFileManager(context: Context) {
 
     @Synchronized
     fun clearLogs() {
+        // Close writer before clearing
+        closeWriter()
+        
         if (logFile.exists()) {
             try {
                 FileWriter(logFile, false).use { fileWriter ->

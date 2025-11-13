@@ -52,9 +52,11 @@ class AiLogCapture(
     private val scope = CoroutineScope(Dispatchers.IO)
     private val handler = Handler(Looper.getMainLooper())
     private val logBroadcastBuffer: MutableList<String> = mutableListOf()
+    private val BROADCAST_DELAY_MS: Long = 1000 // Match TProxyService ultra-optimized delay
+    private val BROADCAST_BUFFER_SIZE_THRESHOLD: Int = 100 // Match TProxyService larger batches
     private val broadcastLogsRunnable = Runnable {
         synchronized(logBroadcastBuffer) {
-            if (logBroadcastBuffer.isNotEmpty()) {
+            if (logBroadcastBuffer.size >= BROADCAST_BUFFER_SIZE_THRESHOLD || logBroadcastBuffer.isNotEmpty()) {
                 val logUpdateIntent = Intent(TProxyService.ACTION_LOG_UPDATE)
                 logUpdateIntent.setPackage(context.packageName)
                 logUpdateIntent.putStringArrayListExtra(
@@ -169,11 +171,16 @@ class AiLogCapture(
                                 val formattedLine = formatLogcatLine(line)
                                 if (formattedLine != null) {
                                     logFileManager.appendLog(formattedLine)
-                                    // Broadcast immediately
+                                    // Batch broadcasts to reduce frequency
                                     synchronized(logBroadcastBuffer) {
                                         logBroadcastBuffer.add(formattedLine)
                                         handler.removeCallbacks(broadcastLogsRunnable)
-                                        handler.post(broadcastLogsRunnable)
+                                        // Only broadcast immediately if buffer threshold reached, otherwise delay
+                                        if (logBroadcastBuffer.size >= BROADCAST_BUFFER_SIZE_THRESHOLD) {
+                                            handler.post(broadcastLogsRunnable)
+                                        } else {
+                                            handler.postDelayed(broadcastLogsRunnable, BROADCAST_DELAY_MS)
+                                        }
                                     }
                                 }
                                 
