@@ -5,6 +5,7 @@ plugins {
     id 'com.google.protobuf' version '0.9.4'
     id 'org.jetbrains.kotlin.plugin.serialization' version "${kotlin_version}"
     id 'kotlin-kapt'
+    id 'androidx.baselineprofile' version '1.3.2'
 }
 
 protobuf {
@@ -38,224 +39,6 @@ def geoipUrl = "https://github.com/lhear/v2ray-rules-dat/releases/download/${geo
 def geositeUrl = "https://github.com/lhear/v2ray-rules-dat/releases/download/${geositeVersion}/geosite.dat"
 def geoipTarget = new File("$projectDir/src/main/assets/geoip.dat")
 def geositeTarget = new File("$projectDir/src/main/assets/geosite.dat")
-
-// Xray-core binary locations
-def xrayVersion = versionProps.XRAY_CORE_VERSION ?: 'v25.10.15'
-def xrayArm64Target = new File("$projectDir/src/main/jniLibs/arm64-v8a/libxray.so")
-def xrayX86Target = new File("$projectDir/src/main/jniLibs/x86_64/libxray.so")
-
-task downloadXrayCore {
-    group = 'build'
-    description = 'Download Xray-core binaries (requires manual build if pre-built binaries not available)'
-    
-    doLast {
-        println "=========================================="
-        println "Downloading Xray-core binaries..."
-        println "Version: ${xrayVersion}"
-        println "=========================================="
-        
-        xrayArm64Target.parentFile.mkdirs()
-        xrayX86Target.parentFile.mkdirs()
-        
-        // Note: Xray-core doesn't provide pre-built Android binaries in releases
-        // This task downloads from a custom source or you need to build from source
-        // For now, we'll try to download from GitHub releases (may not have Android binaries)
-        
-        def baseUrl = "https://github.com/XTLS/Xray-core/releases/download/${xrayVersion}"
-        
-        // Try to download Android binaries if available
-        // Most likely these URLs won't work, but we'll try
-        def arm64Url = "${baseUrl}/Xray-android-arm64-v8a.zip"
-        def x86Url = "${baseUrl}/Xray-android-x86_64.zip"
-        
-        // Alternative: try downloading from custom mirror or build from source
-        println "Note: Xray-core Android binaries may not be available in GitHub releases."
-        println "You may need to build from source or use pre-built binaries from another source."
-        println ""
-        println "To build from source, run:"
-        println "  ./gradlew buildXrayCore"
-        println ""
-        
-        // Check if files already exist
-        if (xrayArm64Target.exists() && xrayX86Target.exists()) {
-            println "Xray-core binaries already exist:"
-            println "  arm64-v8a: ${xrayArm64Target} (${xrayArm64Target.length()} bytes)"
-            println "  x86_64: ${xrayX86Target} (${xrayX86Target.length()} bytes)"
-            println "Skipping download. Use --rerun-tasks to force download."
-            return
-        }
-        
-        // Try downloading (will likely fail, but we'll try)
-        try {
-            if (!xrayArm64Target.exists()) {
-                println "Attempting to download arm64-v8a binary from ${arm64Url}..."
-                println "This may fail - Android binaries may not be available in releases."
-                println "You may need to build from source instead."
-                // Uncomment below if you have a working URL for Android binaries
-                // def arm64Connection = new URL(arm64Url).openConnection()
-                // arm64Connection.setRequestProperty("User-Agent", "Gradle")
-                // arm64Connection.setInstanceFollowRedirects(true)
-                // arm64Connection.connect()
-                // ... download logic
-            }
-            
-            if (!xrayX86Target.exists()) {
-                println "Attempting to download x86_64 binary from ${x86Url}..."
-                println "This may fail - Android binaries may not be available in releases."
-                println "You may need to build from source instead."
-                // Uncomment below if you have a working URL for Android binaries
-                // def x86Connection = new URL(x86Url).openConnection()
-                // x86Connection.setRequestProperty("User-Agent", "Gradle")
-                // x86Connection.setInstanceFollowRedirects(true)
-                // x86Connection.connect()
-                // ... download logic
-            }
-        } catch (Exception e) {
-            println "Download failed: ${e.message}"
-            println ""
-            println "To build Xray-core from source:"
-            println "  1. Install Go ${versionProps.GO_VERSION}"
-            println "  2. Install Android NDK ${versionProps.NDK_VERSION}"
-            println "  3. Run: ./gradlew buildXrayCore"
-            println ""
-            println "Or manually place binaries at:"
-            println "  ${xrayArm64Target}"
-            println "  ${xrayX86Target}"
-            throw e
-        }
-    }
-}
-
-task buildXrayCore {
-    group = 'build'
-    description = 'Build Xray-core from source (requires Go and Android NDK)'
-    
-    doLast {
-        println "=========================================="
-        println "Building Xray-core from source..."
-        println "Version: ${xrayVersion}"
-        println "=========================================="
-        
-        def goVersion = versionProps.GO_VERSION ?: '1.25.3'
-        def ndkVersion = versionProps.NDK_VERSION ?: '28.2.13676358'
-        
-        // Check if Go is installed
-        def goCmd = null
-        try {
-            def goCheck = new ProcessBuilder("go", "version")
-                .redirectErrorStream(true)
-                .start()
-            def exitCode = goCheck.waitFor()
-            if (exitCode == 0) {
-                goCmd = "go"
-            }
-        } catch (Exception e) {
-            println "Go not found. Please install Go ${goVersion} or later."
-            println "Download from: https://go.dev/dl/"
-            throw new GradleException("Go is required to build Xray-core")
-        }
-        
-        // Check NDK
-        def ndkPath = project.findProperty("android.ndkVersion")
-        if (!ndkPath) {
-            def sdkDir = project.findProperty("android.sdkDirectory") ?: 
-                        System.getenv("ANDROID_HOME") ?: 
-                        System.getenv("ANDROID_SDK_ROOT")
-            if (!sdkDir) {
-                throw new GradleException("Android NDK not found. Please set ANDROID_HOME or ANDROID_SDK_ROOT")
-            }
-        }
-        
-        println "Building Xray-core requires:"
-        println "  - Go ${goVersion}+"
-        println "  - Android NDK ${ndkVersion}"
-        println ""
-        println "This is a complex build process. Refer to:"
-        println "  .github/workflows/build.yml"
-        println ""
-        println "For now, please download pre-built binaries or build manually."
-        throw new GradleException("Automatic build not yet implemented. Please build manually or use pre-built binaries.")
-    }
-}
-
-task updateHevSocks5Tunnel {
-    group = 'build'
-    description = 'Update hev-socks5-tunnel submodule'
-    
-    doLast {
-        println "=========================================="
-        println "Updating hev-socks5-tunnel submodule..."
-        println "=========================================="
-        
-        def submodulePath = new File("$projectDir/src/main/jni/hev-socks5-tunnel")
-        
-        // Use relative path for cross-platform compatibility
-        def submoduleRelPath = "app/src/main/jni/hev-socks5-tunnel"
-        
-        if (!submodulePath.exists() || !new File(submodulePath, ".git").exists()) {
-            println "hev-socks5-tunnel submodule not found or not initialized. Initializing..."
-            try {
-                def gitInit = new ProcessBuilder("git", "submodule", "update", "--init", "--recursive", submoduleRelPath)
-                    .directory(rootDir)
-                    .redirectErrorStream(true)
-                    .start()
-                
-                def output = new StringBuilder()
-                def reader = new BufferedReader(new InputStreamReader(gitInit.inputStream))
-                def line
-                while ((line = reader.readLine()) != null) {
-                    println line
-                    output.append(line).append("\n")
-                }
-                def exitCode = gitInit.waitFor()
-                if (exitCode == 0) {
-                    println "✓ Submodule initialized successfully"
-                } else {
-                    throw new GradleException("Git submodule init failed with exit code ${exitCode}")
-                }
-            } catch (Exception e) {
-                println "✗ Failed to initialize submodule: ${e.message}"
-                println ""
-                println "Please run manually:"
-                println "  git submodule update --init --recursive"
-                println "Or:"
-                println "  git submodule update --init --recursive app/src/main/jni/hev-socks5-tunnel"
-                throw new GradleException("Failed to initialize hev-socks5-tunnel submodule", e)
-            }
-        } else {
-            println "Submodule exists. Updating to latest version..."
-            try {
-                def gitUpdate = new ProcessBuilder("git", "submodule", "update", "--remote", "--recursive", submoduleRelPath)
-                    .directory(rootDir)
-                    .redirectErrorStream(true)
-                    .start()
-                
-                def output = new StringBuilder()
-                def reader = new BufferedReader(new InputStreamReader(gitUpdate.inputStream))
-                def line
-                while ((line = reader.readLine()) != null) {
-                    println line
-                    output.append(line).append("\n")
-                }
-                def exitCode = gitUpdate.waitFor()
-                if (exitCode == 0) {
-                    println "✓ Submodule updated successfully"
-                } else {
-                    println "⚠ Submodule update completed with exit code ${exitCode}"
-                    println "  This is normal if submodule is already at latest version"
-                }
-            } catch (Exception e) {
-                println "✗ Failed to update submodule: ${e.message}"
-                println ""
-                println "Please run manually:"
-                println "  git submodule update --remote --recursive"
-                println "Or:"
-                println "  git submodule update --remote --recursive app/src/main/jni/hev-socks5-tunnel"
-                throw new GradleException("Failed to update hev-socks5-tunnel submodule", e)
-            }
-        }
-    }
-}
 
 task downloadGeoFiles {
     group = 'build'
@@ -638,78 +421,7 @@ task generateHyperXrayPolicyModel {
     }
 }
 
-// Fix hev-task-system and yaml include symlinks for Windows build
-task fixIncludeSymlinks {
-    group = 'build'
-    description = 'Fix include file symlinks for Windows compatibility'
-    
-    doLast {
-        def baseDir = new File("$projectDir/src/main/jni/hev-socks5-tunnel/third-part")
-        
-        // Helper function to fix symlink files
-        def fixSymlinkFiles = { includeDir, srcDir ->
-            includeDir.eachFile { includeFile ->
-                if (includeFile.isFile() && includeFile.name.endsWith('.h')) {
-                    def content = includeFile.text.trim()
-                    // Check if file contains relative path (symlink replacement)
-                    if (content.matches('^\\.\\./.*')) {
-                        def targetPath = new File(includeDir, content)
-                        if (!targetPath.exists()) {
-                            // Try relative to src directory
-                            def srcTargetPath = new File(srcDir, content.replaceFirst('^\\.\\./', ''))
-                            if (srcTargetPath.exists() && srcTargetPath.isFile()) {
-                                println "  Fixing ${includeFile.name}: ${content} -> ${srcTargetPath.name}"
-                                // Replace with actual header content
-                                includeFile.text = srcTargetPath.text
-                            } else {
-                                println "  Warning: Target not found for ${includeFile.name}: ${content}"
-                            }
-                        } else {
-                            println "  Fixing ${includeFile.name}: ${content} -> ${targetPath.name}"
-                            includeFile.text = targetPath.text
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Fix hev-task-system includes
-        def hevTaskIncludeDir = new File(baseDir, "hev-task-system/include")
-        def hevTaskSrcDir = new File(baseDir, "hev-task-system/src")
-        
-        if (hevTaskIncludeDir.exists()) {
-            println "Fixing hev-task-system include files for Windows compatibility..."
-            fixSymlinkFiles(hevTaskIncludeDir, hevTaskSrcDir)
-        }
-        
-        // Fix yaml includes
-        def yamlIncludeDir = new File(baseDir, "yaml/include")
-        def yamlSrcDir = new File(baseDir, "yaml/src")
-        
-        if (yamlIncludeDir.exists()) {
-            println "Fixing yaml include files for Windows compatibility..."
-            fixSymlinkFiles(yamlIncludeDir, yamlSrcDir)
-        }
-        
-        // Fix hev-socks5-tunnel core includes
-        def coreIncludeDir = new File("$projectDir/src/main/jni/hev-socks5-tunnel/src/core/include")
-        def coreSrcDir = new File("$projectDir/src/main/jni/hev-socks5-tunnel/src/core/src")
-        
-        if (coreIncludeDir.exists()) {
-            println "Fixing hev-socks5-tunnel core include files for Windows compatibility..."
-            fixSymlinkFiles(coreIncludeDir, coreSrcDir)
-        }
-        
-        println "All include files fixed successfully"
-    }
-}
-
-// Fix includes before NDK build
-tasks.matching { it.name.startsWith("externalNativeBuild") && !it.name.contains("Clean") }.configureEach { task ->
-    task.dependsOn fixIncludeSymlinks
-}
-
-// Download dependencies before processing assets
+// Download geo files before processing assets
 android.applicationVariants.all { variant ->
     variant.mergeAssetsProvider.get().dependsOn downloadGeoFiles
     // Model training disabled during build - use existing models in assets/
@@ -801,11 +513,16 @@ android {
                     getDefaultProguardFile('proguard-android-optimize.txt'),
                     'proguard-rules.pro'
             )
+            // R8 Full Mode optimizations
+            // Enable aggressive class merging and inlining
+            // Note: android.enableR8.fullMode=true is set in gradle.properties
         }
         debug {
             minifyEnabled false
+            shrinkResources false
             signingConfig signingConfigs.release
             debuggable true
+            // Debug builds remain readable - no obfuscation
         }
     }
 
@@ -894,6 +611,13 @@ android {
         abortOnError false
         checkReleaseBuilds false
     }
+    
+    // Baseline Profiles configuration
+    // Profiles are automatically included in release builds and distributed via Play Store
+    baselineProfile {
+        automaticGenerationDuringBuild = true
+        saveInSrc = true
+    }
 }
 
 dependencies {
@@ -907,33 +631,53 @@ dependencies {
     implementation 'androidx.preference:preference-ktx:1.2.1'
     implementation 'androidx.core:core-ktx:1.16.0'
 
-    implementation platform('androidx.compose:compose-bom:2025.11.00')
+    implementation platform('androidx.compose:compose-bom:2025.08.00')
     implementation 'androidx.compose.ui:ui'
     implementation 'androidx.compose.ui:ui-graphics'
     implementation 'androidx.compose.material3:material3'
-    implementation 'androidx.compose.material:material-icons-extended'
     implementation 'androidx.compose.ui:ui-tooling-preview-android'
     implementation 'androidx.activity:activity-compose'
     implementation 'androidx.compose.runtime:runtime-livedata'
     implementation 'androidx.navigation:navigation-compose-android:2.9.3'
-    // Modern UI transitions and animations
-    implementation 'androidx.compose.animation:animation'
-    implementation 'androidx.compose.animation:animation-core'
-    implementation 'androidx.compose.foundation:foundation'
-    implementation 'androidx.compose.ui:ui-util'
 
     implementation 'com.github.nanihadesuka:LazyColumnScrollbar:2.2.0'
     implementation 'sh.calvin.reorderable:reorderable:2.5.1'
     implementation "com.squareup.okhttp3:okhttp:4.12.0"
 
-    // HyperXray-AI Optimizer dependencies
-    implementation 'androidx.datastore:datastore-preferences:1.1.1'
-    implementation 'androidx.room:room-runtime:2.6.1'
-    kapt 'androidx.room:room-compiler:2.6.1'
-    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3'
+    // Performance dependencies - Phase 1
+    // Google Cronet: High-performance HTTP/3 networking stack
+    implementation 'org.chromium.net:cronet-embedded:119.6045.31'
+    
+    // Conscrypt: Google's Conscrypt security provider for better TLS performance
+    implementation 'org.conscrypt:conscrypt-android:2.5.2'
+    
+    // ONNX Runtime Mobile: Already present, keeping for AI/ML inference
     implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.20.0'
+    
+    // Baseline Profiles: For app startup and runtime performance optimization
+    implementation 'androidx.profileinstaller:profileinstaller:1.4.0'
+    
+    // Baseline Profile Generator (for generating profiles)
+    baselineProfile project(':baselineprofile')
+
+    // HyperXray-AI Optimizer dependencies
+    implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3'
     
     // TLS SNI Optimizer v5 dependencies
     implementation 'androidx.work:work-runtime-ktx:2.9.0'
-    implementation 'androidx.concurrent:concurrent-futures-ktx:1.2.0'
+    
+    // Core modules
+    implementation project(':core:core-di')
+    
+    // Xray runtime
+    implementation project(':xray:xray-runtime-service')
+    
+    // Feature modules
+    implementation project(':feature:feature-dashboard')
+    implementation project(':feature:feature-vless')
+    implementation project(':feature:feature-reality')
+    implementation project(':feature:feature-hysteria2')
+    implementation project(':feature:feature-routing')
+    implementation project(':feature:feature-profiles')
+    implementation project(':feature:feature-policy-ai')
 }
