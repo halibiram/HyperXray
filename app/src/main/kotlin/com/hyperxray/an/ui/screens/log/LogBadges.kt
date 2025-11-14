@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hyperxray.an.ui.theme.LogColors
 
 @Composable
 fun LogLevelBadge(level: LogLevel) {
@@ -27,8 +28,8 @@ fun LogLevelBadge(level: LogLevel) {
             "ERROR"
         )
         LogLevel.WARN -> Triple(
-            Color(0xFFFFF3E0), // Orange container
-            Color(0xFFE65100), // Orange on container
+            LogColors.warnContainerColor(), // Theme-aware orange container
+            LogColors.warnTextColor(), // Theme-aware orange on container
             "WARN"
         )
         LogLevel.INFO -> Triple(
@@ -69,12 +70,12 @@ fun LogLevelBadge(level: LogLevel) {
 fun ConnectionTypeBadge(type: ConnectionType) {
     val (backgroundColor, textColor, label) = when (type) {
         ConnectionType.TCP -> Triple(
-            Color(0xFF2196F3), // Blue
+            LogColors.tcpColor(), // Theme-aware blue
             Color.White,
             "TCP"
         )
         ConnectionType.UDP -> Triple(
-            Color(0xFF4CAF50), // Green
+            LogColors.udpColor(), // Theme-aware green
             Color.White,
             "UDP"
         )
@@ -109,10 +110,7 @@ fun SNIBadge() {
             .clip(RoundedCornerShape(8.dp))
             .background(
                 brush = Brush.horizontalGradient(
-                    colors = listOf(
-                        Color(0xFF9C27B0), // Purple
-                        Color(0xFF7B1FA2)  // Darker purple
-                    )
+                    colors = LogColors.sniGradientColors()
                 )
             )
             .padding(horizontal = 8.dp, vertical = 4.dp),
@@ -144,10 +142,7 @@ fun SniffingBadge() {
             .clip(RoundedCornerShape(8.dp))
             .background(
                 brush = Brush.horizontalGradient(
-                    colors = listOf(
-                        Color(0xFFFF6F00), // Orange
-                        Color(0xFFE65100)  // Darker orange
-                    )
+                    colors = LogColors.sniffingGradientColors()
                 )
             )
             .padding(horizontal = 8.dp, vertical = 4.dp),
@@ -179,10 +174,7 @@ fun DnsBadge() {
             .clip(RoundedCornerShape(8.dp))
             .background(
                 brush = Brush.horizontalGradient(
-                    colors = listOf(
-                        Color(0xFF00BCD4), // Cyan
-                        Color(0xFF0097A7)  // Darker cyan
-                    )
+                    colors = LogColors.dnsGradientColors()
                 )
             )
             .padding(horizontal = 8.dp, vertical = 4.dp),
