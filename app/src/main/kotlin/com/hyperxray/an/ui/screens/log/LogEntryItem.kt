@@ -63,12 +63,14 @@ fun LogEntryItem(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = cardColor
         ),
         elevation = CardDefaults.cardElevation(
-            defaultElevation = 1.dp
+            defaultElevation = 2.dp,
+            pressedElevation = 6.dp,
+            hoveredElevation = 4.dp
         )
     ) {
         Row(
@@ -95,7 +97,7 @@ fun LogEntryItem(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(12.dp)
+                    .padding(16.dp)
             ) {
                 // Log level badge, connection type badge, SNI badge, and timestamp row
                 Row(

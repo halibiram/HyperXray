@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -160,9 +161,10 @@ fun LogScreen(
                 ) {
                     LazyColumn(
                         state = listState,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        contentPadding = PaddingValues(vertical = 8.dp),
-                        reverseLayout = true
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        contentPadding = PaddingValues(vertical = 12.dp),
+                        reverseLayout = true,
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
                     ) {
                         items(
                             items = filteredEntries,
@@ -177,14 +179,13 @@ fun LogScreen(
                                     }
                                 }
                             )
-                            Spacer(modifier = Modifier.height(6.dp))
                         }
                     }
                 }
             }
         }
         
-        // FloatingActionButton to scroll to latest log (top)
+        // FloatingActionButton to scroll to latest log (top) - Enhanced
         FloatingActionButton(
             onClick = {
                 scope.launch {
@@ -194,13 +195,18 @@ fun LogScreen(
             },
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(16.dp),
+                .padding(20.dp),
             containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            elevation = androidx.compose.material3.FloatingActionButtonDefaults.elevation(
+                defaultElevation = 6.dp,
+                pressedElevation = 10.dp
+            )
         ) {
             Icon(
                 imageVector = Icons.Default.KeyboardArrowDown,
-                contentDescription = "Scroll to latest log"
+                contentDescription = "Scroll to latest log",
+                modifier = Modifier.size(24.dp)
             )
         }
     }
