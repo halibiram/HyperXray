@@ -13,6 +13,15 @@ android {
         targetSdk 35
     }
 
+    buildTypes {
+        release {
+            // Release build type for baseline profile generation
+        }
+        debug {
+            // Debug build type for baseline profile generation
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_22
         targetCompatibility JavaVersion.VERSION_22

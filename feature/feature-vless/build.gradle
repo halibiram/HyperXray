@@ -32,8 +32,7 @@ dependencies {
     // Core modules
     implementation project(':core:core-designsystem')
     
-    // Note: Removed app module dependency to break circular dependency
-    // VlessLinkConverter now uses default SOCKS port (10808) instead of Preferences
+    // Note: VlessLinkConverter uses default SOCKS port (10808) instead of Preferences
     // TODO: Move prefs to core module in future refactor
     
     // Compose BOM for version management
