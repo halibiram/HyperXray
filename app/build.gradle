@@ -916,6 +916,11 @@ dependencies {
     implementation 'androidx.activity:activity-compose'
     implementation 'androidx.compose.runtime:runtime-livedata'
     implementation 'androidx.navigation:navigation-compose-android:2.9.3'
+    // Modern UI transitions and animations
+    implementation 'androidx.compose.animation:animation'
+    implementation 'androidx.compose.animation:animation-core'
+    implementation 'androidx.compose.foundation:foundation'
+    implementation 'androidx.compose.ui:ui-util'
 
     implementation 'com.github.nanihadesuka:LazyColumnScrollbar:2.2.0'
     implementation 'sh.calvin.reorderable:reorderable:2.5.1'

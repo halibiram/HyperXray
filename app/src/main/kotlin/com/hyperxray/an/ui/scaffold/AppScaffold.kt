@@ -1,8 +1,32 @@
 package com.hyperxray.an.ui.scaffold
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
@@ -17,9 +41,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -35,12 +61,24 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -514,68 +552,204 @@ private fun StatsActions(
 fun AppBottomNavigationBar(navController: NavHostController) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    val colorScheme = MaterialTheme.colorScheme
 
-    NavigationBar {
-        NavigationBarItem(
-            alwaysShowLabel = false,
-            selected = currentRoute == ROUTE_STATS,
-            onClick = { navigateToRoute(navController, ROUTE_STATS) },
-            icon = {
-                Icon(
-                    painter = painterResource(id = R.drawable.dashboard),
-                    contentDescription = stringResource(R.string.core_stats_title)
-                )
-            },
-            label = { Text(stringResource(R.string.core_stats_title)) }
+    val navItems = listOf(
+        NavItem(
+            route = ROUTE_STATS,
+            iconRes = R.drawable.dashboard,
+            label = stringResource(R.string.core_stats_title)
+        ),
+        NavItem(
+            route = ROUTE_CONFIG,
+            iconRes = R.drawable.code,
+            label = stringResource(R.string.configuration)
+        ),
+        NavItem(
+            route = ROUTE_LOG,
+            iconRes = R.drawable.history,
+            label = stringResource(R.string.log)
+        ),
+        NavItem(
+            route = ROUTE_OPTIMIZER,
+            iconRes = R.drawable.optimizer,
+            label = "Optimizer"
+        ),
+        NavItem(
+            route = ROUTE_SETTINGS,
+            iconRes = R.drawable.settings,
+            label = stringResource(R.string.settings)
         )
-        NavigationBarItem(
-            alwaysShowLabel = false,
-            selected = currentRoute == ROUTE_CONFIG,
-            onClick = { navigateToRoute(navController, ROUTE_CONFIG) },
-            icon = {
-                Icon(
-                    painter = painterResource(id = R.drawable.code),
-                    contentDescription = stringResource(R.string.configuration)
+    )
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 12.dp,
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                spotColor = colorScheme.primary.copy(alpha = 0.3f)
+            ),
+        color = colorScheme.surfaceContainerHighest,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        tonalElevation = 8.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(72.dp)
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            navItems.forEach { item ->
+                ModernNavItem(
+                    item = item,
+                    isSelected = currentRoute == item.route,
+                    onClick = { navigateToRoute(navController, item.route) },
+                    colorScheme = colorScheme
                 )
-            },
-            label = { Text(stringResource(R.string.configuration)) }
-        )
-        NavigationBarItem(
-            alwaysShowLabel = false,
-            selected = currentRoute == ROUTE_LOG,
-            onClick = { navigateToRoute(navController, ROUTE_LOG) },
-            icon = {
+            }
+        }
+    }
+}
+
+private data class NavItem(
+    val route: String,
+    val iconRes: Int,
+    val label: String
+)
+
+@Composable
+private fun ModernNavItem(
+    item: NavItem,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    colorScheme: androidx.compose.material3.ColorScheme
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    // Animations
+    val iconScale by animateFloatAsState(
+        targetValue = when {
+            isSelected -> 1.2f
+            isPressed -> 0.9f
+            else -> 1f
+        },
+        animationSpec = spring(
+            dampingRatio = 0.6f,
+            stiffness = 400f
+        ),
+        label = "icon_scale"
+    )
+
+    val containerScale by animateFloatAsState(
+        targetValue = if (isSelected) 1f else 0.8f,
+        animationSpec = spring(
+            dampingRatio = 0.7f,
+            stiffness = 500f
+        ),
+        label = "container_scale"
+    )
+
+    val backgroundColor by animateColorAsState(
+        targetValue = if (isSelected) {
+            colorScheme.primaryContainer.copy(alpha = 0.4f)
+        } else {
+            Color.Transparent
+        },
+        animationSpec = tween(durationMillis = 300),
+        label = "background_color"
+    )
+
+    val iconColor by animateColorAsState(
+        targetValue = if (isSelected) {
+            colorScheme.primary
+        } else {
+            colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+        },
+        animationSpec = tween(durationMillis = 200),
+        label = "icon_color"
+    )
+
+    val textColor by animateColorAsState(
+        targetValue = if (isSelected) {
+            colorScheme.primary
+        } else {
+            colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+        },
+        animationSpec = tween(durationMillis = 200),
+        label = "text_color"
+    )
+
+    Box(
+        modifier = Modifier
+            .height(56.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(backgroundColor)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
+            .scale(containerScale),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            // Animated icon with background circle
+            Box(
+                modifier = Modifier.size(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                // Background circle for selected state
+                if (isSelected) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        colorScheme.primary.copy(alpha = 0.2f),
+                                        Color.Transparent
+                                    )
+                                )
+                            )
+                            .alpha(if (isSelected) 1f else 0f)
+                    )
+                }
+
+                // Icon
                 Icon(
-                    painter = painterResource(id = R.drawable.history),
-                    contentDescription = stringResource(R.string.log)
+                    painter = painterResource(id = item.iconRes),
+                    contentDescription = item.label,
+                    modifier = Modifier
+                        .size(24.dp)
+                        .scale(iconScale),
+                    tint = iconColor
                 )
-            },
-            label = { Text(stringResource(R.string.log)) }
-        )
-        NavigationBarItem(
-            alwaysShowLabel = false,
-            selected = currentRoute == ROUTE_OPTIMIZER,
-            onClick = { navigateToRoute(navController, ROUTE_OPTIMIZER) },
-            icon = {
-                Icon(
-                    painter = painterResource(id = R.drawable.optimizer),
-                    contentDescription = "TLS SNI Optimizer"
-                )
-            },
-            label = { Text("Optimizer") }
-        )
-        NavigationBarItem(
-            alwaysShowLabel = false,
-            selected = currentRoute == ROUTE_SETTINGS,
-            onClick = { navigateToRoute(navController, ROUTE_SETTINGS) },
-            icon = {
-                Icon(
-                    painter = painterResource(id = R.drawable.settings),
-                    contentDescription = stringResource(R.string.settings)
-                )
-            },
-            label = { Text(stringResource(R.string.settings)) }
-        )
+            }
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            // Animated label
+            Text(
+                text = item.label,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 11.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                ),
+                color = textColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
+        }
     }
 }
 
