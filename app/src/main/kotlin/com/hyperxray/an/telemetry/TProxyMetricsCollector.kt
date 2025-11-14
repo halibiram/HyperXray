@@ -2,7 +2,7 @@ package com.hyperxray.an.telemetry
 
 import android.content.Context
 import android.util.Log
-import com.hyperxray.an.common.CoreStatsClient
+import com.hyperxray.an.xray.runtime.stats.CoreStatsClient
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.service.TProxyService
 import com.hyperxray.an.viewmodel.CoreStatsState

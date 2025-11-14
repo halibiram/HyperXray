@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.hyperxray.an.common.formatThroughput
 import com.hyperxray.an.viewmodel.AiInsightsViewModel
 import kotlinx.coroutines.launch
 
@@ -569,7 +570,7 @@ private fun FeedbackListCard(
                             style = MaterialTheme.typography.bodySmall
                         )
                         Text(
-                            text = formatThroughput(entry.throughput),
+                            text = formatThroughput(entry.throughput.toDouble()),
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
@@ -593,14 +594,6 @@ private fun formatLatency(latencyMs: Long): String {
         latencyMs < 1000 -> "${latencyMs}ms"
         latencyMs < 60000 -> "${latencyMs / 1000.0}s"
         else -> "${latencyMs / 60000.0}min"
-    }
-}
-
-private fun formatThroughput(throughput: Float): String {
-    return when {
-        throughput < 1000 -> String.format("%.1f KB/s", throughput)
-        throughput < 1000000 -> String.format("%.1f MB/s", throughput / 1000)
-        else -> String.format("%.2f GB/s", throughput / 1000000)
     }
 }
 

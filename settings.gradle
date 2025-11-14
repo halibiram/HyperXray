@@ -1,8 +1,19 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
 include ':app'
+include ':baselineprofile'
+include ':core:core-di'
 include ':core:core-network'
 include ':core:core-database'
 include ':core:core-telemetry'
 include ':core:core-designsystem'
+include ':xray:xray-runtime-service'
 include ':feature:feature-dashboard'
 include ':feature:feature-profiles'
 include ':feature:feature-vless'

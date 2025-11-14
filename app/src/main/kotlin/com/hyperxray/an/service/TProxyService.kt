@@ -32,7 +32,7 @@ import com.hyperxray.an.core.inference.OnnxRuntimeManager
 import com.hyperxray.an.core.network.TLSFeatureEncoder
 import com.hyperxray.an.core.monitor.OptimizerLogger
 import com.hyperxray.an.ui.screens.log.extractSNI
-import com.hyperxray.an.common.CoreStatsClient
+import com.hyperxray.an.xray.runtime.stats.CoreStatsClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

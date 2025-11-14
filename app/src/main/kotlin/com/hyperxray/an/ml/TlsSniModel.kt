@@ -26,6 +26,7 @@ class TlsSniModel(
     
     private val FP32_MODEL_PATH = "models/tls_sni_optimizer_v5_fp32.onnx"
     private val FP16_MODEL_PATH = "models/tls_sni_optimizer_v5_fp16.onnx"
+    private val V9_MODEL_PATH = "tls_sni_optimizer_v9.onnx" // Fallback to v9 if v5 not available
     
     private lateinit var env: OrtEnvironment
     private var session: OrtSession? = null
@@ -46,7 +47,7 @@ class TlsSniModel(
             Log.d(TAG, "Initializing ONNX Runtime environment")
             env = OrtEnvironment.getEnvironment()
             
-            // Try FP32 first
+            // Try FP32 first, then FP16, then fallback to v9
             var modelBytes: ByteArray? = null
             try {
                 modelBytes = context.assets.open(FP32_MODEL_PATH).use { it.readBytes() }
@@ -59,8 +60,15 @@ class TlsSniModel(
                     modelPath = FP16_MODEL_PATH
                     Log.i(TAG, "Loaded FP16 model: $FP16_MODEL_PATH")
                 } catch (e2: IOException) {
-                    Log.e(TAG, "Neither FP32 nor FP16 model found", e2)
-                    return
+                    Log.w(TAG, "FP16 model not found, trying v9 fallback: ${e2.message}")
+                    try {
+                        modelBytes = context.assets.open(V9_MODEL_PATH).use { it.readBytes() }
+                        modelPath = V9_MODEL_PATH
+                        Log.i(TAG, "Loaded v9 fallback model: $V9_MODEL_PATH")
+                    } catch (e3: IOException) {
+                        Log.e(TAG, "No TLS SNI model found (tried FP32, FP16, and v9). TLS SNI optimization will be disabled.", e3)
+                        return
+                    }
                 }
             }
             

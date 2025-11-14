@@ -19,7 +19,7 @@ import androidx.lifecycle.application
 import androidx.lifecycle.viewModelScope
 import com.hyperxray.an.BuildConfig
 import com.hyperxray.an.R
-import com.hyperxray.an.common.CoreStatsClient
+import com.hyperxray.an.xray.runtime.stats.CoreStatsClient
 import com.hyperxray.an.common.ROUTE_AI_INSIGHTS
 import com.hyperxray.an.common.ROUTE_APP_LIST
 import com.hyperxray.an.common.formatBytes

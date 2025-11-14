@@ -32,6 +32,10 @@ dependencies {
     // Core modules
     implementation project(':core:core-designsystem')
     
+    // Note: Removed app module dependency to break circular dependency
+    // VlessLinkConverter now uses default SOCKS port (10808) instead of Preferences
+    // TODO: Move prefs to core module in future refactor
+    
     // Compose BOM for version management
     implementation platform('androidx.compose:compose-bom:2025.08.00')
     
@@ -46,6 +50,7 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.7'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7'
     implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.8.7'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7'
     
     // Kotlin coroutines
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'

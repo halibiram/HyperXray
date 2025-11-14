@@ -2,7 +2,6 @@ package com.hyperxray.an.activity
 
 import android.content.Intent
 import android.content.res.Configuration
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -13,22 +12,40 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import com.hyperxray.an.ui.theme.ExpressiveMaterialTheme
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.hyperxray.an.common.ThemeMode
+import com.hyperxray.an.core.di.AppContainer
+import com.hyperxray.an.core.di.DefaultAppContainer
+import com.hyperxray.an.feature.profiles.IntentHandler
 import com.hyperxray.an.ui.navigation.AppNavHost
+import com.hyperxray.an.ui.theme.ExpressiveMaterialTheme
 import com.hyperxray.an.viewmodel.MainViewModel
 import com.hyperxray.an.viewmodel.MainViewModelFactory
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 /**
  * Main activity for HyperXray VPN application.
- * Handles UI initialization, theme management, and intent processing for config sharing.
+ * 
+ * Responsibilities:
+ * - Activity lifecycle management
+ * - Theme initialization and configuration changes
+ * - Navigation host setup
+ * - Intent delegation to feature modules
+ * 
+ * No business logic - all business logic is in feature modules.
  */
 class MainActivity : ComponentActivity() {
-    private val mainViewModel: MainViewModel by viewModels { MainViewModelFactory(application) }
+    private val mainViewModel: MainViewModel by viewModels { 
+        MainViewModelFactory(application) 
+    }
+    
+    // DI container (simplified - will be expanded in future phases)
+    private val appContainer: AppContainer by lazy { 
+        DefaultAppContainer(application) 
+    }
+    
+    // Intent handler for config sharing (moved to feature-profiles)
+    private lateinit var intentHandler: IntentHandler
 
     public override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,10 +53,17 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         window.isNavigationBarContrastEnforced = false
 
+        // Initialize intent handler (delegates to MainViewModel for now)
+        intentHandler = IntentHandler { content ->
+            mainViewModel.handleSharedContent(content)
+        }
+
         mainViewModel.reloadView = { initView() }
         initView()
 
-        processShareIntent(intent)
+        // Process share intent (delegated to feature module)
+        intent?.let { intentHandler.processShareIntent(it, contentResolver, lifecycleScope) }
+        
         Log.d(TAG, "MainActivity onCreate called.")
     }
 
@@ -70,13 +94,13 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         intent?.let {
-            processShareIntent(intent)
+            intentHandler.processShareIntent(it, contentResolver, lifecycleScope)
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        Log.d(TAG, "Activity Coroutine Scope cancelled.")
+        Log.d(TAG, "MainActivity onDestroy called.")
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -92,40 +116,7 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "MainActivity onConfigurationChanged called.")
     }
 
-    private fun processShareIntent(intent: Intent) {
-        val currentIntentHash = intent.hashCode()
-        if (lastProcessedIntentHash == currentIntentHash) return
-        lastProcessedIntentHash = currentIntentHash
-
-        when (intent.action) {
-            Intent.ACTION_SEND -> {
-                intent.clipData?.getItemAt(0)?.uri?.let { uri ->
-                    lifecycleScope.launch(Dispatchers.IO) {
-                        try {
-                            val text =
-                                contentResolver.openInputStream(uri)?.bufferedReader()?.readText()
-                            text?.let { mainViewModel.handleSharedContent(it) }
-                        } catch (e: Exception) {
-                            Log.e("Share", "Error reading shared file", e)
-                        }
-                    }
-                }
-            }
-
-            Intent.ACTION_VIEW -> {
-                intent.data?.toString()?.let { uriString ->
-                    if (uriString.startsWith("hyperxray://")) {
-                        lifecycleScope.launch {
-                            mainViewModel.handleSharedContent(uriString)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     companion object {
         const val TAG = "MainActivity"
-        private var lastProcessedIntentHash: Int = 0
     }
 }

@@ -1,12 +1,10 @@
 package com.hyperxray.an.viewmodel
 
-/**
- * Traffic statistics (uplink and downlink bytes).
- */
-data class TrafficState(
-    val uplink: Long,
-    val downlink: Long
-)
+import com.hyperxray.an.xray.runtime.stats.model.TrafficState
+
+// Re-export TrafficState for backward compatibility
+// TODO: Update all references to use com.hyperxray.an.xray.runtime.stats.model.TrafficState directly
+typealias TrafficState = com.hyperxray.an.xray.runtime.stats.model.TrafficState
 
 /**
  * Complete statistics state from Xray-core including traffic, memory, and runtime metrics.

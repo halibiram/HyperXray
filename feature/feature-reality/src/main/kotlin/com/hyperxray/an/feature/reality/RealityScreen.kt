@@ -9,26 +9,29 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.hyperxray.an.feature.reality.viewmodel.RealityViewModel
 
 /**
- * Reality feature screen placeholder.
+ * REALITY feature screen.
  * 
- * This module will handle:
- * - Reality protocol configuration
- * - Reality fingerprint management
- * - Reality server settings
- * - Reality connection handling
+ * This module handles:
+ * - REALITY protocol configuration
+ * - REALITY fingerprint management
+ * - REALITY server settings
+ * - REALITY connection handling
  */
 @Composable
 fun RealityScreen(
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    viewModel: RealityViewModel = viewModel()
 ) {
     Box(
         modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text = "Reality Feature\n(Placeholder)",
+            text = "REALITY Feature\n(Configuration UI)",
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.padding(16.dp)
         )
