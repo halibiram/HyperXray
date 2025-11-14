@@ -11,6 +11,7 @@ import kotlinx.coroutines.withContext
 import java.time.Instant
 import kotlin.math.max
 import kotlin.math.abs
+import kotlin.concurrent.Volatile
 
 /**
  * TProxyMetricsCollector: Collects real-time performance metrics from TProxy and Xray-core.
@@ -29,6 +30,9 @@ class TProxyMetricsCollector(
     private val TAG = "TProxyMetricsCollector"
     
     private var coreStatsClient: CoreStatsClient? = null
+    @Volatile
+    private var lastClientCloseTime: Long = 0L
+    private val MIN_RECREATE_INTERVAL_MS = 5000L // 5 seconds minimum between recreations
     private var lastTrafficStats: Pair<Long, Long>? = null // (uplink, downlink)
     private var lastTrafficTime: Instant? = null
     private val metricsHistory = mutableListOf<TelemetryMetrics>()
@@ -55,9 +59,22 @@ class TProxyMetricsCollector(
      */
     suspend fun collectMetrics(coreStatsState: CoreStatsState?): TelemetryMetrics? = withContext(Dispatchers.IO) {
         try {
-            // Initialize stats client if needed
+            // Initialize stats client if needed (create() now returns nullable)
+            // Enforce cooldown to prevent rapid recreation loops
             if (coreStatsClient == null && prefs.apiPort > 0) {
-                coreStatsClient = CoreStatsClient.create("127.0.0.1", prefs.apiPort)
+                val now = System.currentTimeMillis()
+                val timeSinceClose = now - lastClientCloseTime
+                
+                if (timeSinceClose < MIN_RECREATE_INTERVAL_MS) {
+                    val remainingCooldown = MIN_RECREATE_INTERVAL_MS - timeSinceClose
+                    Log.d(TAG, "Client recreation cooldown active, ${remainingCooldown}ms remaining")
+                } else {
+                    coreStatsClient = CoreStatsClient.create("127.0.0.1", prefs.apiPort)
+                    if (coreStatsClient == null) {
+                        Log.w(TAG, "Failed to create CoreStatsClient for metrics collection")
+                        lastClientCloseTime = System.currentTimeMillis()
+                    }
+                }
             }
             
             // Get native TProxy stats from hev-socks5-tunnel
@@ -519,6 +536,7 @@ class TProxyMetricsCollector(
     fun close() {
         coreStatsClient?.close()
         coreStatsClient = null
+        lastClientCloseTime = System.currentTimeMillis()
     }
 }
 

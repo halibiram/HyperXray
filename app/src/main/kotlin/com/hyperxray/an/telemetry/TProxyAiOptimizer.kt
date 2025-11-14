@@ -123,22 +123,39 @@ class TProxyAiOptimizer(
                     val metrics = metricsCollector?.collectMetrics(coreStatsState)
                     
                     if (metrics != null) {
-                        // Run optimization
-                        val result = optimizeConfiguration(metrics, coreStatsState)
+                        // Run optimization with error handling
+                        val result = try {
+                            optimizeConfiguration(metrics, coreStatsState)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error in optimizeConfiguration: ${e.javaClass.simpleName}: ${e.message}", e)
+                            // Return failure result to continue loop
+                            OptimizationResult(
+                                config = getCurrentConfig(),
+                                expectedImprovement = 0.0,
+                                metrics = metrics,
+                                success = false,
+                                error = "Optimization failed: ${e.message}"
+                            )
+                        }
                         
                         if (result.success) {
-                            // Apply optimized configuration
-                            val needsReload = applyConfiguration(result.config)
-                            
-                            // Notify callback if configuration was applied
-                            onConfigurationApplied?.invoke(result.config, needsReload)
-                            
-                            Log.i(TAG, "Applied optimized configuration: MTU=${result.config.mtu}, " +
-                                    "Buffer=${result.config.tcpBufferSize}, " +
-                                    "Pipeline=${result.config.socks5Pipeline}, " +
-                                    "MultiQueue=${result.config.tunnelMultiQueue}, " +
-                                    "Expected improvement: ${result.expectedImprovement}%, " +
-                                    "NeedsReload=$needsReload")
+                            try {
+                                // Apply optimized configuration
+                                val needsReload = applyConfiguration(result.config)
+                                
+                                // Notify callback if configuration was applied
+                                onConfigurationApplied?.invoke(result.config, needsReload)
+                                
+                                Log.i(TAG, "Applied optimized configuration: MTU=${result.config.mtu}, " +
+                                        "Buffer=${result.config.tcpBufferSize}, " +
+                                        "Pipeline=${result.config.socks5Pipeline}, " +
+                                        "MultiQueue=${result.config.tunnelMultiQueue}, " +
+                                        "Expected improvement: ${result.expectedImprovement}%, " +
+                                        "NeedsReload=$needsReload")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error applying configuration: ${e.javaClass.simpleName}: ${e.message}", e)
+                                // Continue loop even if application fails
+                            }
                         } else {
                             Log.d(TAG, "Optimization skipped: ${result.error}")
                         }
@@ -149,8 +166,15 @@ class TProxyAiOptimizer(
                     // Wait before next optimization cycle
                     delay(optimizationIntervalMs)
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error in optimization loop", e)
-                    delay(optimizationIntervalMs)
+                    // Catch-all for any unexpected exceptions in loop
+                    Log.e(TAG, "Error in optimization loop: ${e.javaClass.simpleName}: ${e.message}", e)
+                    // Continue loop - don't let exceptions kill the optimization thread
+                    try {
+                        delay(optimizationIntervalMs)
+                    } catch (delayEx: Exception) {
+                        Log.e(TAG, "Error in delay, breaking loop", delayEx)
+                        break
+                    }
                 }
             }
         }
@@ -161,6 +185,7 @@ class TProxyAiOptimizer(
      */
     fun stopOptimization() {
         isOptimizing = false
+        isWarmedUp = false // Reset warm-up state
         optimizationJob?.cancel()
         optimizationJob = null
         metricsCollector = null
@@ -294,6 +319,9 @@ class TProxyAiOptimizer(
         return features
     }
     
+    // Track warm-up state for first inference
+    private var isWarmedUp = false
+    
     /**
      * Get AI recommendation for TProxy configuration.
      */
@@ -304,14 +332,62 @@ class TProxyAiOptimizer(
                 return getHeuristicRecommendation(features)
             }
             
+            // Validate features before inference
+            if (features.isEmpty()) {
+                Log.w(TAG, "Features array is empty, using heuristic")
+                return getHeuristicRecommendation(features)
+            }
+            
+            // Warm-up: run inference once before first real use (helps with cold start)
+            if (!isWarmedUp) {
+                try {
+                    Log.d(TAG, "Warming up model with first inference")
+                    val warmupOutput = deepModel.inferRaw(features)
+                    if (warmupOutput.size >= 5) {
+                        isWarmedUp = true
+                        Log.d(TAG, "Model warm-up successful (output size: ${warmupOutput.size})")
+                    } else {
+                        Log.w(TAG, "Model warm-up failed (output size: ${warmupOutput.size}), will retry on next cycle")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Model warm-up failed, will retry on next cycle: ${e.message}")
+                    // Don't fail here, just log and continue
+                }
+            }
+            
             // Use AI model to predict optimal configuration
             // Model outputs 5 actions (we'll map to configuration adjustments)
-            val modelOutput = deepModel.inferRaw(features)
+            val modelOutput = try {
+                deepModel.inferRaw(features)
+            } catch (e: Exception) {
+                Log.e(TAG, "Inference failed: ${e.javaClass.simpleName}: ${e.message}", e)
+                // Return empty array to trigger heuristic fallback
+                DoubleArray(0)
+            }
             
-            // Ensure we have at least 5 outputs
+            // Validate output size - must be exactly 5 or more
+            if (modelOutput.isEmpty()) {
+                Log.w(TAG, "Model output is empty, using heuristic")
+                return getHeuristicRecommendation(features)
+            }
+            
             if (modelOutput.size < 5) {
                 Log.w(TAG, "Model output size ${modelOutput.size} < 5, using heuristic")
                 return getHeuristicRecommendation(features)
+            }
+            
+            // Validate output values (check for NaN/Inf)
+            var hasInvalidValues = false
+            for (i in 0 until minOf(5, modelOutput.size)) {
+                val value = modelOutput[i]
+                if (value.isNaN() || value.isInfinite()) {
+                    Log.w(TAG, "Model output[$i] is invalid (NaN/Inf: $value), clamping to 0.5")
+                    modelOutput[i] = 0.5
+                    hasInvalidValues = true
+                }
+            }
+            if (hasInvalidValues) {
+                Log.w(TAG, "Model output contained invalid values, clamped to safe defaults")
             }
             
             // Map model output to configuration adjustments
@@ -352,7 +428,8 @@ class TProxyAiOptimizer(
             
             adjustments
         } catch (e: Exception) {
-            Log.e(TAG, "Error getting AI recommendation", e)
+            Log.e(TAG, "Error getting AI recommendation: ${e.javaClass.simpleName}: ${e.message}", e)
+            // Always return heuristic on any exception
             getHeuristicRecommendation(features)
         }
     }
