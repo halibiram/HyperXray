@@ -66,31 +66,63 @@ class TlsSniModel(
                         modelPath = V9_MODEL_PATH
                         Log.i(TAG, "Loaded v9 fallback model: $V9_MODEL_PATH")
                     } catch (e3: IOException) {
-                        Log.e(TAG, "No TLS SNI model found (tried FP32, FP16, and v9). TLS SNI optimization will be disabled.", e3)
-                        return
+                        val errorMsg = "No TLS SNI model found (tried FP32, FP16, and v9). TLS SNI optimization will be disabled."
+                        Log.e(TAG, errorMsg, e3)
+                        isInitialized = false
+                        throw IllegalStateException(errorMsg, e3)
                     }
                 }
             }
             
             if (modelBytes == null || modelBytes.isEmpty() || modelBytes.size < 100) {
-                Log.e(TAG, "Model file is invalid (size: ${modelBytes?.size ?: 0})")
-                return
+                val errorMsg = "Model file is invalid (size: ${modelBytes?.size ?: 0})"
+                Log.e(TAG, errorMsg)
+                isInitialized = false
+                throw IllegalStateException(errorMsg)
             }
             
             Log.d(TAG, "Model file size: ${modelBytes.size} bytes")
             
             // Create session with default options
             val sessionOptions = OrtSession.SessionOptions()
-            session = env.createSession(modelBytes, sessionOptions)
+            val createdSession = env.createSession(modelBytes, sessionOptions)
+            
+            // Verify session was created successfully
+            if (createdSession == null) {
+                val errorMsg = "Failed to create ONNX session"
+                Log.e(TAG, errorMsg)
+                isInitialized = false
+                throw IllegalStateException(errorMsg)
+            }
+            
+            // Store session after verification
+            session = createdSession
+            
+            // Verify session has required inputs/outputs
+            val inputNames = createdSession.inputNames
+            val outputNames = createdSession.outputNames
+            if (inputNames.isEmpty() || outputNames.isEmpty()) {
+                val errorMsg = "Invalid ONNX session: missing inputs or outputs"
+                Log.e(TAG, errorMsg)
+                session?.close()
+                session = null
+                isInitialized = false
+                throw IllegalStateException(errorMsg)
+            }
             
             isInitialized = true
             Log.i(TAG, "TLS SNI optimizer v5 model loaded successfully from $modelPath")
-            Log.d(TAG, "Model inputs: ${session?.inputNames?.joinToString()}")
-            Log.d(TAG, "Model outputs: ${session?.outputNames?.joinToString()}")
+            Log.d(TAG, "Model inputs: ${inputNames.joinToString()}")
+            Log.d(TAG, "Model outputs: ${outputNames.joinToString()}")
             
+        } catch (e: IllegalStateException) {
+            // Re-throw IllegalStateException (our validation errors)
+            isInitialized = false
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize TlsSniModel: ${e.message}", e)
             isInitialized = false
+            throw IllegalStateException("TlsSniModel initialization failed: ${e.message}", e)
         }
     }
     
