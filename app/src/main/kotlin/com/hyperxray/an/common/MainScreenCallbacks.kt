@@ -53,7 +53,8 @@ fun rememberMainScreenCallbacks(
     val onPerformExport: () -> Unit = {
         scope.launch {
             val logFile = logViewModel.getLogFile()
-            if (logFile.exists() && logViewModel.logEntries.value.isNotEmpty()) {
+            // Use hasLogsToExport instead of accessing logEntries.value to prevent memory leak
+            if (logFile.exists() && logViewModel.hasLogsToExport.value) {
                 try {
                     val fileUri =
                         FileProvider.getUriForFile(
