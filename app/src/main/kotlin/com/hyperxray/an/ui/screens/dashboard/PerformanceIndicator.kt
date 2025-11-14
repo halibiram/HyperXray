@@ -70,18 +70,18 @@ fun PerformanceIndicator(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(10.dp)
-                .clip(RoundedCornerShape(6.dp))
+                .height(12.dp)
+                .clip(RoundedCornerShape(8.dp))
                 .background(
-                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
                 )
         ) {
             LinearProgressIndicator(
                 progress = { animatedProgress },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(10.dp)
-                    .clip(RoundedCornerShape(6.dp)),
+                    .height(12.dp)
+                    .clip(RoundedCornerShape(8.dp)),
                 color = color,
                 trackColor = Color.Transparent
             )
