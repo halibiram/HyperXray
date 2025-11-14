@@ -1,0 +1,44 @@
+plugins {
+    id 'com.android.library'
+    id 'org.jetbrains.kotlin.android'
+    id 'androidx.baselineprofile' version '1.3.2'
+}
+
+android {
+    namespace "com.hyperxray.an.baselineprofile"
+    compileSdk 35
+
+    defaultConfig {
+        minSdk 29
+        targetSdk 35
+    }
+
+    buildTypes {
+        release {
+            // Release build type for baseline profile generation
+        }
+        debug {
+            // Debug build type for baseline profile generation
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_22
+        targetCompatibility JavaVersion.VERSION_22
+    }
+
+    kotlinOptions {
+        jvmTarget = '22'
+    }
+}
+
+dependencies {
+    // Baseline Profile Generator dependencies
+    implementation 'androidx.test.ext:junit:1.2.1'
+    implementation 'androidx.test.uiautomator:uiautomator:2.3.0'
+    implementation 'androidx.benchmark:benchmark-macro-junit4:1.3.2'
+    
+    // App module dependency for profile generation
+    implementation project(':app')
+}
+

@@ -126,11 +126,41 @@ class FileManager(private val application: Application, private val prefs: Prefe
                 return@withContext null
             }
 
-            val (name, configContent) = ConfigFormatConverter.convert(application, content).getOrElse { e ->
-                Log.e(TAG, "Failed to parse config", e)
+            // SimpleXray approach: First check if content is already valid JSON
+            val isDirectJson = try {
+                org.json.JSONObject(content)
+                true
+            } catch (e: org.json.JSONException) {
+                false
+            }
+
+            val (name, configContent) = if (isDirectJson) {
+                // Direct JSON content - use it as-is (SimpleXray approach)
+                val configName = "imported_${System.currentTimeMillis()}"
+                Pair(configName, content)
+            } else {
+                // Try to convert using converters (vless://, hyperxray://, etc.)
+                ConfigFormatConverter.convert(application, content).getOrElse { e ->
+                    Log.e(TAG, "Failed to parse config: ${e.message}", e)
+                    return@withContext null
+                }
+            }
+
+            // Validate that configContent is valid JSON (SimpleXray approach)
+            val isJson = try {
+                org.json.JSONObject(configContent)
+                true
+            } catch (e: org.json.JSONException) {
+                Log.e(TAG, "Config content is not valid JSON after conversion", e)
+                false
+            }
+
+            if (!isJson) {
+                Log.e(TAG, "Config content is not valid JSON. Content starts with: ${configContent.take(100)}")
                 return@withContext null
             }
 
+            // Format and save the config (SimpleXray approach: minimal formatting)
             val formattedContent = try {
                 ConfigUtils.formatConfigContent(configContent)
             } catch (e: JSONException) {
@@ -138,18 +168,25 @@ class FileManager(private val application: Application, private val prefs: Prefe
                 return@withContext null
             }
 
+            // SimpleXray approach: Use timestamp-based filename, handle conflicts
             val filename = "$name.json"
             val newFile = File(application.filesDir, filename)
 
+            // Check if file already exists and handle naming conflict
+            var finalFile = newFile
+            var counter = 1
+            while (finalFile.exists()) {
+                val newName = "${name}_$counter.json"
+                finalFile = File(application.filesDir, newName)
+                counter++
+            }
+
             try {
-                FileOutputStream(newFile).use { fileOutputStream ->
+                FileOutputStream(finalFile).use { fileOutputStream ->
                     fileOutputStream.write(formattedContent.toByteArray(StandardCharsets.UTF_8))
                 }
-                Log.d(
-                    TAG,
-                    "Successfully imported config from content to: ${newFile.absolutePath}"
-                )
-                newFile.absolutePath
+                Log.d(TAG, "Successfully imported config from content to: ${finalFile.absolutePath}")
+                finalFile.absolutePath
             } catch (e: IOException) {
                 Log.e(TAG, "Error saving imported config file from content.", e)
                 return@withContext null

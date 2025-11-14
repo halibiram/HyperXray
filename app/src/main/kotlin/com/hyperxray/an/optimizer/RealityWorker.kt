@@ -12,6 +12,10 @@ import androidx.work.NetworkType
 import androidx.work.ExistingPeriodicWorkPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
 import java.io.FileWriter
@@ -36,8 +40,35 @@ class RealityWorker(
 ) : CoroutineWorker(context, params) {
     
     private val TAG = "RealityWorker"
-    private val learner = OnDeviceLearner(applicationContext)
-    private val learnerState = LearnerState(applicationContext)
+    
+    // Lazy initialization to ensure applicationContext is ready
+    // Use lateinit to allow proper exception propagation
+    private lateinit var learner: OnDeviceLearner
+    private lateinit var learnerState: LearnerState
+    
+    /**
+     * Initialize learner components with explicit error handling.
+     * @throws IllegalStateException if initialization fails
+     */
+    private fun initializeLearnerComponents() {
+        if (!::learner.isInitialized) {
+            try {
+                learner = OnDeviceLearner(applicationContext)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to initialize OnDeviceLearner: ${e.message}", e)
+                throw IllegalStateException("OnDeviceLearner initialization failed", e)
+            }
+        }
+        
+        if (!::learnerState.isInitialized) {
+            try {
+                learnerState = LearnerState(applicationContext)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to initialize LearnerState: ${e.message}", e)
+                throw IllegalStateException("LearnerState initialization failed", e)
+            }
+        }
+    }
     
     data class FeedbackEntry(
         val timestamp: Long,
@@ -58,6 +89,19 @@ class RealityWorker(
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "RealityWorker started")
+            
+            // Initialize components with explicit error handling
+            try {
+                initializeLearnerComponents()
+            } catch (e: IllegalStateException) {
+                Log.e(TAG, "Failed to initialize learner components: ${e.message}", e)
+                // Retry initialization failures with backoff
+                return@withContext Result.retry()
+            } catch (e: Exception) {
+                Log.e(TAG, "Unexpected error during learner component initialization: ${e.message}", e)
+                // Retry on unexpected errors
+                return@withContext Result.retry()
+            }
             
             // Read feedback logs
             val logFile = File(applicationContext.filesDir, "learner_log.jsonl")
@@ -81,29 +125,59 @@ class RealityWorker(
             
             // Update learner with aggregated feedback
             for (feedback in aggregated) {
-                learner.updateWithFeedback(
-                    success = feedback.success,
-                    throughputKbps = feedback.throughput,
-                    svcIdx = feedback.svcIdx,
-                    routeIdx = feedback.routeIdx
-                )
+                try {
+                    learner.updateWithFeedback(
+                        success = feedback.success,
+                        throughputKbps = feedback.throughput,
+                        svcIdx = feedback.svcIdx,
+                        routeIdx = feedback.routeIdx
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error updating feedback for svc=${feedback.svcIdx}, route=${feedback.routeIdx}: ${e.message}", e)
+                    // Continue with next feedback entry
+                }
             }
             
             // Save learner state
-            learnerState.save()
+            try {
+                learnerState.save()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error saving learner state: ${e.message}", e)
+                // Continue - state updates are atomic via SharedPreferences
+            }
             
             // Rebuild policy JSON
-            rebuildPolicyJson()
+            try {
+                rebuildPolicyJson()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error rebuilding policy JSON: ${e.message}", e)
+                // Continue - policy rebuild failure doesn't break the worker
+            }
             
             // Trigger Xray reload
-            triggerXrayReload()
+            try {
+                triggerXrayReload()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error triggering Xray reload: ${e.message}", e)
+                // Continue - reload failure is non-critical
+            }
             
             Log.i(TAG, "Updated learner from ${recentEntries.size} feedback entries, ${aggregated.size} aggregated updates")
             Result.success()
             
         } catch (e: Exception) {
             Log.e(TAG, "RealityWorker failed: ${e.message}", e)
-            Result.retry()
+            // Retry initialization failures with backoff
+            if (e is IllegalStateException && (
+                e.message?.contains("initialization failed") == true ||
+                e.message?.contains("not initialized") == true
+            )) {
+                Log.w(TAG, "Initialization failed, will retry: ${e.message}")
+                Result.retry() // Retry initialization failures
+            } else {
+                // Retry on transient failures
+                Result.retry()
+            }
         }
     }
     
@@ -458,29 +532,131 @@ class RealityWorker(
     }
     
     companion object {
+        @Volatile
+        private var isScheduled = false
+        @Volatile
+        private var isScheduling = false
+        private val scheduleLock = Any()
+        private val scheduleScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        
         /**
          * Schedule periodic work (5 minutes for more frequent policy updates).
+         * Handles IllegalStateException if WorkManager is not initialized yet.
+         * Idempotent - safe to call multiple times.
+         * Uses coroutines instead of Handler to avoid main looper issues.
+         * Never throws - all errors are handled internally with retry logic.
          */
         fun schedule(context: Context) {
-            val workRequest = PeriodicWorkRequestBuilder<RealityWorker>(
-                5, TimeUnit.MINUTES // Changed from 30 minutes to 5 minutes for more frequent updates
-            )
-                .setConstraints(
-                    Constraints.Builder()
-                        .setRequiredNetworkType(NetworkType.CONNECTED)
-                        .setRequiresCharging(false) // Can run without charging
-                        .setRequiresDeviceIdle(false) // Can run when not idle
-                        .build()
+            synchronized(scheduleLock) {
+                if (isScheduled) {
+                    Log.d("RealityWorker", "Already scheduled, skipping")
+                    return
+                }
+                if (isScheduling) {
+                    Log.d("RealityWorker", "Scheduling in progress, skipping")
+                    return
+                }
+                isScheduling = true
+            }
+            
+            // Use coroutine scope for retries to avoid Handler/main looper issues
+            scheduleScope.launch {
+                try {
+                    val success = attemptSchedule(context.applicationContext, 0)
+                    if (!success) {
+                        Log.w("RealityWorker", "Scheduling failed, will retry on next schedule() call")
+                    }
+                } catch (e: Exception) {
+                    // Reset scheduling flag on unexpected error (attemptSchedule should handle this, but be safe)
+                    synchronized(scheduleLock) {
+                        isScheduling = false
+                    }
+                    Log.e("RealityWorker", "Unexpected error in schedule coroutine: ${e.message}", e)
+                }
+            }
+        }
+        
+        private suspend fun attemptSchedule(ctx: Context, retryCount: Int): Boolean {
+            return try {
+                // Add initial delay on first attempt to give WorkManager time to initialize
+                if (retryCount == 0) {
+                    delay(100L) // Small delay to allow WorkManager.initialize() to complete
+                }
+                
+                // Check if WorkManager is ready - this can throw IllegalStateException
+                val workManager = try {
+                    WorkManager.getInstance(ctx)
+                } catch (e: IllegalStateException) {
+                    // WorkManager not ready - retry with backoff
+                    if (retryCount < 10) {
+                        val backoffMs = when {
+                            retryCount == 0 -> 200L // First retry: 200ms
+                            retryCount < 3 -> 500L * retryCount // Next few: 500ms, 1000ms
+                            else -> (1000L * (1 shl (retryCount - 2))).coerceAtMost(5000L) // Exponential backoff
+                        }
+                        Log.d("RealityWorker", "WorkManager not ready (attempt ${retryCount + 1}/10), waiting ${backoffMs}ms")
+                        delay(backoffMs)
+                        return attemptSchedule(ctx.applicationContext, retryCount + 1)
+                    } else {
+                        Log.e("RealityWorker", "WorkManager not ready after 10 attempts: ${e.message}")
+                        throw e // Re-throw to be caught by outer catch
+                    }
+                }
+                
+                // WorkManager is ready - create and enqueue work request
+                val workRequest = PeriodicWorkRequestBuilder<RealityWorker>(
+                    5, TimeUnit.MINUTES // Changed from 30 minutes to 5 minutes for more frequent updates
                 )
-                .build()
-            
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                "reality_worker",
-                ExistingPeriodicWorkPolicy.REPLACE, // Replace existing to update interval
-                workRequest
-            )
-            
-            Log.i("RealityWorker", "Scheduled periodic learning work (5 min)")
+                    .setConstraints(
+                        Constraints.Builder()
+                            .setRequiredNetworkType(NetworkType.CONNECTED)
+                            .setRequiresCharging(false) // Can run without charging
+                            .setRequiresDeviceIdle(false) // Can run when not idle
+                            .build()
+                    )
+                    .build()
+                
+                workManager.enqueueUniquePeriodicWork(
+                    "reality_worker",
+                    ExistingPeriodicWorkPolicy.REPLACE, // Replace existing to update interval
+                    workRequest
+                )
+                
+                synchronized(scheduleLock) {
+                    isScheduled = true
+                    isScheduling = false
+                }
+                Log.i("RealityWorker", "Scheduled periodic learning work (5 min)")
+                true
+            } catch (e: IllegalStateException) {
+                // WorkManager not initialized - retry with backoff
+                if (retryCount < 10) {
+                    val backoffMs = when {
+                        retryCount == 0 -> 200L
+                        retryCount < 3 -> 500L * retryCount
+                        else -> (1000L * (1 shl (retryCount - 2))).coerceAtMost(5000L)
+                    }
+                    Log.w("RealityWorker", "WorkManager not initialized (attempt ${retryCount + 1}/10), retrying in ${backoffMs}ms: ${e.message}")
+                    delay(backoffMs)
+                    attemptSchedule(ctx.applicationContext, retryCount + 1)
+                } else {
+                    Log.e("RealityWorker", "Failed to schedule work after 10 retries: ${e.message}", e)
+                    // Reset flags to allow manual retry later
+                    synchronized(scheduleLock) {
+                        isScheduled = false
+                        isScheduling = false
+                    }
+                    false
+                }
+            } catch (e: Exception) {
+                Log.e("RealityWorker", "Failed to schedule work: ${e.message}", e)
+                // Reset flags to allow retry
+                synchronized(scheduleLock) {
+                    isScheduled = false
+                    isScheduling = false
+                }
+                false
+            }
         }
     }
 }

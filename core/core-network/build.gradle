@@ -1,0 +1,86 @@
+plugins {
+    id 'com.android.library'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.google.protobuf' version '0.9.4'
+}
+
+def versionProps = new Properties()
+file("$rootDir/version.properties").withInputStream { versionProps.load(it) }
+
+protobuf {
+    protoc {
+        artifact = 'com.google.protobuf:protoc:3.25.1'
+    }
+    plugins {
+        grpc {
+            artifact = 'io.grpc:protoc-gen-grpc-java:1.65.0'
+        }
+    }
+    generateProtoTasks {
+        all().each { task ->
+            task.builtins {
+                java {}
+            }
+            task.plugins {
+                grpc {}
+            }
+        }
+    }
+}
+
+android {
+    namespace "com.hyperxray.an.core.network"
+    compileSdk 35
+
+    defaultConfig {
+        minSdk 29
+        targetSdk 35
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_22
+        targetCompatibility JavaVersion.VERSION_22
+    }
+
+    kotlinOptions {
+        jvmTarget = '22'
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    sourceSets {
+        main {
+            java {
+                srcDirs 'src/main/java', 'build/generated/source/proto/main/java'
+            }
+            kotlin {
+                srcDirs 'src/main/kotlin', 'build/generated/source/proto/main/grpckt'
+            }
+        }
+    }
+}
+
+dependencies {
+    // gRPC dependencies for network communication
+    implementation "io.grpc:grpc-okhttp:1.74.0"
+    implementation "io.grpc:grpc-protobuf:1.74.0"
+    implementation "io.grpc:grpc-stub:1.74.0"
+    implementation "io.grpc:grpc-kotlin-stub:1.4.3"
+    
+    // OkHttp for HTTP client functionality (fallback)
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
+    // OkHttp DNS over HTTPS for fast DNS resolution
+    implementation "com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0"
+    
+    // Performance networking - Cronet for high-speed HTTP/3
+    implementation 'org.chromium.net:cronet-embedded:119.6045.31'
+    
+    // Conscrypt for TLS acceleration
+    implementation 'org.conscrypt:conscrypt-android:2.5.2'
+    
+    // Android core
+    implementation 'androidx.core:core-ktx:1.16.0'
+}
+

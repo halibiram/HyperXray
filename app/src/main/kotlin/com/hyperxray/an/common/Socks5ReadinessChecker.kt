@@ -1,0 +1,168 @@
+package com.hyperxray.an.common
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
+import android.util.Log
+import com.hyperxray.an.prefs.Preferences
+import com.hyperxray.an.service.TProxyService
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import java.net.Socket
+import java.net.SocketTimeoutException
+
+/**
+ * Utility class to check if SOCKS5 proxy is ready and wait for it to become available.
+ * 
+ * This class provides:
+ * - Health check function to test if SOCKS5 port is listening
+ * - Suspend function to wait until SOCKS5 is ready
+ * - StateFlow to observe SOCKS5 readiness status
+ * - Auto-reconnection support when SOCKS5 restarts
+ */
+object Socks5ReadinessChecker {
+    private const val TAG = "Socks5ReadinessChecker"
+    
+    // Default timeout for socket connection attempts
+    private const val SOCKET_CONNECT_TIMEOUT_MS = 2000L
+    
+    // Retry interval when waiting for SOCKS5 to become ready
+    private const val RETRY_INTERVAL_MS = 500L
+    
+    // Maximum wait time before giving up
+    private const val MAX_WAIT_TIME_MS = 30000L // 30 seconds
+    
+    // StateFlow to track SOCKS5 readiness
+    private val _isSocks5Ready = MutableStateFlow<Boolean>(false)
+    val isSocks5Ready: StateFlow<Boolean> = _isSocks5Ready.asStateFlow()
+    
+    /**
+     * Check if SOCKS5 proxy is ready by attempting to connect to the port.
+     * 
+     * @param context Application context
+     * @param address SOCKS5 address (default: 127.0.0.1)
+     * @param port SOCKS5 port (default: from Preferences or 10808)
+     * @return true if port is listening and accepting connections, false otherwise
+     */
+    fun isSocks5Ready(
+        context: Context,
+        address: String = "127.0.0.1",
+        port: Int? = null
+    ): Boolean {
+        val socksPort = port ?: Preferences(context).socksPort
+        val socksAddress = address
+        
+        return try {
+            Socket().use { socket ->
+                socket.soTimeout = SOCKET_CONNECT_TIMEOUT_MS.toInt()
+                socket.connect(
+                    java.net.InetSocketAddress(socksAddress, socksPort),
+                    SOCKET_CONNECT_TIMEOUT_MS.toInt()
+                )
+                // If connection succeeds, port is listening
+                Log.d(TAG, "SOCKS5 readiness check: port $socksPort is ready")
+                true
+            }
+        } catch (e: SocketTimeoutException) {
+            Log.d(TAG, "SOCKS5 readiness check: port $socksPort not ready (timeout)")
+            false
+        } catch (e: Exception) {
+            Log.d(TAG, "SOCKS5 readiness check: port $socksPort not ready (${e.javaClass.simpleName}: ${e.message})")
+            false
+        }
+    }
+    
+    /**
+     * Wait until SOCKS5 proxy is ready, with retries and timeout.
+     * 
+     * @param context Application context
+     * @param address SOCKS5 address (default: 127.0.0.1)
+     * @param port SOCKS5 port (default: from Preferences or 10808)
+     * @param maxWaitTimeMs Maximum time to wait in milliseconds (default: 30 seconds)
+     * @param retryIntervalMs Interval between retry attempts in milliseconds (default: 500ms)
+     * @return true if SOCKS5 became ready within timeout, false if timeout was reached
+     */
+    suspend fun waitUntilSocksReady(
+        context: Context,
+        address: String = "127.0.0.1",
+        port: Int? = null,
+        maxWaitTimeMs: Long = MAX_WAIT_TIME_MS,
+        retryIntervalMs: Long = RETRY_INTERVAL_MS
+    ): Boolean {
+        val socksPort = port ?: Preferences(context).socksPort
+        val socksAddress = address
+        val startTime = System.currentTimeMillis()
+        
+        Log.d(TAG, "Waiting for SOCKS5 to become ready on $socksAddress:$socksPort (max wait: ${maxWaitTimeMs}ms)")
+        
+        while (System.currentTimeMillis() - startTime < maxWaitTimeMs) {
+            if (isSocks5Ready(context, socksAddress, socksPort)) {
+                _isSocks5Ready.value = true
+                Log.i(TAG, "SOCKS5 is ready on $socksAddress:$socksPort")
+                return true
+            }
+            
+            // Check if we've exceeded max wait time
+            val elapsed = System.currentTimeMillis() - startTime
+            if (elapsed >= maxWaitTimeMs) {
+                break
+            }
+            
+            // Wait before retrying
+            val remainingWait = (maxWaitTimeMs - elapsed).coerceAtMost(retryIntervalMs)
+            delay(remainingWait)
+        }
+        
+        val elapsed = System.currentTimeMillis() - startTime
+        Log.w(TAG, "SOCKS5 did not become ready within ${elapsed}ms (timeout: ${maxWaitTimeMs}ms)")
+        _isSocks5Ready.value = false
+        return false
+    }
+    
+    /**
+     * Update readiness state (called by TProxyService when SOCKS5 starts/stops).
+     */
+    fun setSocks5Ready(ready: Boolean) {
+        if (_isSocks5Ready.value != ready) {
+            _isSocks5Ready.value = ready
+            Log.d(TAG, "SOCKS5 readiness state updated: $ready")
+        }
+    }
+    
+    /**
+     * Register a BroadcastReceiver to listen for SOCKS5 readiness events from TProxyService.
+     * 
+     * @param context Application context
+     * @param receiver BroadcastReceiver to register
+     */
+    fun registerReadinessReceiver(context: Context, receiver: BroadcastReceiver) {
+        val filter = IntentFilter(TProxyService.ACTION_SOCKS5_READY)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            context.registerReceiver(receiver, filter)
+        }
+        Log.d(TAG, "Registered SOCKS5 readiness receiver")
+    }
+    
+    /**
+     * Unregister a BroadcastReceiver.
+     * 
+     * @param context Application context
+     * @param receiver BroadcastReceiver to unregister
+     */
+    fun unregisterReadinessReceiver(context: Context, receiver: BroadcastReceiver) {
+        try {
+            context.unregisterReceiver(receiver)
+            Log.d(TAG, "Unregistered SOCKS5 readiness receiver")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error unregistering SOCKS5 readiness receiver: ${e.message}")
+        }
+    }
+}
+

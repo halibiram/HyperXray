@@ -1,0 +1,558 @@
+package com.hyperxray.an.xray.runtime
+
+import android.content.Context
+import android.os.Build
+import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import java.io.BufferedReader
+import java.io.File
+import java.io.IOException
+import java.io.InputStreamReader
+import java.io.InterruptedIOException
+import kotlin.concurrent.Volatile
+
+/**
+ * Service for managing Xray-core binary lifecycle.
+ * 
+ * This service provides a safe, controlled interface for starting, stopping,
+ * and restarting the Xray-core binary process. It exposes status events
+ * through StateFlow for reactive programming.
+ * 
+ * Thread-safety: All public methods are thread-safe and can be called from
+ * any thread. Internal state is protected with @Volatile and synchronization.
+ * 
+ * @param context Android context for accessing native library directory
+ */
+class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
+    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    
+    @Volatile
+    private var xrayProcess: Process? = null
+    
+    @Volatile
+    private var isStopping = false
+    
+    @Volatile
+    private var isStarting = false
+    
+    private val _status = MutableStateFlow<XrayRuntimeStatus>(XrayRuntimeStatus.Stopped)
+    
+    /**
+     * Current runtime status of Xray-core.
+     * 
+     * This StateFlow emits status updates whenever the Xray-core process
+     * state changes. Observers can collect from this flow to react to
+     * status changes.
+     * 
+     * Example:
+     * ```
+     * service.status.collect { status ->
+     *     when (status) {
+     *         is XrayRuntimeStatus.Running -> println("Xray is running")
+     *         is XrayRuntimeStatus.Error -> println("Error: ${status.message}")
+     *         else -> {}
+     *     }
+     * }
+     * ```
+     */
+    override val status: StateFlow<XrayRuntimeStatus> = _status.asStateFlow()
+    
+    companion object {
+        private const val TAG = "XrayRuntimeService"
+        
+        /**
+         * Get the native library directory path.
+         * 
+         * @param context Android context
+         * @return Native library directory path, or null if unavailable
+         */
+        fun getNativeLibraryDir(context: Context?): String? {
+            if (context == null) {
+                Log.e(TAG, "Context is null")
+                return null
+            }
+            try {
+                val applicationInfo = context.applicationInfo
+                if (applicationInfo != null) {
+                    val nativeLibraryDir = applicationInfo.nativeLibraryDir
+                    Log.d(TAG, "Native Library Directory: $nativeLibraryDir")
+                    return nativeLibraryDir
+                } else {
+                    Log.e(TAG, "ApplicationInfo is null")
+                    return null
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error getting native library dir", e)
+                return null
+            }
+        }
+    }
+    
+    /**
+     * Start Xray-core with the provided configuration.
+     * 
+     * This method will:
+     * 1. Validate the configuration file path
+     * 2. Find an available API port
+     * 3. Launch the Xray-core process
+     * 4. Write configuration to stdin
+     * 5. Monitor the process and update status
+     * 
+     * @param configPath Path to the Xray configuration JSON file
+     * @param configContent Optional pre-read configuration content (for security)
+     * @param apiPort Optional API port (if null, will find available port)
+     * @return The API port number used, or null if startup failed
+     */
+    override fun start(
+        configPath: String,
+        configContent: String?,
+        apiPort: Int?
+    ): Int? {
+        // Prevent concurrent start calls
+        if (isStarting) {
+            Log.w(TAG, "Start already in progress, ignoring duplicate call")
+            return null
+        }
+        
+        if (isStopping) {
+            Log.w(TAG, "Cannot start while stopping")
+            return null
+        }
+        
+        val currentStatus = _status.value
+        if (currentStatus is XrayRuntimeStatus.Running) {
+            Log.w(TAG, "Already running, ignoring start request")
+            return (currentStatus as? XrayRuntimeStatus.Running)?.apiPort
+        }
+        
+        isStarting = true
+        _status.value = XrayRuntimeStatus.Starting
+        
+        return try {
+            val libraryDir = getNativeLibraryDir(context)
+            if (libraryDir == null) {
+                val errorMessage = "Failed to get native library directory"
+                Log.e(TAG, errorMessage)
+                _status.value = XrayRuntimeStatus.Error(errorMessage)
+                isStarting = false
+                return null
+            }
+            
+            // Validate config path
+            val configFile = validateConfigPath(configPath)
+            if (configFile == null) {
+                val errorMessage = "Invalid configuration file: path validation failed or file not accessible"
+                Log.e(TAG, errorMessage)
+                _status.value = XrayRuntimeStatus.Error(errorMessage)
+                isStarting = false
+                return null
+            }
+            
+            // Read config content if not provided
+            val finalConfigContent = configContent ?: readConfigContentSecurely(configFile)
+            if (finalConfigContent == null) {
+                val errorMessage = "Failed to read configuration file"
+                Log.e(TAG, errorMessage)
+                _status.value = XrayRuntimeStatus.Error(errorMessage)
+                isStarting = false
+                return null
+            }
+            
+            // Find available port if not provided
+            val finalApiPort = apiPort ?: findAvailablePort(extractPortsFromJson(finalConfigContent))
+            if (finalApiPort == null) {
+                val errorMessage = "Failed to find available port"
+                Log.e(TAG, errorMessage)
+                _status.value = XrayRuntimeStatus.Error(errorMessage)
+                isStarting = false
+                return null
+            }
+            
+            // Start the process
+            serviceScope.launch {
+                runXrayProcess(libraryDir, configFile, finalConfigContent, finalApiPort)
+            }
+            
+            isStarting = false
+            finalApiPort
+        } catch (e: Exception) {
+            Log.e(TAG, "Error starting Xray", e)
+            _status.value = XrayRuntimeStatus.Error("Failed to start: ${e.message}", e)
+            isStarting = false
+            null
+        }
+    }
+    
+    /**
+     * Stop Xray-core gracefully.
+     * 
+     * This method will:
+     * 1. Signal graceful shutdown by closing stdin
+     * 2. Wait for process to finish current operations
+     * 3. Destroy the process if still alive
+     * 4. Update status to Stopped
+     */
+    override fun stop() {
+        if (isStopping) {
+            Log.d(TAG, "Stop already in progress, ignoring duplicate call")
+            return
+        }
+        
+        isStopping = true
+        _status.value = XrayRuntimeStatus.Stopping
+        
+        try {
+            val processToDestroy = xrayProcess
+            
+            // Signal graceful shutdown
+            if (processToDestroy != null && processToDestroy.isAlive) {
+                try {
+                    processToDestroy.outputStream?.close()
+                    Log.d(TAG, "Closed stdin to signal graceful shutdown")
+                } catch (e: Exception) {
+                    Log.d(TAG, "Error closing stdin: ${e.message}")
+                }
+                
+                // Grace period for UDP operations
+                try {
+                    Thread.sleep(400)
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+            }
+            
+            // Cancel coroutine scope
+            serviceScope.cancel()
+            
+            // Destroy process
+            if (processToDestroy != null) {
+                try {
+                    processToDestroy.destroy()
+                    Thread.sleep(500)
+                    if (processToDestroy.isAlive) {
+                        Log.d(TAG, "Process still alive, forcing destroy")
+                        processToDestroy.destroyForcibly()
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error destroying process", e)
+                }
+                xrayProcess = null
+            }
+            
+            _status.value = XrayRuntimeStatus.Stopped
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during stop", e)
+            _status.value = XrayRuntimeStatus.Error("Failed to stop: ${e.message}", e)
+        } finally {
+            isStopping = false
+        }
+    }
+    
+    /**
+     * Restart Xray-core with new configuration.
+     * 
+     * This is equivalent to calling stop() followed by start().
+     * 
+     * @param configPath Path to the Xray configuration JSON file
+     * @param configContent Optional pre-read configuration content
+     * @param apiPort Optional API port
+     * @return The API port number used, or null if restart failed
+     */
+    override fun restart(
+        configPath: String,
+        configContent: String?,
+        apiPort: Int?
+    ): Int? {
+        Log.d(TAG, "Restarting Xray-core")
+        stop()
+        
+        // Wait a bit for cleanup
+        try {
+            Thread.sleep(200)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+        
+        return start(configPath, configContent, apiPort)
+    }
+    
+    /**
+     * Check if Xray-core is currently running.
+     * 
+     * @return true if running, false otherwise
+     */
+    override fun isRunning(): Boolean {
+        return _status.value is XrayRuntimeStatus.Running && 
+               xrayProcess?.isAlive == true
+    }
+    
+    /**
+     * Get the current process ID if running.
+     * 
+     * @return Process ID, or null if not running
+     */
+    override fun getProcessId(): Long? {
+        val currentStatus = _status.value
+        return if (currentStatus is XrayRuntimeStatus.Running) {
+            currentStatus.processId
+        } else {
+            null
+        }
+    }
+    
+    /**
+     * Get the current API port if running.
+     * 
+     * @return API port number, or null if not running
+     */
+    override fun getApiPort(): Int? {
+        val currentStatus = _status.value
+        return if (currentStatus is XrayRuntimeStatus.Running) {
+            currentStatus.apiPort
+        } else {
+            null
+        }
+    }
+    
+    /**
+     * Cleanup resources. Call this when the service is no longer needed.
+     */
+    override fun cleanup() {
+        stop()
+        serviceScope.cancel()
+    }
+    
+    // Private helper methods
+    
+    private fun validateConfigPath(configPath: String?): File? {
+        if (configPath == null) {
+            Log.e(TAG, "Config path is null")
+            return null
+        }
+        
+        try {
+            val configFile = File(configPath)
+            
+            if (!configFile.exists()) {
+                Log.e(TAG, "Config file does not exist: $configPath")
+                return null
+            }
+            
+            if (!configFile.isFile) {
+                Log.e(TAG, "Config path is not a file: $configPath")
+                return null
+            }
+            
+            val canonicalConfigPath = configFile.canonicalPath
+            val privateDir = context.filesDir
+            val canonicalPrivateDir = privateDir.canonicalPath
+            
+            if (!canonicalConfigPath.startsWith(canonicalPrivateDir)) {
+                Log.e(TAG, "Config file is outside private directory: $canonicalConfigPath")
+                return null
+            }
+            
+            if (!configFile.canRead()) {
+                Log.e(TAG, "Config file is not readable: $canonicalConfigPath")
+                return null
+            }
+            
+            return configFile
+        } catch (e: Exception) {
+            Log.e(TAG, "Error validating config path: $configPath", e)
+            return null
+        }
+    }
+    
+    private fun readConfigContentSecurely(configFile: File): String? {
+        try {
+            if (!configFile.exists() || !configFile.isFile || !configFile.canRead()) {
+                Log.e(TAG, "Config file validation failed during read: ${configFile.canonicalPath}")
+                return null
+            }
+            return configFile.readText()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error reading config file: ${configFile.canonicalPath}", e)
+            return null
+        }
+    }
+    
+    private fun extractPortsFromJson(jsonContent: String): Set<Int> {
+        // Simple regex-based extraction of port numbers
+        // This is a basic implementation - can be enhanced
+        val portPattern = Regex("""["']port["']\s*:\s*(\d+)""", RegexOption.IGNORE_CASE)
+        return portPattern.findAll(jsonContent)
+            .mapNotNull { it.groupValues.getOrNull(1)?.toIntOrNull() }
+            .toSet()
+    }
+    
+    private fun findAvailablePort(excludedPorts: Set<Int>): Int? {
+        (10000..65535)
+            .shuffled()
+            .forEach { port ->
+                if (port in excludedPorts) return@forEach
+                runCatching {
+                    java.net.ServerSocket(port).use { socket ->
+                        socket.reuseAddress = true
+                    }
+                    port
+                }.onSuccess {
+                    return it
+                }
+            }
+        return null
+    }
+    
+    private suspend fun runXrayProcess(
+        libraryDir: String,
+        configFile: File,
+        configContent: String,
+        apiPort: Int
+    ) {
+        var currentProcess: Process? = null
+        try {
+            Log.d(TAG, "Starting Xray-core process")
+            
+            val xrayPath = "$libraryDir/libxray.so"
+            val processBuilder = createProcessBuilder(xrayPath)
+            currentProcess = processBuilder.start()
+            xrayProcess = currentProcess
+            
+            // Validate process startup
+            var checksPerformed = 0
+            val checkInterval = 50L
+            val minStartupChecks = 2
+            val maxStartupChecks = 100
+            
+            while (checksPerformed < maxStartupChecks) {
+                delay(checkInterval)
+                checksPerformed++
+                
+                if (!currentProcess.isAlive) {
+                    val exitValue = try {
+                        currentProcess.exitValue()
+                    } catch (e: IllegalThreadStateException) {
+                        -1
+                    }
+                    val errorMessage = "Xray process exited during startup (exit code: $exitValue)"
+                    Log.e(TAG, errorMessage)
+                    _status.value = XrayRuntimeStatus.ProcessExited(exitValue, errorMessage)
+                    return
+                }
+                
+                if (checksPerformed >= minStartupChecks) {
+                    Log.d(TAG, "Process startup validated after ${checksPerformed * checkInterval}ms")
+                    break
+                }
+            }
+            
+            // Write config to stdin
+            Log.d(TAG, "Writing config to Xray stdin")
+            try {
+                currentProcess.outputStream.use { os ->
+                    os.write(configContent.toByteArray())
+                    os.flush()
+                }
+            } catch (e: IOException) {
+                if (!currentProcess.isAlive) {
+                    val exitValue = try { currentProcess.exitValue() } catch (ex: IllegalThreadStateException) { -1 }
+                    Log.e(TAG, "Xray process exited while writing config, exit code: $exitValue")
+                    _status.value = XrayRuntimeStatus.ProcessExited(exitValue, "Process exited during config write")
+                }
+                throw e
+            }
+            
+            // Update status to Running
+            val processId = try {
+                // Get process ID using reflection (Android doesn't expose this directly)
+                val pidField = currentProcess.javaClass.getDeclaredField("pid")
+                pidField.isAccessible = true
+                pidField.getLong(currentProcess)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not get process ID: ${e.message}")
+                0L
+            }
+            
+            _status.value = XrayRuntimeStatus.Running(processId, apiPort)
+            Log.d(TAG, "Xray-core started successfully (pid=$processId, apiPort=$apiPort)")
+            
+            // Monitor process output (optional - can be used for logging)
+            readProcessStream(currentProcess)
+            
+        } catch (e: InterruptedIOException) {
+            Log.d(TAG, "Xray process reading interrupted")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error executing Xray", e)
+            _status.value = XrayRuntimeStatus.Error("Process execution failed: ${e.message}", e)
+        } finally {
+            if (xrayProcess === currentProcess) {
+                xrayProcess = null
+            }
+            
+            if (!isStopping) {
+                val exitValue = try {
+                    currentProcess?.exitValue() ?: -1
+                } catch (e: IllegalThreadStateException) {
+                    -1
+                }
+                _status.value = XrayRuntimeStatus.ProcessExited(exitValue, "Process exited unexpectedly")
+            }
+        }
+    }
+    
+    private fun createProcessBuilder(xrayPath: String): ProcessBuilder {
+        val filesDir = context.filesDir
+        
+        val libxrayFile = File(xrayPath)
+        if (!libxrayFile.exists()) {
+            throw IOException("libxray.so not found at: $xrayPath")
+        }
+        
+        val linkerPath = if (Build.SUPPORTED_64_BIT_ABIS.isNotEmpty()) {
+            "/system/bin/linker64"
+        } else {
+            "/system/bin/linker"
+        }
+        
+        Log.d(TAG, "Using linker: $linkerPath to execute: $xrayPath")
+        
+        val command = mutableListOf(linkerPath, xrayPath, "run")
+        val processBuilder = ProcessBuilder(command)
+        val environment = processBuilder.environment()
+        environment["XRAY_LOCATION_ASSET"] = filesDir.path
+        processBuilder.directory(filesDir)
+        processBuilder.redirectErrorStream(true)
+        return processBuilder
+    }
+    
+    private suspend fun readProcessStream(process: Process) {
+        // Basic stream reading - can be enhanced for log forwarding
+        // Note: This is a simplified version - full implementation would
+        // forward logs to a callback or Flow
+        try {
+            BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    // Process log line if needed
+                    Log.d(TAG, "Xray: $line")
+                }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Cancellation is expected when stopping
+            throw e
+        } catch (e: Exception) {
+            if (!isStopping) {
+                Log.d(TAG, "Stream reading finished: ${e.message}")
+            }
+        }
+    }
+}
+

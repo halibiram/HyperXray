@@ -2,7 +2,7 @@ package com.hyperxray.an.telemetry
 
 import android.content.Context
 import android.util.Log
-import com.hyperxray.an.common.CoreStatsClient
+import com.hyperxray.an.xray.runtime.stats.CoreStatsClient
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.viewmodel.CoreStatsState
 import kotlinx.coroutines.CoroutineScope
@@ -153,15 +153,14 @@ class XrayCoreAiOptimizer(
         
         isOptimizing = true
         
-        // Initialize stats client
-        try {
-            coreStatsClient = CoreStatsClient.create("127.0.0.1", apiPort)
-            Log.i(TAG, "Connected to Xray core stats API on port $apiPort")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to connect to Xray core stats API", e)
+        // Initialize stats client (create() now returns nullable)
+        coreStatsClient = CoreStatsClient.create("127.0.0.1", apiPort)
+        if (coreStatsClient == null) {
+            Log.e(TAG, "Failed to connect to Xray core stats API on port $apiPort after retries")
             isOptimizing = false
             return
         }
+        Log.i(TAG, "Connected to Xray core stats API on port $apiPort")
         
         optimizationJob = scope.launch {
             Log.i(TAG, "Starting Xray core AI optimization loop (interval: ${optimizationIntervalMs}ms)")

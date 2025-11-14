@@ -1,0 +1,83 @@
+plugins {
+    id 'com.android.library'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.google.protobuf' version '0.9.4'
+}
+
+def versionProps = new Properties()
+file("$rootDir/version.properties").withInputStream { versionProps.load(it) }
+
+protobuf {
+    protoc {
+        artifact = 'com.google.protobuf:protoc:3.25.1'
+    }
+    plugins {
+        grpc {
+            artifact = 'io.grpc:protoc-gen-grpc-java:1.65.0'
+        }
+    }
+    generateProtoTasks {
+        all().each { task ->
+            task.builtins {
+                java {}
+            }
+            task.plugins {
+                grpc {}
+            }
+        }
+    }
+}
+
+android {
+    namespace "com.hyperxray.an.xray.runtime"
+    compileSdk 35
+
+    defaultConfig {
+        minSdk 29
+        targetSdk 35
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_22
+        targetCompatibility JavaVersion.VERSION_22
+    }
+
+    kotlinOptions {
+        jvmTarget = '22'
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+    
+    sourceSets {
+        main {
+            proto {
+                srcDir '../../app/src/main/proto'
+            }
+            java {
+                srcDirs += 'build/generated/source/proto/main/java'
+            }
+            kotlin {
+                srcDirs += 'build/generated/source/proto/main/grpckt'
+            }
+        }
+    }
+}
+
+dependencies {
+    // Android core
+    implementation 'androidx.core:core-ktx:1.16.0'
+    
+    // Kotlin coroutines for Flow support
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
+    
+    // gRPC for Xray stats API
+    implementation "io.grpc:grpc-okhttp:1.74.0"
+    implementation "io.grpc:grpc-protobuf:1.74.0"
+    implementation "io.grpc:grpc-stub:1.74.0"
+    
+    // Required for javax.annotation.Generated (removed in Java 9+)
+    implementation 'javax.annotation:javax.annotation-api:1.3.2'
+}

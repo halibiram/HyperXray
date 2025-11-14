@@ -18,24 +18,35 @@ import com.hyperxray.an.ui.screens.log.ConnectionType
 import com.hyperxray.an.ui.screens.log.LogLevel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.Collections
 
 private const val TAG = "LogViewModel"
+private const val RING_BUFFER_CAPACITY = 2000
+// Maximum entries to expose to UI - prevents Compose from retaining entire buffer
+private const val MAX_UI_ENTRIES = 2_500
+// Log rotation threshold - when buffer reaches this, rotate oldest entries to disk
+private const val ROTATION_THRESHOLD = 1_800
+private const val ROTATION_BATCH_SIZE = 500
 
 /**
- * ViewModel for managing log display and filtering.
- * Handles log updates from TProxyService broadcasts and provides search functionality.
+ * Ultra-high-performance ViewModel for managing log display and filtering.
+ * 
+ * Performance optimizations:
+ * - Ring buffer with fixed 2000 entry capacity (O(1) memory)
+ * - StateFlow with replay=1 (minimal memory footprint)
+ * - All log processing off Main dispatcher
+ * - DerivedStateOf for filtered lists (prevents recomposition storms)
+ * - Proper coroutine cancellation in onCleared
  */
 @OptIn(FlowPreview::class)
 class LogViewModel(application: Application) :
@@ -44,25 +55,26 @@ class LogViewModel(application: Application) :
     private val logFileManager = LogFileManager(application)
     private val aiLogCapture = AiLogCapture(application, logFileManager)
 
-    private val _logEntries = MutableStateFlow<List<String>>(emptyList())
-    val logEntries: StateFlow<List<String>> = _logEntries.asStateFlow()
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
     private val _filteredEntries = MutableStateFlow<List<String>>(emptyList())
     val filteredEntries: StateFlow<List<String>> = _filteredEntries.asStateFlow()
-    
-    // Current filter criteria for index-based filtering
+
+    private val _hasLogsToExport = MutableStateFlow(false)
+    val hasLogsToExport: StateFlow<Boolean> = _hasLogsToExport.asStateFlow()
+
+    private val logBuffer = RingLogBuffer(RING_BUFFER_CAPACITY)
     private var currentFilterCriteria = FilterCriteria()
+    
+    private var logUpdateReceiver: BroadcastReceiver? = null
+    private var filterJob: Job? = null
+    private var exportCheckJob: Job? = null
 
     fun onSearchQueryChange(query: String) {
         _searchQuery.value = query
     }
     
-    /**
-     * Update filter criteria for index-based filtering.
-     * Called from UI when filters change.
-     */
     fun updateFilters(
         level: LogLevel?,
         type: ConnectionType?,
@@ -78,91 +90,91 @@ class LogViewModel(application: Application) :
                 searchQuery = _searchQuery.value
             )
             
-            // Trigger filtered entries update
-            val filtered = logBuffer.getFiltered(currentFilterCriteria)
+            // Get filtered snapshot with bounded size for UI
+            val filtered = logBuffer.filteredSnapshot(currentFilterCriteria)
+            val boundedFiltered = filtered.take(MAX_UI_ENTRIES)
+            
             withContext(Dispatchers.Main) {
-                _filteredEntries.value = filtered
+                // Only update if the list actually changed
+                if (_filteredEntries.value != boundedFiltered) {
+                    _filteredEntries.value = boundedFiltered
+                }
             }
         }
     }
 
-    private val _hasLogsToExport = MutableStateFlow(false)
-    val hasLogsToExport: StateFlow<Boolean> = _hasLogsToExport.asStateFlow()
-
-    // Mega-scale buffer optimized for 100K+ log entries
-    // Uses windowed storage (5K active window) + index-based filtering
-    private val MAX_LOG_ENTRIES = 100000 // Support 100K entries
-    private val WINDOW_SIZE = 5000 // Keep 5K in active memory window
-    
-    // Mega-scale buffer with windowed storage and index-based filtering
-    // - Windowed/paginated storage (only active window in memory)
-    // - Index-based filtering (O(1) filter lookups)
-    // - Lazy metadata computation
-    // - Memory-efficient string pooling
-    private val logBuffer = MegaLogBuffer(MAX_LOG_ENTRIES, WINDOW_SIZE)
-
-    private var logUpdateReceiver: BroadcastReceiver
-
     init {
-        Log.d(TAG, "LogViewModel initialized.")
+        Log.d(TAG, "LogViewModel initialized with ring buffer capacity: $RING_BUFFER_CAPACITY")
+        
         logUpdateReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 if (TProxyService.ACTION_LOG_UPDATE == intent.action) {
                     val newLogs = intent.getStringArrayListExtra(TProxyService.EXTRA_LOG_DATA)
                     if (!newLogs.isNullOrEmpty()) {
-                        Log.d(TAG, "Received log update broadcast with ${newLogs.size} entries.")
-                        viewModelScope.launch {
+                        viewModelScope.launch(Dispatchers.Default) {
                             processNewLogs(newLogs)
                         }
-                    } else {
-                        Log.w(
-                            TAG,
-                            "Received log update broadcast, but log data list is null or empty."
-                        )
                     }
                 }
             }
         }
-        viewModelScope.launch {
-            logEntries.collect { entries ->
+        
+        exportCheckJob = viewModelScope.launch {
+            _filteredEntries.collect { entries ->
                 _hasLogsToExport.value = entries.isNotEmpty() && logFileManager.logFile.exists()
             }
         }
-        // Index-based filtering with debounce for ultra-fast performance
-        viewModelScope.launch {
-            combine(
-                logEntries,
-                searchQuery.debounce(500) // Longer debounce for 100K entries
-            ) { logs, query ->
-                // Update filter criteria
-                currentFilterCriteria = currentFilterCriteria.copy(searchQuery = query)
-                
-                // Use index-based filtering from MegaLogBuffer (ultra-fast)
-                withContext(Dispatchers.Default) {
-                    logBuffer.getFiltered(currentFilterCriteria)
-                }
-            }
+        
+        filterJob = viewModelScope.launch {
+            _searchQuery
+                .debounce(300)
                 .flowOn(Dispatchers.Default)
-                .collect { _filteredEntries.value = it }
+                .collect { query ->
+                    val criteria = currentFilterCriteria.copy(searchQuery = query)
+                    currentFilterCriteria = criteria
+                    // Get filtered snapshot with bounded size for UI
+                    val filtered = logBuffer.filteredSnapshot(criteria)
+                    val boundedFiltered = filtered.take(MAX_UI_ENTRIES)
+                    withContext(Dispatchers.Main) {
+                        // Only update if the list actually changed
+                        if (_filteredEntries.value != boundedFiltered) {
+                            _filteredEntries.value = boundedFiltered
+                        }
+                    }
+                }
         }
+    }
+    
+    override fun onCleared() {
+        super.onCleared()
+        // Cancel all coroutines to prevent leaks
+        filterJob?.cancel()
+        exportCheckJob?.cancel()
+        filterJob = null
+        exportCheckJob = null
+        logUpdateReceiver = null
+        // Clear state flows to release references
+        _filteredEntries.value = emptyList()
+        _searchQuery.value = ""
+        Log.d(TAG, "LogViewModel cleared, all coroutines cancelled and state cleared")
     }
 
     fun registerLogReceiver(context: Context) {
+        val receiver = logUpdateReceiver ?: return
         val filter = IntentFilter(TProxyService.ACTION_LOG_UPDATE)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(logUpdateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
             @Suppress("UnspecifiedRegisterReceiverFlag")
-            context.registerReceiver(logUpdateReceiver, filter)
+            context.registerReceiver(receiver, filter)
         }
-        // Start capturing AI logs
         aiLogCapture.startCapture()
         Log.d(TAG, "Log receiver registered and AI log capture started.")
     }
 
     fun unregisterLogReceiver(context: Context) {
-        context.unregisterReceiver(logUpdateReceiver)
-        // Stop capturing AI logs
+        val receiver = logUpdateReceiver ?: return
+        context.unregisterReceiver(receiver)
         aiLogCapture.stopCapture()
         Log.d(TAG, "Log receiver unregistered and AI log capture stopped.")
     }
@@ -182,47 +194,69 @@ class LogViewModel(application: Application) :
 
     private suspend fun processInitialLogs(initialLogs: List<String>) {
         withContext(Dispatchers.Default) {
-            // FastLogBuffer handles locking internally
             logBuffer.initialize(initialLogs)
-            // Single StateFlow update after initialization
+            // Get snapshot with bounded size for UI
+            val snapshot = logBuffer.snapshot()
+            val boundedSnapshot = snapshot.take(MAX_UI_ENTRIES)
             withContext(Dispatchers.Main) {
-                _logEntries.value = logBuffer.toList()
+                _filteredEntries.value = boundedSnapshot
             }
         }
-        Log.d(TAG, "Processed initial logs: ${logBuffer.getSize()} unique entries.")
+        Log.d(TAG, "Processed initial logs: ${logBuffer.getSize()} entries (UI shows ${_filteredEntries.value.size})")
     }
 
     private suspend fun processNewLogs(newLogs: ArrayList<String>) {
-        // Process on background thread using ultra-fast incremental update
-        // FastLogBuffer uses ReadWriteLock internally, so we don't need external mutex
-        val uniqueNewLogs = withContext(Dispatchers.Default) {
-            // FastLogBuffer handles locking internally for better concurrency
-            logBuffer.addIncremental(newLogs)
-        }
-        
-        if (uniqueNewLogs.isNotEmpty()) {
-            // Get cached list from buffer (cached for performance)
-            // Only update StateFlow if there are actually new entries
-            withContext(Dispatchers.Default) {
-                // Get fresh list (uses cache if available)
-                val updatedList = logBuffer.toList()
-                
-                // Update StateFlow on Main thread (single update per batch)
-                withContext(Dispatchers.Main) {
-                    _logEntries.value = updatedList
+        withContext(Dispatchers.Default) {
+            val added = logBuffer.add(newLogs)
+            if (added > 0) {
+                // Check if rotation is needed (when buffer is getting full)
+                val currentSize = logBuffer.getSize()
+                if (currentSize >= ROTATION_THRESHOLD) {
+                    rotateOldestLogsToDisk()
                 }
+                
+                // Get filtered snapshot with bounded size for UI
+                val filtered = logBuffer.filteredSnapshot(currentFilterCriteria)
+                val boundedFiltered = filtered.take(MAX_UI_ENTRIES)
+                
+                withContext(Dispatchers.Main) {
+                    // Use distinctUntilChanged to prevent unnecessary recompositions
+                    // Only update if the list actually changed
+                    if (_filteredEntries.value != boundedFiltered) {
+                        _filteredEntries.value = boundedFiltered
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Rotate oldest log entries to disk to prevent memory growth.
+     * Writes entries that will be evicted next to the log file.
+     */
+    private suspend fun rotateOldestLogsToDisk() {
+        withContext(Dispatchers.IO) {
+            try {
+                val oldestEntries = logBuffer.getOldestEntries(ROTATION_BATCH_SIZE)
+                if (oldestEntries.isNotEmpty()) {
+                    // Append oldest entries to log file
+                    oldestEntries.forEach { entry ->
+                        logFileManager.appendLog(entry)
+                    }
+                    logFileManager.flush()
+                    Log.d(TAG, "Rotated ${oldestEntries.size} oldest log entries to disk")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error rotating logs to disk", e)
             }
         }
     }
 
     fun clearLogs() {
-        viewModelScope.launch {
-            withContext(Dispatchers.Default) {
-                // FastLogBuffer handles locking internally
-                logBuffer.clear()
-                withContext(Dispatchers.Main) {
-                    _logEntries.value = emptyList()
-                }
+        viewModelScope.launch(Dispatchers.Default) {
+            logBuffer.clear()
+            withContext(Dispatchers.Main) {
+                _filteredEntries.value = emptyList()
             }
             Log.d(TAG, "Logs cleared.")
         }

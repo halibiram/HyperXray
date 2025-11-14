@@ -46,6 +46,7 @@ import com.hyperxray.an.ui.screens.log.LogLevel
 import com.hyperxray.an.ui.screens.log.isAiLog
 import com.hyperxray.an.ui.screens.log.isSniffingLog
 import com.hyperxray.an.ui.screens.log.parseConnectionType
+import com.hyperxray.an.ui.screens.log.parseLogEntry
 import com.hyperxray.an.ui.screens.log.parseLogLevel
 import com.hyperxray.an.viewmodel.LogViewModel
 import kotlinx.coroutines.launch
@@ -59,7 +60,8 @@ fun LogScreen(
     listState: LazyListState
 ) {
     val context = LocalContext.current
-    val allEntries by logViewModel.logEntries.collectAsStateWithLifecycle()
+    // Removed unused allEntries collection to prevent memory leak
+    // Only filteredEntries is needed for display
     val searchQuery by logViewModel.searchQuery.collectAsStateWithLifecycle()
     val isInitialLoad = remember { mutableStateOf(true) }
     var selectedLogEntry by remember { mutableStateOf<String?>(null) }
@@ -72,11 +74,11 @@ fun LogScreen(
     var showSniffingOnly by remember { mutableStateOf(false) }
     var showAiOnly by remember { mutableStateOf(false) }
     
-    // Use ViewModel's index-based filtered entries (ultra-fast for 100K entries)
-    // MegaLogBuffer handles all filtering with index-based O(1) lookups
-    val filteredEntries = logViewModel.filteredEntries.collectAsStateWithLifecycle().value
+    // Use distinctUntilChanged to prevent unnecessary recompositions when list content is the same
+    // This prevents Compose from retaining references to unchanged lists
+    val filteredEntries by logViewModel.filteredEntries
+        .collectAsStateWithLifecycle()
     
-    // Update ViewModel filters when UI filters change
     LaunchedEffect(selectedLogLevel, selectedConnectionType, showSniffingOnly, showAiOnly) {
         logViewModel.updateFilters(
             level = selectedLogLevel,
@@ -168,7 +170,7 @@ fun LogScreen(
                     ) {
                         items(
                             items = filteredEntries,
-                            key = { it }
+                            key = { logEntry -> logEntry }
                         ) { logEntry ->
                             LogEntryItem(
                                 logEntry = logEntry,
@@ -185,29 +187,42 @@ fun LogScreen(
             }
         }
         
-        // FloatingActionButton to scroll to latest log (top) - Enhanced
-        FloatingActionButton(
-            onClick = {
-                scope.launch {
-                    listState.animateScrollToItem(0)
-                    isUserScrolledAway.value = false
-                }
-            },
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(20.dp),
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            elevation = androidx.compose.material3.FloatingActionButtonDefaults.elevation(
-                defaultElevation = 6.dp,
-                pressedElevation = 10.dp
+        // FloatingActionButton to scroll to latest log (top) - M3 Enhanced
+        // Only show when user has scrolled away
+        androidx.compose.animation.AnimatedVisibility(
+            visible = isUserScrolledAway.value && filteredEntries.isNotEmpty(),
+            enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically(
+                initialOffsetY = { it },
+                animationSpec = androidx.compose.animation.core.spring()
+            ),
+            exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically(
+                targetOffsetY = { it },
+                animationSpec = androidx.compose.animation.core.spring()
             )
         ) {
-            Icon(
-                imageVector = Icons.Default.KeyboardArrowDown,
-                contentDescription = "Scroll to latest log",
-                modifier = Modifier.size(24.dp)
-            )
+            FloatingActionButton(
+                onClick = {
+                    scope.launch {
+                        listState.animateScrollToItem(0)
+                        isUserScrolledAway.value = false
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(16.dp),
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                elevation = androidx.compose.material3.FloatingActionButtonDefaults.elevation(
+                    defaultElevation = 3.dp,
+                    pressedElevation = 6.dp
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Scroll to latest log",
+                    modifier = Modifier.size(24.dp)
+                )
+            }
         }
     }
 

@@ -481,104 +481,226 @@ class DeepPolicyModel(
      * @return Raw model output as DoubleArray
      */
     fun inferRaw(context: DoubleArray): DoubleArray {
-        if (!isLoaded || ortSession == null) {
+        val session = ortSession
+        if (!isLoaded || session == null) {
             Log.w(TAG, "Model not loaded, returning zero array")
             return DoubleArray(5) { 0.0 }
         }
         
+        var inputTensor: OnnxTensor? = null
+        var outputs: OrtSession.Result? = null
+        
         return try {
+            // Validate input context
+            if (context.isEmpty()) {
+                Log.w(TAG, "Input context is empty, returning zero array")
+                return DoubleArray(5) { 0.0 }
+            }
+            
             // Normalize context
             val normalizedContext = scaler.normalize(context)
+            if (normalizedContext.isEmpty()) {
+                Log.w(TAG, "Normalized context is empty, returning zero array")
+                return DoubleArray(5) { 0.0 }
+            }
+            
+            // Validate input names before creating tensor
+            val inputNameToUse = inputName ?: session.inputNames.firstOrNull()
+            if (inputNameToUse == null || session.inputNames.isEmpty()) {
+                Log.e(TAG, "No input names available in session (inputNames.size=${session.inputNames.size})")
+                return DoubleArray(5) { 0.0 }
+            }
             
             // Create input tensor
-            val inputShape = longArrayOf(1, normalizedContext.size.toLong())
             val inputData = Array(1) { normalizedContext }
-            val inputTensor = OnnxTensor.createTensor(ortEnv, inputData)
+            inputTensor = OnnxTensor.createTensor(ortEnv, inputData)
             
             // Run inference
-            val inputs = mapOf((inputName ?: ortSession!!.inputNames.first()) to inputTensor)
-            val outputs = ortSession!!.run(inputs)
+            val inputs = mapOf(inputNameToUse to inputTensor)
+            outputs = session.run(inputs)
             
-            // Extract output
-            val outputTensor = outputs.get(0)
+            // Validate outputs before accessing
+            if (outputs == null) {
+                Log.e(TAG, "Session.run() returned null outputs")
+                return DoubleArray(5) { 0.0 }
+            }
+            
+            val outputNames = session.outputNames
+            if (outputNames.isEmpty()) {
+                Log.e(TAG, "No output names available in session")
+                return DoubleArray(5) { 0.0 }
+            }
+            
+            // Extract output BEFORE closing tensors
+            val outputTensor = try {
+                outputs.get(0)
+            } catch (e: IndexOutOfBoundsException) {
+                Log.e(TAG, "Output index 0 out of bounds (outputs.size=${outputNames.size})", e)
+                return DoubleArray(5) { 0.0 }
+            }
+            
             val outputValue = outputTensor.value
             
-            // Close resources
-            inputTensor.close()
-            outputs.close()
+            // Log output type for debugging
+            val outputTypeStr = when {
+                outputValue == null -> "null"
+                outputValue is Array<*> -> "Array[${outputValue.size}]"
+                outputValue is FloatArray -> "FloatArray[${outputValue.size}]"
+                outputValue is DoubleArray -> "DoubleArray[${outputValue.size}]"
+                else -> outputValue.javaClass.simpleName
+            }
+            Log.d(TAG, "Output tensor type: $outputTypeStr")
             
-            // Convert output to DoubleArray
-            when (outputValue) {
-                is Array<*> -> {
-                    outputValue.mapNotNull {
-                        when (it) {
-                            is Float -> it.toDouble()
-                            is Double -> it
-                            is Number -> it.toDouble()
-                            else -> null
-                        }
-                    }.toDoubleArray()
-                }
-                is FloatArray -> {
-                    outputValue.map { it.toDouble() }.toDoubleArray()
-                }
-                is DoubleArray -> {
-                    outputValue
-                }
-                else -> {
-                    // Try to handle 2D arrays using reflection or type checking
-                    // Kotlin doesn't allow is-instance checks for erased generic types
-                    // So we try to cast and handle exceptions
-                    try {
-                        val arrayValue = outputValue as? Array<*>
-                        if (arrayValue != null && arrayValue.isNotEmpty()) {
-                            val firstElement = arrayValue[0]
-                            when (firstElement) {
-                                is FloatArray -> {
-                                    firstElement.map { it.toDouble() }.toDoubleArray()
-                                }
-                                is DoubleArray -> {
-                                    firstElement
-                                }
-                                is Array<*> -> {
-                                    // Nested array - try to flatten
-                                    val flattened = arrayValue.flatMap { row ->
-                                        when (row) {
-                                            is FloatArray -> row.map { it.toDouble() }
-                                            is DoubleArray -> row.toList()
-                                            is Array<*> -> row.mapNotNull { 
-                                                when (it) {
-                                                    is Float -> it.toDouble()
-                                                    is Double -> it
-                                                    is Number -> it.toDouble()
-                                                    else -> null
-                                                }
-                                            }
-                                            else -> emptyList<Double>()
-                                        }
-                                    }
-                                    if (flattened.isNotEmpty()) {
-                                        flattened.take(5).toDoubleArray()
-                                    } else {
-                                        DoubleArray(5) { 0.0 }
-                                    }
-                                }
-                                else -> {
-                                    DoubleArray(5) { 0.0 }
-                                }
-                            }
-                        } else {
-                            DoubleArray(5) { 0.0 }
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error handling array output: ${e.message}")
+            // Convert output to DoubleArray BEFORE closing tensors
+            val result = when {
+                // Direct FloatArray (1D output)
+                outputValue is FloatArray -> {
+                    val arr = outputValue as FloatArray
+                    if (arr.isEmpty()) {
+                        Log.w(TAG, "Output FloatArray is empty")
                         DoubleArray(5) { 0.0 }
+                    } else {
+                        Log.d(TAG, "Output is FloatArray with size ${arr.size}: ${arr.joinToString(", ")}")
+                        arr.map { it.toDouble() }.toDoubleArray()
                     }
                 }
+                // Direct DoubleArray (1D output)
+                outputValue is DoubleArray -> {
+                    val arr = outputValue as DoubleArray
+                    if (arr.isEmpty()) {
+                        Log.w(TAG, "Output DoubleArray is empty")
+                        DoubleArray(5) { 0.0 }
+                    } else {
+                        Log.d(TAG, "Output is DoubleArray with size ${arr.size}: ${arr.joinToString(", ")}")
+                        arr
+                    }
+                }
+                // Array<FloatArray> or Array<DoubleArray> (2D batch output [batch, features])
+                outputValue is Array<*> && outputValue.isNotEmpty() -> {
+                    val firstElement = outputValue[0]
+                    when (firstElement) {
+                        is FloatArray -> {
+                            val arr = firstElement as FloatArray
+                            if (arr.isEmpty()) {
+                                Log.w(TAG, "Output Array<FloatArray> first element is empty")
+                                DoubleArray(5) { 0.0 }
+                            } else {
+                                Log.d(TAG, "Output is Array<FloatArray>, batch size=${outputValue.size}, feature size=${arr.size}: ${arr.joinToString(", ")}")
+                                arr.map { it.toDouble() }.toDoubleArray()
+                            }
+                        }
+                        is DoubleArray -> {
+                            val arr = firstElement as DoubleArray
+                            if (arr.isEmpty()) {
+                                Log.w(TAG, "Output Array<DoubleArray> first element is empty")
+                                DoubleArray(5) { 0.0 }
+                            } else {
+                                Log.d(TAG, "Output is Array<DoubleArray>, batch size=${outputValue.size}, feature size=${arr.size}: ${arr.joinToString(", ")}")
+                                arr
+                            }
+                        }
+                        is Array<*> -> {
+                            // Nested Array<Array<*>> - flatten
+                            val flattened = outputValue.flatMap { row ->
+                                when (row) {
+                                    is FloatArray -> row.map { it.toDouble() }
+                                    is DoubleArray -> row.toList()
+                                    is Array<*> -> row.mapNotNull { 
+                                        when (it) {
+                                            is Float -> it.toDouble()
+                                            is Double -> it
+                                            is Number -> it.toDouble()
+                                            else -> null
+                                        }
+                                    }
+                                    else -> emptyList<Double>()
+                                }
+                            }
+                            Log.d(TAG, "Output is nested Array, flattened size=${flattened.size}: ${flattened.take(5).joinToString(", ")}")
+                            if (flattened.isNotEmpty()) {
+                                flattened.take(5).toDoubleArray()
+                            } else {
+                                Log.w(TAG, "Flattened array is empty, returning zero array")
+                                DoubleArray(5) { 0.0 }
+                            }
+                        }
+                        is Float, is Double, is Number -> {
+                            // Array<Number> - direct conversion
+                            val converted = outputValue.mapNotNull {
+                                when (it) {
+                                    is Float -> it.toDouble()
+                                    is Double -> it
+                                    is Number -> it.toDouble()
+                                    else -> null
+                                }
+                            }.toDoubleArray()
+                            if (converted.isEmpty()) {
+                                Log.w(TAG, "Output Array<Number> conversion resulted in empty array")
+                                DoubleArray(5) { 0.0 }
+                            } else {
+                                Log.d(TAG, "Output is Array<Number> with size ${converted.size}: ${converted.joinToString(", ")}")
+                                converted
+                            }
+                        }
+                        else -> {
+                            Log.w(TAG, "Unhandled Array element type: ${firstElement?.javaClass?.simpleName ?: "null"}")
+                            DoubleArray(5) { 0.0 }
+                        }
+                    }
+                }
+                else -> {
+                    Log.w(TAG, "Unhandled output type: ${outputValue?.javaClass?.simpleName ?: "null"}")
+                    DoubleArray(5) { 0.0 }
+                }
             }
+            
+            // Close resources AFTER extraction
+            try {
+                inputTensor?.close()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error closing input tensor", e)
+            }
+            try {
+                outputs?.close()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error closing outputs", e)
+            }
+            
+            // Validate result size - ensure it's never empty
+            if (result.isEmpty()) {
+                Log.e(TAG, "CRITICAL: Extracted result is empty after conversion, returning zero array")
+                return DoubleArray(5) { 0.0 }
+            }
+            
+            // Ensure minimum size of 5 (pad if needed)
+            if (result.size < 5) {
+                Log.w(TAG, "Result size ${result.size} < 5, padding to 5")
+                return result + DoubleArray(5 - result.size) { 0.0 }
+            }
+            
+            // Final validation - should never be empty or < 5 at this point
+            if (result.size < 5) {
+                Log.e(TAG, "CRITICAL: Result size ${result.size} still < 5 after padding, forcing to 5")
+                return DoubleArray(5) { 0.0 }
+            }
+            
+            result
         } catch (e: Exception) {
-            Log.e(TAG, "Error during raw inference", e)
+            Log.e(TAG, "Error during raw inference: ${e.javaClass.simpleName}: ${e.message}", e)
+            // Ensure we always return valid array even on exception
             DoubleArray(5) { 0.0 }
+        } finally {
+            // Ensure cleanup even if exception occurred
+            try {
+                inputTensor?.close()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error closing input tensor in finally", e)
+            }
+            try {
+                outputs?.close()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error closing outputs in finally", e)
+            }
         }
     }
     

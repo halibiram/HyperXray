@@ -17,6 +17,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -24,37 +25,69 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hyperxray.an.ui.theme.LogColors
 
 @Composable
 fun LogEntryItem(
     logEntry: String,
     onClick: () -> Unit = {}
 ) {
-    val logLevel = try { parseLogLevel(logEntry) } catch (e: Exception) { LogLevel.UNKNOWN }
-    val connectionType = try { parseConnectionType(logEntry) } catch (e: Exception) { ConnectionType.UNKNOWN }
-    val (timestamp, message) = try { parseLogEntry(logEntry) } catch (e: Exception) { Pair("", logEntry) }
-    val containsFailed = try { logEntry.uppercase().contains("FAILED") } catch (e: Exception) { false }
-    val hasSNI = try { extractSNI(logEntry) != null } catch (e: Exception) { false }
-    val isSniffing = try { isSniffingLog(logEntry) } catch (e: Exception) { false }
-    val isDns = try { isDnsLog(logEntry) } catch (e: Exception) { false }
+    // Cache all parsing results to avoid recomputation on every recomposition
+    // This prevents GC pressure from repeated string operations
+    val parsedData = remember(logEntry) {
+        try {
+            val upperEntry = logEntry.uppercase()
+            val parsedLog = try { parseLogEntry(logEntry) } catch (e: Exception) { Pair("", logEntry) }
+            ParsedLogData(
+                logLevel = try { parseLogLevel(logEntry) } catch (e: Exception) { LogLevel.UNKNOWN },
+                connectionType = try { parseConnectionType(logEntry) } catch (e: Exception) { ConnectionType.UNKNOWN },
+                timestamp = parsedLog.first,
+                message = parsedLog.second,
+                containsFailed = try { upperEntry.contains("FAILED") } catch (e: Exception) { false },
+                hasSNI = try { extractSNI(logEntry) != null } catch (e: Exception) { false },
+                isSniffing = try { isSniffingLog(logEntry) } catch (e: Exception) { false },
+                isDns = try { isDnsLog(logEntry) } catch (e: Exception) { false }
+            )
+        } catch (e: Exception) {
+            ParsedLogData(
+                logLevel = LogLevel.UNKNOWN,
+                connectionType = ConnectionType.UNKNOWN,
+                timestamp = "",
+                message = logEntry,
+                containsFailed = false,
+                hasSNI = false,
+                isSniffing = false,
+                isDns = false
+            )
+        }
+    }
+    
+    val logLevel = parsedData.logLevel
+    val connectionType = parsedData.connectionType
+    val timestamp = parsedData.timestamp
+    val message = parsedData.message
+    val containsFailed = parsedData.containsFailed
+    val hasSNI = parsedData.hasSNI
+    val isSniffing = parsedData.isSniffing
+    val isDns = parsedData.isDns
     
     // Get connection type color for left border
     // Priority: Failed > DNS > Sniffing > SNI > TCP/UDP
     val borderColor = when {
         containsFailed -> MaterialTheme.colorScheme.error // Red for failed logs
-        isDns -> Color(0xFF00BCD4) // Cyan for DNS logs
-        isSniffing -> Color(0xFFFF6F00) // Orange for sniffing logs
-        hasSNI -> Color(0xFF9C27B0) // Purple for SNI logs
-        connectionType == ConnectionType.TCP -> Color(0xFF2196F3) // Blue for TCP
-        connectionType == ConnectionType.UDP -> Color(0xFF4CAF50) // Green for UDP
+        isDns -> LogColors.dnsBorderColor() // Theme-aware cyan for DNS logs
+        isSniffing -> LogColors.sniffingBorderColor() // Theme-aware orange for sniffing logs
+        hasSNI -> LogColors.sniBorderColor() // Theme-aware purple for SNI logs
+        connectionType == ConnectionType.TCP -> LogColors.tcpColor() // Theme-aware blue for TCP
+        connectionType == ConnectionType.UDP -> LogColors.udpColor() // Theme-aware green for UDP
         else -> Color.Transparent
     }
     
-    // Use error container color for failed logs, cyan tint for DNS, orange tint for sniffing, purple tint for SNI logs
+    // Use error container color for failed logs, theme-aware colors for DNS, sniffing, SNI logs
     val cardColor = when {
         containsFailed -> MaterialTheme.colorScheme.errorContainer
-        isDns -> Color(0xFFE0F7FA) // Light cyan container
-        isSniffing -> Color(0xFFFFF3E0) // Light orange container
+        isDns -> LogColors.dnsContainerColor() // Theme-aware cyan container
+        isSniffing -> LogColors.sniffingContainerColor() // Theme-aware orange container
         hasSNI -> MaterialTheme.colorScheme.tertiaryContainer
         else -> MaterialTheme.colorScheme.surfaceContainerLow
     }

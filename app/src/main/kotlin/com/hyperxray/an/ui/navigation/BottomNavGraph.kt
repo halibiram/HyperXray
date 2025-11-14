@@ -26,12 +26,13 @@ import com.hyperxray.an.common.ROUTE_SETTINGS
 import com.hyperxray.an.common.ROUTE_STATS
 import com.hyperxray.an.service.TProxyService
 import com.hyperxray.an.ui.screens.ConfigScreen
-import com.hyperxray.an.ui.screens.DashboardScreen
 import com.hyperxray.an.ui.screens.LogScreen
 import com.hyperxray.an.ui.screens.OptimizerScreen
 import com.hyperxray.an.ui.screens.SettingsScreen
+import com.hyperxray.an.feature.dashboard.DashboardScreen
 import com.hyperxray.an.viewmodel.LogViewModel
 import com.hyperxray.an.viewmodel.MainViewModel
+import com.hyperxray.an.viewmodel.dashboardViewModel
 import java.io.File
 
 private const val TAG = "AppNavGraph"
@@ -124,8 +125,23 @@ fun BottomNavHost(
             popExitTransition = { popExitTransition() }
         ) {
             DashboardScreen(
-                mainViewModel = mainViewModel,
-                onSwitchVpnService = onSwitchVpnService
+                viewModel = mainViewModel.dashboardViewModel,
+                onSwitchVpnService = onSwitchVpnService,
+                resources = object : com.hyperxray.an.feature.dashboard.DashboardResources {
+                    override val drawablePlay: Int = com.hyperxray.an.R.drawable.play
+                    override val drawablePause: Int = com.hyperxray.an.R.drawable.pause
+                    override val drawableDashboard: Int = com.hyperxray.an.R.drawable.dashboard
+                    override val drawableCloudDownload: Int = com.hyperxray.an.R.drawable.cloud_download
+                    override val drawableSettings: Int = com.hyperxray.an.R.drawable.settings
+                    override val drawableOptimizer: Int = com.hyperxray.an.R.drawable.optimizer
+                    override val stringStatsUplink: Int = com.hyperxray.an.R.string.stats_uplink
+                    override val stringStatsDownlink: Int = com.hyperxray.an.R.string.stats_downlink
+                    override val stringStatsNumGoroutine: Int = com.hyperxray.an.R.string.stats_num_goroutine
+                    override val stringStatsNumGc: Int = com.hyperxray.an.R.string.stats_num_gc
+                    override val stringStatsUptime: Int = com.hyperxray.an.R.string.stats_uptime
+                    override val stringStatsAlloc: Int = com.hyperxray.an.R.string.stats_alloc
+                    override val stringVpnDisconnected: Int = com.hyperxray.an.R.string.vpn_disconnected
+                }
             )
         }
 

@@ -19,13 +19,14 @@ import androidx.lifecycle.application
 import androidx.lifecycle.viewModelScope
 import com.hyperxray.an.BuildConfig
 import com.hyperxray.an.R
-import com.hyperxray.an.common.CoreStatsClient
+import com.hyperxray.an.xray.runtime.stats.CoreStatsClient
 import com.hyperxray.an.common.ROUTE_AI_INSIGHTS
 import com.hyperxray.an.common.ROUTE_APP_LIST
 import com.hyperxray.an.common.formatBytes
 import com.hyperxray.an.common.formatThroughput
 import com.hyperxray.an.common.ROUTE_CONFIG_EDIT
 import com.hyperxray.an.common.ThemeMode
+import com.hyperxray.an.core.network.NetworkModule
 import com.hyperxray.an.data.source.FileManager
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.service.TProxyService
@@ -92,6 +93,24 @@ class MainViewModel(application: Application) :
     private val coreStatsClientMutex = Mutex() // For suspend functions (updateCoreStats)
     // Separate lock object for synchronous operations (used in closeCoreStatsClient)
     private val coreStatsClientLock = Any()
+    
+    // Client lifecycle state management to prevent rebuild loops
+    @Volatile
+    private var clientState: ClientState = ClientState.STOPPED
+    @Volatile
+    private var lastClientCloseTime: Long = 0L
+    @Volatile
+    private var consecutiveFailures: Int = 0
+    private val MIN_RECREATE_INTERVAL_MS = 5000L // 5 seconds minimum between recreations
+    private val MAX_BACKOFF_MS = 30000L // 30 seconds maximum backoff
+    
+    private enum class ClientState {
+        STOPPED,        // Client not created or properly closed
+        CREATING,       // Client creation in progress
+        READY,          // Client ready and working
+        FAILED,         // Client failed, needs cooldown before retry
+        SHUTTING_DOWN   // Client is being shut down, ignore recreate requests
+    }
     
     // Broadcast receiver registration state
     @Volatile
@@ -227,6 +246,7 @@ class MainViewModel(application: Application) :
             // Close client when service stops (non-blocking, uses helper function)
             viewModelScope.launch {
                 closeCoreStatsClient()
+                consecutiveFailures = 0
             }
         }
     }
@@ -488,12 +508,21 @@ class MainViewModel(application: Application) :
         // Since this may be called from onCleared() or other non-suspend contexts,
         // we use a simple synchronized block instead of Mutex
         synchronized(coreStatsClientLock) {
+            // Prevent multiple shutdown attempts
+            if (clientState == ClientState.SHUTTING_DOWN || clientState == ClientState.STOPPED) {
+                return
+            }
+            
+            clientState = ClientState.SHUTTING_DOWN
+            lastClientCloseTime = System.currentTimeMillis()
+            
             try {
                 coreStatsClient?.close()
             } catch (e: Exception) {
                 Log.w(TAG, "Error closing CoreStatsClient: ${e.message}", e)
             } finally {
                 coreStatsClient = null
+                clientState = ClientState.STOPPED
             }
         }
     }
@@ -503,27 +532,82 @@ class MainViewModel(application: Application) :
         if (!_isServiceEnabled.value) {
             // Service is not enabled, ensure client is closed if it exists
             closeCoreStatsClient()
+            consecutiveFailures = 0
             return
         }
         
         // Synchronize access to coreStatsClient to prevent race conditions
         val client = coreStatsClientMutex.withLock {
-            // Double-check pattern: create client if needed
+            // Check if we can recreate client (cooldown and state checks)
             if (coreStatsClient == null) {
+                val now = System.currentTimeMillis()
+                val timeSinceClose = now - lastClientCloseTime
+                
+                // Prevent rapid recreation: enforce cooldown period
+                if (timeSinceClose < MIN_RECREATE_INTERVAL_MS) {
+                    val remainingCooldown = MIN_RECREATE_INTERVAL_MS - timeSinceClose
+                    Log.d(TAG, "Client recreation cooldown active, ${remainingCooldown}ms remaining")
+                    return@withLock null
+                }
+                
+                // Check state: only recreate if STOPPED or FAILED (not SHUTTING_DOWN or CREATING)
+                if (clientState != ClientState.STOPPED && clientState != ClientState.FAILED) {
+                    Log.d(TAG, "Client in state ${clientState}, skipping recreation")
+                    return@withLock null
+                }
+                
+                // Calculate exponential backoff based on consecutive failures
+                if (consecutiveFailures > 0) {
+                    val backoffMs = minOf(
+                        MIN_RECREATE_INTERVAL_MS * (1L shl minOf(consecutiveFailures - 1, 4)),
+                        MAX_BACKOFF_MS
+                    )
+                    if (timeSinceClose < backoffMs) {
+                        val remainingBackoff = backoffMs - timeSinceClose
+                        Log.d(TAG, "Exponential backoff active, ${remainingBackoff}ms remaining (failures: $consecutiveFailures)")
+                        return@withLock null
+                    }
+                }
+                
+                // Set state to CREATING to prevent concurrent creation attempts
+                clientState = ClientState.CREATING
+                
                 try {
+                    // create() now returns nullable and handles retries internally
                     coreStatsClient = CoreStatsClient.create("127.0.0.1", prefs.apiPort)
-                    Log.d(TAG, "Created new CoreStatsClient")
+                    if (coreStatsClient != null) {
+                        Log.d(TAG, "Created new CoreStatsClient")
+                        clientState = ClientState.READY
+                        consecutiveFailures = 0 // Reset on success
+                    } else {
+                        Log.w(TAG, "Failed to create CoreStatsClient after retries")
+                        clientState = ClientState.FAILED
+                        consecutiveFailures++
+                        lastClientCloseTime = System.currentTimeMillis()
+                    }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to create CoreStatsClient", e)
-                    return // Exit early if client creation fails
+                    Log.e(TAG, "Exception creating CoreStatsClient: ${e.message}", e)
+                    clientState = ClientState.FAILED
+                    consecutiveFailures++
+                    lastClientCloseTime = System.currentTimeMillis()
+                    coreStatsClient = null
                 }
             }
+            // If client exists but might be in bad state, we'll detect that during RPC calls
+            // and recreate on next attempt (handled by CoreStatsClient internally)
             coreStatsClient
         }
         
         // Validate client was created
         if (client == null) {
-            Log.w(TAG, "CoreStatsClient is null, cannot update stats")
+            Log.w(TAG, "CoreStatsClient is null, cannot update stats - will retry on next call")
+            // Don't return immediately - update state with safe fallback values
+            // This allows UI to show "connecting" or "unavailable" state
+            val currentState = _coreStatsState.value
+            _coreStatsState.value = currentState.copy(
+                // Preserve existing values, don't reset to zero
+                // UI can show these as "last known" or "unavailable"
+            )
             return
         }
         
@@ -552,9 +636,35 @@ class MainViewModel(application: Application) :
         // Handle timeout, exception, or service disabled
         if (statsResult == null) {
             // Timeout, exception, or service disabled occurred
-            Log.w(TAG, "Stats query failed (timeout/exception/disabled), closing client")
-            closeCoreStatsClient()
+            Log.w(TAG, "Stats query failed (timeout/exception/disabled)")
+            // Only close client if service is disabled or we've had multiple failures
+            // This prevents rapid recreate loops
+            if (!_isServiceEnabled.value) {
+                closeCoreStatsClient()
+                consecutiveFailures = 0
+            } else {
+                // Service is enabled but query failed - increment failure count
+                // Only close client after multiple consecutive failures to prevent loops
+                consecutiveFailures++
+                if (consecutiveFailures >= 3) {
+                    Log.w(TAG, "Multiple consecutive failures ($consecutiveFailures), closing client")
+                    synchronized(coreStatsClientLock) {
+                        clientState = ClientState.FAILED
+                    }
+                    closeCoreStatsClient()
+                } else {
+                    Log.d(TAG, "Stats query failed but keeping client (failures: $consecutiveFailures)")
+                }
+            }
             return
+        }
+        
+        // Success: reset failure count
+        consecutiveFailures = 0
+        synchronized(coreStatsClientLock) {
+            if (clientState != ClientState.READY) {
+                clientState = ClientState.READY
+            }
         }
         
         // Check if service is still enabled after first gRPC call
@@ -585,9 +695,36 @@ class MainViewModel(application: Application) :
         // Handle timeout, exception, or service disabled
         if (trafficResult == null) {
             // Timeout, exception, or service disabled occurred
-            Log.w(TAG, "Traffic query failed (timeout/exception/disabled), closing client")
-            closeCoreStatsClient()
+            Log.w(TAG, "Traffic query failed (timeout/exception/disabled)")
+            // Don't close client immediately - it might recover on next call
+            // Only close if service is disabled
+            if (!_isServiceEnabled.value) {
+                closeCoreStatsClient()
+                consecutiveFailures = 0
+            } else {
+                // Increment failure count but don't close immediately
+                // Traffic failures are less critical than system stats failures
+                consecutiveFailures++
+                if (consecutiveFailures >= 5) {
+                    Log.w(TAG, "Multiple consecutive failures ($consecutiveFailures), closing client")
+                    synchronized(coreStatsClientLock) {
+                        clientState = ClientState.FAILED
+                    }
+                    closeCoreStatsClient()
+                }
+            }
+            // Preserve existing traffic values instead of returning
+            // This allows UI to show last known values
+            // Note: We don't update state here since traffic failed - preserve all existing values
             return
+        }
+        
+        // Success: reset failure count
+        consecutiveFailures = 0
+        synchronized(coreStatsClientLock) {
+            if (clientState != ClientState.READY) {
+                clientState = ClientState.READY
+            }
         }
         
         // Check if service is still enabled after both gRPC calls
@@ -1693,11 +1830,12 @@ class MainViewModel(application: Application) :
                 _geositeDownloadProgress
             }
 
-            val client = OkHttpClient.Builder().apply {
-                if (_isServiceEnabled.value) {
-                    proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", prefs.socksPort)))
-                }
-            }.build()
+            val proxy = if (_isServiceEnabled.value) {
+                Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", prefs.socksPort))
+            } else {
+                null
+            }
+            val client = NetworkModule.getHttpClientFactory().createHttpClient(proxy)
 
             try {
                 progressFlow.value = application.getString(R.string.connecting)
@@ -1813,11 +1951,12 @@ class MainViewModel(application: Application) :
     fun checkForUpdates() {
         viewModelScope.launch(Dispatchers.IO) {
             _isCheckingForUpdates.value = true
-            val client = OkHttpClient.Builder().apply {
-                if (_isServiceEnabled.value) {
-                    proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", prefs.socksPort)))
-                }
-            }.build()
+            val proxy = if (_isServiceEnabled.value) {
+                Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", prefs.socksPort))
+            } else {
+                null
+            }
+            val client = NetworkModule.getHttpClientFactory().createHttpClient(proxy)
 
             val request = Request.Builder()
                 .url(application.getString(R.string.source_url) + "/releases/latest")

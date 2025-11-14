@@ -48,7 +48,7 @@ internal class MegaLogBuffer(
     private val lock: ReadWriteLock = ReentrantReadWriteLock()
     
     // Cached filtered results
-    private val filteredCache = AtomicReference<Pair<FilterCriteria, List<String>>?>(null)
+    private val filteredCache = AtomicReference<Pair<MegaFilterCriteria, List<String>>?>(null)
     
     // Buffer position to entry index mapping (for windowed entries)
     // Maps buffer position (0 = newest) to entry index
@@ -202,9 +202,34 @@ internal class MegaLogBuffer(
     }
     
     /**
+     * Get bounded list of entries (max size limit to prevent memory leak).
+     * Returns only the most recent entries up to maxSize.
+     */
+    fun toBoundedList(maxSize: Int): List<String> {
+        lock.readLock().lock()
+        return try {
+            if (buffer.size <= maxSize) {
+                ArrayList(buffer) // Create snapshot if within limit
+            } else {
+                // Return only the most recent entries (newest first in buffer)
+                val result = ArrayList<String>(maxSize)
+                var count = 0
+                for (entry in buffer) {
+                    if (count >= maxSize) break
+                    result.add(entry)
+                    count++
+                }
+                result
+            }
+        } finally {
+            lock.readLock().unlock()
+        }
+    }
+    
+    /**
      * Get filtered entries using index-based filtering (ultra-fast).
      */
-    fun getFiltered(criteria: FilterCriteria): List<String> {
+    fun getFiltered(criteria: MegaFilterCriteria): List<String> {
         // Check cache
         val cached = filteredCache.get()
         if (cached != null && cached.first == criteria) {
@@ -213,14 +238,15 @@ internal class MegaLogBuffer(
         
         lock.readLock().lock()
         return try {
-            val entries = ArrayList(buffer)
-            
-            // Early return if no filters
+            // Early return if no filters - use buffer directly without copy
             if (criteria.isEmpty()) {
-                val result = entries
+                val result = buffer.toList() // Only create list when needed
                 filteredCache.set(Pair(criteria, result))
                 return result
             }
+            
+            // Build result incrementally instead of copying entire buffer first
+            val entries = buffer
             
             // Index-based filtering (O(1) lookup per filter)
             val filteredIndices = HashSet<Int>()
@@ -287,43 +313,62 @@ internal class MegaLogBuffer(
                 
                 if (criteria.searchQuery.isBlank()) {
                     // Pure index-based filtering (fastest path - O(1) per entry)
-                    entries.filterIndexed { bufferIndex, _ ->
-                        bufferPositions.contains(bufferIndex)
+                    // Build result list incrementally to avoid intermediate allocations
+                    val resultList = ArrayList<String>(bufferPositions.size.coerceAtMost(buffer.size))
+                    entries.forEachIndexed { bufferIndex, entry ->
+                        if (bufferPositions.contains(bufferIndex)) {
+                            resultList.add(entry)
+                        }
                     }
+                    resultList
                 } else {
                     // Index + search: use index to narrow down, then search
-                    entries.filterIndexed { bufferIndex, entry ->
-                        if (!bufferPositions.contains(bufferIndex)) return@filterIndexed false
-                        val upper = entry.uppercase()
-                        upper.contains(criteria.searchQuery.uppercase())
+                    // Pre-compute uppercase query once to avoid repeated allocations
+                    val upperQuery = criteria.searchQuery.uppercase()
+                    val resultList = ArrayList<String>(bufferPositions.size.coerceAtMost(buffer.size))
+                    entries.forEachIndexed { bufferIndex, entry ->
+                        if (bufferPositions.contains(bufferIndex)) {
+                            // Reuse metadata cache if available, otherwise compute once
+                            val metadata = getMetadataFast(entry)
+                            if (metadata.upperCase.contains(upperQuery)) {
+                                resultList.add(entry)
+                            }
+                        }
                     }
+                    resultList
                 }
             } else {
-                // Fallback to regular filtering
-                entries.filter { entry ->
+                // Fallback to regular filtering - build incrementally
+                // Pre-compute uppercase query once
+                val upperQuery = if (criteria.searchQuery.isNotBlank()) {
+                    criteria.searchQuery.uppercase()
+                } else null
+                val resultList = ArrayList<String>(buffer.size / 2) // Estimate half will match
+                entries.forEach { entry ->
                     val metadata = getMetadataFast(entry)
                     
                     // Level filter
-                    if (criteria.level != null && metadata.level != criteria.level) return@filter false
+                    if (criteria.level != null && metadata.level != criteria.level) return@forEach
                     
                     // Type filter
-                    if (criteria.type != null && metadata.connectionType != criteria.type) return@filter false
+                    if (criteria.type != null && metadata.connectionType != criteria.type) return@forEach
                     
                     // Sniffing filter
-                    if (criteria.sniffingOnly && !metadata.isSniffing) return@filter false
+                    if (criteria.sniffingOnly && !metadata.isSniffing) return@forEach
                     
                     // AI filter
-                    if (criteria.aiOnly && !metadata.isAi) return@filter false
+                    if (criteria.aiOnly && !metadata.isAi) return@forEach
                     
                     // Search filter
-                    if (criteria.searchQuery.isNotBlank()) {
-                        if (!metadata.upperCase.contains(criteria.searchQuery.uppercase())) {
-                            return@filter false
+                    if (upperQuery != null) {
+                        if (!metadata.upperCase.contains(upperQuery)) {
+                            return@forEach
                         }
                     }
                     
-                    true
+                    resultList.add(entry)
                 }
+                resultList
             }
             
             // Cache result
@@ -440,7 +485,7 @@ internal class MegaLogBuffer(
 /**
  * Filter criteria for index-based filtering.
  */
-internal data class FilterCriteria(
+internal data class MegaFilterCriteria(
     val level: Int? = null,
     val type: Int? = null,
     val sniffingOnly: Boolean = false,

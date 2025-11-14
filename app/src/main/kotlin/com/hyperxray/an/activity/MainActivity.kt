@@ -2,7 +2,6 @@ package com.hyperxray.an.activity
 
 import android.content.Intent
 import android.content.res.Configuration
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -13,54 +12,124 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import com.hyperxray.an.ui.theme.ExpressiveMaterialTheme
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.hyperxray.an.common.ThemeMode
+import com.hyperxray.an.core.di.AppContainer
+import com.hyperxray.an.core.di.DefaultAppContainer
+import com.hyperxray.an.feature.profiles.IntentHandler
 import com.hyperxray.an.ui.navigation.AppNavHost
+import com.hyperxray.an.ui.theme.ExpressiveMaterialTheme
 import com.hyperxray.an.viewmodel.MainViewModel
 import com.hyperxray.an.viewmodel.MainViewModelFactory
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 /**
  * Main activity for HyperXray VPN application.
- * Handles UI initialization, theme management, and intent processing for config sharing.
+ * 
+ * Responsibilities:
+ * - Activity lifecycle management
+ * - Theme initialization and configuration changes
+ * - Navigation host setup
+ * - Intent delegation to feature modules
+ * 
+ * No business logic - all business logic is in feature modules.
  */
 class MainActivity : ComponentActivity() {
-    private val mainViewModel: MainViewModel by viewModels { MainViewModelFactory(application) }
+    private val mainViewModel: MainViewModel by viewModels { 
+        MainViewModelFactory(application) 
+    }
+    
+    // DI container (simplified - will be expanded in future phases)
+    private val appContainer: AppContainer by lazy { 
+        DefaultAppContainer(application) 
+    }
+    
+    // Intent handler for config sharing (moved to feature-profiles)
+    private lateinit var intentHandler: IntentHandler
 
     public override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        enableEdgeToEdge()
-        window.isNavigationBarContrastEnforced = false
+        try {
+            enableEdgeToEdge()
+            window.isNavigationBarContrastEnforced = false
 
-        mainViewModel.reloadView = { initView() }
-        initView()
+            // Initialize intent handler (delegates to MainViewModel for now)
+            try {
+                intentHandler = IntentHandler { content ->
+                    mainViewModel.handleSharedContent(content)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to initialize IntentHandler: ${e.message}", e)
+                // Create a no-op handler to prevent crashes
+                intentHandler = IntentHandler { }
+            }
 
-        processShareIntent(intent)
-        Log.d(TAG, "MainActivity onCreate called.")
+            try {
+                mainViewModel.reloadView = { initView() }
+                initView()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to initialize view: ${e.message}", e)
+                // Show error state or fallback UI
+            }
+
+            // Process share intent (delegated to feature module)
+            try {
+                intent?.let { intentHandler.processShareIntent(it, contentResolver, lifecycleScope) }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to process share intent: ${e.message}", e)
+            }
+            
+            Log.d(TAG, "MainActivity onCreate called.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Critical error in onCreate: ${e.message}", e)
+            // Try to show a basic error UI
+            try {
+                setContent {
+                    Surface(modifier = Modifier.fillMaxSize()) {
+                        // Basic error UI - app will be unusable but won't crash
+                    }
+                }
+            } catch (e2: Exception) {
+                Log.e(TAG, "Failed to show error UI: ${e2.message}", e2)
+            }
+        }
     }
 
     private fun initView() {
-        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
-        val currentNightMode =
-            resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        val isDark = when (mainViewModel.prefs.theme) {
-            ThemeMode.Light -> false
-            ThemeMode.Dark -> true
-            ThemeMode.Auto -> currentNightMode == Configuration.UI_MODE_NIGHT_YES
-        }
-        insetsController.isAppearanceLightStatusBars = !isDark
+        try {
+            val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+            val currentNightMode =
+                resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+            val isDark = try {
+                when (mainViewModel.prefs.theme) {
+                    ThemeMode.Light -> false
+                    ThemeMode.Dark -> true
+                    ThemeMode.Auto -> currentNightMode == Configuration.UI_MODE_NIGHT_YES
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to get theme preference: ${e.message}", e)
+                // Default to auto theme
+                currentNightMode == Configuration.UI_MODE_NIGHT_YES
+            }
+            insetsController.isAppearanceLightStatusBars = !isDark
 
-        setContent {
-            ExpressiveMaterialTheme(darkTheme = isDark) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    AppNavHost(mainViewModel)
+            setContent {
+                ExpressiveMaterialTheme(darkTheme = isDark) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        AppNavHost(mainViewModel)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize view: ${e.message}", e)
+            // Show basic UI as fallback
+            setContent {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    // Basic fallback UI
                 }
             }
         }
@@ -70,13 +139,13 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         intent?.let {
-            processShareIntent(intent)
+            intentHandler.processShareIntent(it, contentResolver, lifecycleScope)
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        Log.d(TAG, "Activity Coroutine Scope cancelled.")
+        Log.d(TAG, "MainActivity onDestroy called.")
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -92,40 +161,7 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "MainActivity onConfigurationChanged called.")
     }
 
-    private fun processShareIntent(intent: Intent) {
-        val currentIntentHash = intent.hashCode()
-        if (lastProcessedIntentHash == currentIntentHash) return
-        lastProcessedIntentHash = currentIntentHash
-
-        when (intent.action) {
-            Intent.ACTION_SEND -> {
-                intent.clipData?.getItemAt(0)?.uri?.let { uri ->
-                    lifecycleScope.launch(Dispatchers.IO) {
-                        try {
-                            val text =
-                                contentResolver.openInputStream(uri)?.bufferedReader()?.readText()
-                            text?.let { mainViewModel.handleSharedContent(it) }
-                        } catch (e: Exception) {
-                            Log.e("Share", "Error reading shared file", e)
-                        }
-                    }
-                }
-            }
-
-            Intent.ACTION_VIEW -> {
-                intent.data?.toString()?.let { uriString ->
-                    if (uriString.startsWith("hyperxray://")) {
-                        lifecycleScope.launch {
-                            mainViewModel.handleSharedContent(uriString)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     companion object {
         const val TAG = "MainActivity"
-        private var lastProcessedIntentHash: Int = 0
     }
 }

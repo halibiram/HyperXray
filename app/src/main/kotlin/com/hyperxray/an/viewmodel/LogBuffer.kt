@@ -1,15 +1,17 @@
 package com.hyperxray.an.viewmodel
 
 import java.util.ArrayDeque
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * High-performance circular buffer for log entries with O(1) operations.
- * Uses hash-based duplicate detection and incremental updates for maximum speed.
+ * Uses Set-based duplicate detection with timestamp+message keys for reliable deduplication.
  * 
  * Algorithm features:
  * 1. Circular buffer (ArrayDeque) for O(1) add/remove operations
- * 2. Hash-based duplicate detection (faster than string comparison)
+ * 2. Set-based duplicate detection using timestamp+message keys (O(1) lookup, no hash collisions)
  * 3. Incremental updates (only new entries added, no full list recreation)
  * 4. Lazy trimming (trim only when necessary)
  * 5. Memory-efficient (pre-allocated capacity)
@@ -20,20 +22,56 @@ internal class LogBuffer(
     // Circular buffer for O(1) operations
     private val buffer = ArrayDeque<String>(maxSize)
     
-    // Hash set for fast duplicate detection (O(1) lookup)
-    // Using Int hash instead of full string for memory efficiency
-    private val hashSet = HashSet<Int>(maxSize * 2) // 2x capacity for better hash distribution
+    // Set-based duplicate detection using timestamp+message keys
+    // Using ConcurrentHashMap-backed Set for thread-safety and O(1) operations
+    private val seen = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>(maxSize * 2))
     
     // Atomic counter for thread-safe size tracking
     private val size = AtomicInteger(0)
+    
+    /**
+     * Extracts timestamp from log entry string.
+     * Returns a Pair of (timestamp, message) similar to parseLogEntry but without UI dependencies.
+     */
+    private fun extractTimestamp(entry: String): Pair<String, String> {
+        var timestampEndIndex = 0
+        while (timestampEndIndex < entry.length) {
+            val c = entry[timestampEndIndex]
+            if (Character.isDigit(c) || c == '/' || c == ' ' || c == ':' || c == '.' || c == '-') {
+                timestampEndIndex++
+            } else {
+                break
+            }
+        }
+        
+        if (timestampEndIndex > 0) {
+            val potentialTimestamp = entry.substring(0, timestampEndIndex).trim()
+            // Check if it looks like a timestamp (contains date and time separators)
+            if (potentialTimestamp.contains("/") && potentialTimestamp.contains(":") ||
+                potentialTimestamp.contains("-") && potentialTimestamp.contains(":")) {
+                val message = entry.substring(timestampEndIndex).trim()
+                return Pair(potentialTimestamp, message)
+            }
+        }
+        
+        // No timestamp found, return empty timestamp and full message
+        return Pair("", entry)
+    }
+    
+    /**
+     * Creates a unique key for duplicate detection: timestamp_message
+     */
+    private fun createKey(entry: String): String {
+        val (timestamp, message) = extractTimestamp(entry)
+        return "${timestamp}_${message}"
+    }
     
     /**
      * Add new log entries incrementally.
      * Returns only the new unique entries that were actually added.
      * O(n) where n is number of new entries (each checked in O(1) time).
      * 
-     * Uses hash-based duplicate detection for O(1) lookup.
-     * Hash collisions are extremely rare but handled by storing full strings.
+     * Uses Set-based duplicate detection with timestamp+message keys for reliable O(1) lookup.
      */
     fun addIncremental(newEntries: List<String>): List<String> {
         val addedEntries = mutableListOf<String>()
@@ -42,40 +80,20 @@ internal class LogBuffer(
             val trimmed = entry.trim()
             if (trimmed.isEmpty()) continue
             
-            // Fast hash-based duplicate check (O(1))
-            val hash = trimmed.hashCode()
-            if (hashSet.contains(hash)) {
-                // Hash collision: need to verify it's actually the same string
-                // Use a secondary check with a small cache of recent entries
-                // to avoid O(n) buffer.contains() call
-                var isDuplicate = false
-                // Check last 10 entries (most likely duplicates are recent)
-                val iterator = buffer.iterator()
-                var count = 0
-                while (iterator.hasNext() && count < 10) {
-                    if (iterator.next() == trimmed) {
-                        isDuplicate = true
-                        break
-                    }
-                    count++
+            // Create unique key for duplicate detection
+            val key = createKey(trimmed)
+            
+            // Set.add() returns true if the element was added (not a duplicate)
+            if (seen.add(key)) {
+                // Add to circular buffer
+                buffer.addFirst(trimmed) // Newest at front
+                size.incrementAndGet()
+                addedEntries.add(trimmed)
+                
+                // Lazy trimming: only trim when we exceed maxSize
+                if (size.get() > maxSize) {
+                    trimOldest()
                 }
-                // If not found in recent entries, do full check (rare case)
-                if (!isDuplicate && buffer.contains(trimmed)) {
-                    continue
-                }
-            }
-            
-            // Add to hash set first (O(1))
-            hashSet.add(hash)
-            
-            // Add to circular buffer
-            buffer.addFirst(trimmed) // Newest at front
-            size.incrementAndGet()
-            addedEntries.add(trimmed)
-            
-            // Lazy trimming: only trim when we exceed maxSize
-            if (size.get() > maxSize) {
-                trimOldest()
             }
         }
         
@@ -91,7 +109,8 @@ internal class LogBuffer(
         repeat(toRemove) {
             val removed = buffer.removeLast() // Remove oldest
             if (removed != null) {
-                hashSet.remove(removed.hashCode())
+                val key = createKey(removed)
+                seen.remove(key)
                 size.decrementAndGet()
             }
         }
@@ -111,7 +130,7 @@ internal class LogBuffer(
      */
     fun clear() {
         buffer.clear()
-        hashSet.clear()
+        seen.clear()
         size.set(0)
     }
     
@@ -136,7 +155,7 @@ internal class LogBuffer(
         clear()
         
         // Process entries: trim, filter empty, deduplicate, and limit to maxSize
-        val seenHashes = HashSet<Int>(maxSize * 2)
+        val tempSeen = HashSet<String>(maxSize * 2)
         val uniqueEntries = mutableListOf<String>()
         
         // Process in reverse order (oldest first) so newest will be at front after addFirst
@@ -146,33 +165,23 @@ internal class LogBuffer(
             val trimmed = entry.trim()
             if (trimmed.isEmpty()) continue
             
-            val hash = trimmed.hashCode()
+            // Create unique key for duplicate detection
+            val key = createKey(trimmed)
             
-            // Fast hash-based duplicate check (O(1))
-            if (seenHashes.contains(hash)) {
-                // Hash collision: check if it's actually a duplicate
-                // Since we're building the list, check against uniqueEntries (smaller than buffer)
-                var isDuplicate = false
-                for (existing in uniqueEntries) {
-                    if (existing == trimmed) {
-                        isDuplicate = true
-                        break
-                    }
-                }
-                if (isDuplicate) continue
+            // Set-based duplicate check (O(1))
+            if (tempSeen.add(key)) {
+                uniqueEntries.add(trimmed)
+                
+                // Stop if we've reached maxSize
+                if (uniqueEntries.size >= maxSize) break
             }
-            
-            seenHashes.add(hash)
-            uniqueEntries.add(trimmed)
-            
-            // Stop if we've reached maxSize
-            if (uniqueEntries.size >= maxSize) break
         }
         
-        // Add to buffer (newest first)
+        // Add to buffer (newest first) and seen set
         for (entry in uniqueEntries.reversed()) {
             buffer.addFirst(entry)
-            hashSet.add(entry.hashCode())
+            val key = createKey(entry)
+            seen.add(key)
             size.incrementAndGet()
         }
     }

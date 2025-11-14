@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hyperxray.an.ui.theme.LogColors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -178,7 +179,7 @@ fun LogDetailSheet(logEntry: String) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFFE0F7FA) // Light cyan container
+                        containerColor = LogColors.dnsContainerColor() // Theme-aware cyan container
                     ),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -193,13 +194,13 @@ fun LogDetailSheet(logEntry: String) {
                                 text = "DNS Query: ",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFF0097A7)
+                                color = LogColors.dnsTextColor()
                             )
                             Text(
                                 text = dnsQuery,
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontFamily = FontFamily.Monospace,
-                                color = Color(0xFF0097A7),
+                                color = LogColors.dnsTextColor(),
                                 fontWeight = FontWeight.Medium
                             )
                         }
@@ -224,7 +225,7 @@ fun LogDetailSheet(logEntry: String) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFFFFF3E0) // Light orange container
+                        containerColor = LogColors.sniffingContainerColor() // Theme-aware orange container
                     ),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -239,13 +240,13 @@ fun LogDetailSheet(logEntry: String) {
                                 text = "Sniffed Domain: ",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFFE65100)
+                                color = LogColors.sniffingTextColor()
                             )
                             Text(
                                 text = sniffedDomain,
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontFamily = FontFamily.Monospace,
-                                color = Color(0xFFE65100),
+                                color = LogColors.sniffingTextColor(),
                                 fontWeight = FontWeight.Medium
                             )
                         }

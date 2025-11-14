@@ -107,41 +107,49 @@ class PrefsProvider : ContentProvider() {
             val key = uri.lastPathSegment
             if (key != null && values != null && values.containsKey(PrefsContract.PrefsEntry.COLUMN_PREF_VALUE)) {
                 val editor = prefs.edit()
-                when (val value = values[PrefsContract.PrefsEntry.COLUMN_PREF_VALUE]) {
-                    is String -> {
-                        editor.putString(key, value)
-                    }
-
-                    is Int -> {
-                        editor.putInt(key, value)
-                    }
-
-                    is Boolean -> {
-                        editor.putBoolean(key, value)
-                    }
-
-                    is Long -> {
-                        editor.putLong(key, value)
-                    }
-
-                    is Float -> {
-                        editor.putFloat(key, value)
-                    }
-
-                    is Set<*> -> {
-                        val stringSet = value.filterIsInstance<String>().toSet()
-                        if (stringSet.size == value.size) {
-                            editor.putStringSet(key, stringSet)
-                        } else {
-                            Log.e(
-                                TAG,
-                                "Value for key $key is a Set but contains non-String or null elements (putStringSet requires Set<String>)."
-                            )
+                val value = values[PrefsContract.PrefsEntry.COLUMN_PREF_VALUE]
+                
+                // Handle null values (remove the key from preferences)
+                if (value == null) {
+                    editor.remove(key)
+                    Log.d(TAG, "Removed key: $key (null value)")
+                } else {
+                    when (value) {
+                        is String -> {
+                            editor.putString(key, value)
                         }
-                    }
 
-                    else -> {
-                        Log.e(TAG, "Unsupported value type for key: $key")
+                        is Int -> {
+                            editor.putInt(key, value)
+                        }
+
+                        is Boolean -> {
+                            editor.putBoolean(key, value)
+                        }
+
+                        is Long -> {
+                            editor.putLong(key, value)
+                        }
+
+                        is Float -> {
+                            editor.putFloat(key, value)
+                        }
+
+                        is Set<*> -> {
+                            val stringSet = value.filterIsInstance<String>().toSet()
+                            if (stringSet.size == value.size) {
+                                editor.putStringSet(key, stringSet)
+                            } else {
+                                Log.e(
+                                    TAG,
+                                    "Value for key $key is a Set but contains non-String or null elements (putStringSet requires Set<String>)."
+                                )
+                            }
+                        }
+
+                        else -> {
+                            Log.e(TAG, "Unsupported value type for key: $key (type: ${value?.javaClass?.simpleName})")
+                        }
                     }
                 }
                 editor.apply()

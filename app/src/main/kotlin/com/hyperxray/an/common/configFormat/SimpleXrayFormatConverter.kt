@@ -9,16 +9,27 @@ import java.net.URLDecoder
 import java.util.Base64
 import java.util.zip.Inflater
 
+/**
+ * SimpleXray format converter.
+ * Handles hyperxray://config/ URI scheme (SimpleXray-compatible format).
+ */
 class SimpleXrayFormatConverter: ConfigFormatConverter {
     override fun detect(content: String): Boolean {
-        return content.startsWith("hyperxray://config/")
+        return content.startsWith("hyperxray://config/") || content.startsWith("simplexray://config/")
     }
 
     override fun convert(context: Context, content: String): Result<DetectedConfig> {
-        val parts = content.substring("hyperxray://config/".length).split("/")
+        // Handle both hyperxray:// and simplexray:// formats
+        val prefix = when {
+            content.startsWith("hyperxray://config/") -> "hyperxray://config/"
+            content.startsWith("simplexray://config/") -> "simplexray://config/"
+            else -> return Result.failure(RuntimeException("Invalid URI format"))
+        }
+        
+        val parts = content.substring(prefix.length).split("/")
         if (parts.size != 2) {
-            Log.e(TAG, "Invalid hyperxray URI format")
-            return Result.failure(RuntimeException("Invalid hyperxray URI format"))
+            Log.e(TAG, "Invalid URI format")
+            return Result.failure(RuntimeException("Invalid URI format"))
         }
 
         val decodedName = URLDecoder.decode(parts[0], "UTF-8")
