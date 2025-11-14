@@ -1,0 +1,53 @@
+plugins {
+    id 'com.android.library'
+    id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose' version "${kotlin_version}"
+}
+
+android {
+    namespace "com.hyperxray.an.feature.hysteria2"
+    compileSdk 35
+
+    defaultConfig {
+        minSdk 29
+        targetSdk 35
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_22
+        targetCompatibility JavaVersion.VERSION_22
+    }
+
+    kotlinOptions {
+        jvmTarget = '22'
+    }
+
+    buildFeatures {
+        compose true
+        buildConfig true
+    }
+}
+
+dependencies {
+    // Core modules
+    implementation project(':core:core-designsystem')
+    
+    // Compose BOM for version management
+    implementation platform('androidx.compose:compose-bom:2025.08.00')
+    
+    // Compose UI components
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-graphics'
+    implementation 'androidx.compose.material3:material3'
+    implementation 'androidx.compose.runtime:runtime-livedata'
+    
+    // Android core
+    implementation 'androidx.core:core-ktx:1.16.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.7'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.8.7'
+    
+    // Kotlin coroutines
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
+}
+
