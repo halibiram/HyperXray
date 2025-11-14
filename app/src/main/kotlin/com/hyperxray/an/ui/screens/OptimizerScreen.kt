@@ -33,6 +33,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -169,11 +170,17 @@ private fun LearnerDebugScreenContent() {
     val failCount = learnerState.getFailCount()
     val successRate = learnerState.getSuccessRate()
     
+    // Responsive layout
+    val configuration = LocalConfiguration.current
+    val isTablet = configuration.screenWidthDp >= 600
+    val horizontalPadding = if (isTablet) 24.dp else 16.dp
+    val cardSpacing = if (isTablet) 20.dp else 16.dp
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = horizontalPadding, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(cardSpacing)
     ) {
         Text(
             text = "TLS SNI Learner Debug",
@@ -307,11 +314,7 @@ private fun LearnerDebugScreenContent() {
                     learner.reset()
                     refreshTrigger++
                 },
-                modifier = Modifier.weight(1f),
-                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                modifier = Modifier.weight(1f)
             ) {
                 Text("Reset Learner", fontWeight = FontWeight.SemiBold)
             }
@@ -379,7 +382,7 @@ private fun ModernOptimizerCard(
             .fillMaxWidth()
             .scale(cardScale)
             .alpha(cardAlpha)
-            .clip(RoundedCornerShape(20.dp)),
+            .clip(MaterialTheme.shapes.medium),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
         ),
@@ -411,7 +414,7 @@ private fun ModernOptimizerCard(
                     Box(
                         modifier = Modifier
                             .size(8.dp)
-                            .clip(RoundedCornerShape(4.dp))
+                            .clip(MaterialTheme.shapes.extraSmall)
                             .background(gradientColors[0])
                     )
                     Text(

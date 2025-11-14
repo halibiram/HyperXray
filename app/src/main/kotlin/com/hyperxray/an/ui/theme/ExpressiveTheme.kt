@@ -4,6 +4,7 @@ import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -12,100 +13,104 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
  * Material 3 Expressive Color Scheme - Light Theme
  * Features more vibrant colors, higher contrast, and expressive design tokens
  * Modern purple/indigo gradient theme for premium feel
+ * Optimized for accessibility, readability, and visual hierarchy in light mode
  */
 private val ExpressiveLightColorScheme = lightColorScheme(
-    primary = Color(0xFF6366F1), // Modern indigo
+    primary = Color(0xFF5B5FEF), // Slightly darker indigo for better contrast (was 0xFF6366F1)
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFE0E7FF), // Light indigo container
-    onPrimaryContainer = Color(0xFF1E1B4B),
-    secondary = Color(0xFF8B5CF6), // Purple accent
+    primaryContainer = Color(0xFFD6DBFF), // Slightly darker container for better definition
+    onPrimaryContainer = Color(0xFF1A1B4A), // Darker for better readability
+    secondary = Color(0xFF7C3AED), // More vibrant purple for better visibility
     onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFEDE9FE), // Light purple container
-    onSecondaryContainer = Color(0xFF3B1F5C),
-    tertiary = Color(0xFFA855F7), // Vibrant purple
+    secondaryContainer = Color(0xFFE9D5FF), // Slightly darker container
+    onSecondaryContainer = Color(0xFF2D1B5A), // Darker for better contrast
+    tertiary = Color(0xFF9333EA), // More vibrant purple
     onTertiary = Color(0xFFFFFFFF),
-    tertiaryContainer = Color(0xFFF3E8FF), // Light purple container
-    onTertiaryContainer = Color(0xFF4A1F6B),
-    error = Color(0xFFBA1A1A),
+    tertiaryContainer = Color(0xFFF0E4FF), // Slightly darker container
+    onTertiaryContainer = Color(0xFF3D1B6A), // Darker for better readability
+    error = Color(0xFFC62828), // Darker red for better contrast (was 0xFFBA1A1A)
     onError = Color(0xFFFFFFFF),
-    errorContainer = Color(0xFFFFDAD6),
-    onErrorContainer = Color(0xFF410002),
-    background = Color(0xFFFBFDF9),
-    onBackground = Color(0xFF191C1A),
-    surface = Color(0xFFFBFDF9),
-    onSurface = Color(0xFF191C1A),
-    surfaceVariant = Color(0xFFDBE5DD),
-    onSurfaceVariant = Color(0xFF404943),
-    outline = Color(0xFF707973),
-    outlineVariant = Color(0xFFBFC9C1),
+    errorContainer = Color(0xFFFFCDD2), // Slightly darker container
+    onErrorContainer = Color(0xFF3D0000), // Darker for better readability
+    background = Color(0xFFFFFFFF), // Pure white for maximum contrast
+    onBackground = Color(0xFF1C1F1D), // Darker for better readability (was 0xFF1A1D1B)
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF1C1F1D), // Darker for better readability
+    surfaceVariant = Color(0xFFE1E9E1), // More defined variant (was 0xFFDFE7DF)
+    onSurfaceVariant = Color(0xFF3F4A43), // Darker for better readability (was 0xFF434C45)
+    outline = Color(0xFF6B7570), // More visible outline (was 0xFF737C75)
+    outlineVariant = Color(0xFFBFC7C1), // More defined variant (was 0xFFC3CDC5)
     scrim = Color(0xFF000000),
     inverseSurface = Color(0xFF2E312F),
-    inverseOnSurface = Color(0xFFEFF1ED),
-    inversePrimary = Color(0xFF6FD9AC),
-    surfaceDim = Color(0xFFDBDDD9),
-    surfaceBright = Color(0xFFFBFDF9),
-    surfaceContainerLowest = Color(0xFFFFFFFF),
-    surfaceContainerLow = Color(0xFFF5F7F3),
-    surfaceContainer = Color(0xFFEFF1ED),
-    surfaceContainerHigh = Color(0xFFE9EBE7),
-    surfaceContainerHighest = Color(0xFFE3E5E1),
+    inverseOnSurface = Color(0xFFF5F7F5), // Lighter for better contrast
+    inversePrimary = Color(0xFFB8C5FF), // More visible inverse primary
+    surfaceDim = Color(0xFFD8DAD8), // Slightly darker for better definition
+    surfaceBright = Color(0xFFFFFFFF), // Pure white
+    surfaceContainerLowest = Color(0xFFFFFFFF), // Pure white
+    surfaceContainerLow = Color(0xFFF2F4F2), // More defined separation (was 0xFFF4F6F4)
+    surfaceContainer = Color(0xFFECEEEC), // More defined elevation (was 0xFFEEF0EE)
+    surfaceContainerHigh = Color(0xFFE6E8E6), // More defined (was 0xFFE8EAE8)
+    surfaceContainerHighest = Color(0xFFE0E2E0), // More defined (was 0xFFE2E4E2)
 )
 
 /**
  * Material 3 Expressive Color Scheme - Dark Theme
  * Features more vibrant colors, higher contrast, and expressive design tokens
  * Modern purple/indigo gradient theme for premium feel
+ * Optimized for dark mode readability and eye comfort
  */
 private val ExpressiveDarkColorScheme = darkColorScheme(
-    primary = Color(0xFF818CF8), // Bright indigo
+    primary = Color(0xFF9BB5FF), // Brighter indigo for better visibility
     onPrimary = Color(0xFF1E1B4B),
-    primaryContainer = Color(0xFF4338CA), // Dark indigo container
+    primaryContainer = Color(0xFF4F46E5), // More vibrant container
     onPrimaryContainer = Color(0xFFE0E7FF),
-    secondary = Color(0xFFA78BFA), // Bright purple
+    secondary = Color(0xFFB8A5FF), // Brighter purple
     onSecondary = Color(0xFF3B1F5C),
-    secondaryContainer = Color(0xFF6D28D9), // Dark purple container
+    secondaryContainer = Color(0xFF7C3AED), // More vibrant container
     onSecondaryContainer = Color(0xFFEDE9FE),
-    tertiary = Color(0xFFC084FC), // Vibrant purple
+    tertiary = Color(0xFFD4A5FF), // Brighter vibrant purple
     onTertiary = Color(0xFF4A1F6B),
-    tertiaryContainer = Color(0xFF7C3AED), // Dark purple container
+    tertiaryContainer = Color(0xFF9333EA), // More vibrant container
     onTertiaryContainer = Color(0xFFF3E8FF),
     error = Color(0xFFFFB4AB),
     onError = Color(0xFF690005),
     errorContainer = Color(0xFF93000A),
     onErrorContainer = Color(0xFFFFDAD6),
-    background = Color(0xFF191C1A),
-    onBackground = Color(0xFFE1E3DF),
-    surface = Color(0xFF191C1A),
-    onSurface = Color(0xFFE1E3DF),
-    surfaceVariant = Color(0xFF404943),
-    onSurfaceVariant = Color(0xFFBFC9C1),
-    outline = Color(0xFF89938B),
-    outlineVariant = Color(0xFF404943),
+    background = Color(0xFF0F1210), // Darker for better contrast and eye comfort
+    onBackground = Color(0xFFE4E6E4), // Lighter for better readability
+    surface = Color(0xFF0F1210),
+    onSurface = Color(0xFFE4E6E4),
+    surfaceVariant = Color(0xFF3D453F), // Better contrast
+    onSurfaceVariant = Color(0xFFC4CEC6), // Lighter for better readability
+    outline = Color(0xFF8E9790), // More visible borders
+    outlineVariant = Color(0xFF3D453F), // Subtle variant
     scrim = Color(0xFF000000),
-    inverseSurface = Color(0xFFE1E3DF),
+    inverseSurface = Color(0xFFE4E6E4),
     inverseOnSurface = Color(0xFF2E312F),
-    inversePrimary = Color(0xFF006C4C),
-    surfaceDim = Color(0xFF191C1A),
-    surfaceBright = Color(0xFF3F423F),
-    surfaceContainerLowest = Color(0xFF0F120F),
-    surfaceContainerLow = Color(0xFF1F221F),
-    surfaceContainer = Color(0xFF232622),
-    surfaceContainerHigh = Color(0xFF2D302D),
-    surfaceContainerHighest = Color(0xFF373A37),
+    inversePrimary = Color(0xFF6366F1), // Better inverse primary
+    surfaceDim = Color(0xFF0F1210),
+    surfaceBright = Color(0xFF353835), // Brighter for elevated surfaces
+    surfaceContainerLowest = Color(0xFF0A0D0A), // Darkest for depth
+    surfaceContainerLow = Color(0xFF1A1D1A), // Better separation
+    surfaceContainer = Color(0xFF242724), // Better elevation hierarchy
+    surfaceContainerHigh = Color(0xFF2E312E),
+    surfaceContainerHighest = Color(0xFF393C39), // Highest elevation
 )
 
 /**
- * Material 3 Expressive Typography
- * Features more expressive font sizes, weights, and line heights
+ * Material 3 v2024 Typography Scale
+ * Updated to match Material Design 3 typography v2024 specifications
  */
 private val ExpressiveTypography = Typography(
     displayLarge = TextStyle(
@@ -216,8 +221,21 @@ private val ExpressiveTypography = Typography(
 )
 
 /**
+ * Material 3 Shape System v2
+ * Corner radius hierarchy: 8dp (small), 12dp (medium), 24dp (large)
+ */
+private val ExpressiveShapes = Shapes(
+    extraSmall = RoundedCornerShape(4.dp),
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(12.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(28.dp),
+)
+
+/**
  * Get Material 3 Expressive Color Scheme
  * Supports dynamic colors on Android 12+ (API 31+)
+ * Uses tonal palettes for better color harmony
  */
 @Composable
 fun expressiveColorScheme(
@@ -226,22 +244,12 @@ fun expressiveColorScheme(
 ): ColorScheme {
     return when {
         dynamicColor && darkTheme -> {
-            // Use dynamic colors for expressive design
-            val dynamicScheme = dynamicDarkColorScheme(LocalContext.current)
-            dynamicScheme.copy(
-                // Enhance primary colors for more vibrancy
-                primary = dynamicScheme.primary.copy(alpha = 1f),
-                primaryContainer = dynamicScheme.primaryContainer.copy(alpha = 1f),
-            )
+            // Use dynamic colors with full tonal palette support
+            dynamicDarkColorScheme(LocalContext.current)
         }
         dynamicColor && !darkTheme -> {
-            // Use dynamic colors for expressive design
-            val dynamicScheme = dynamicLightColorScheme(LocalContext.current)
-            dynamicScheme.copy(
-                // Enhance primary colors for more vibrancy
-                primary = dynamicScheme.primary.copy(alpha = 1f),
-                primaryContainer = dynamicScheme.primaryContainer.copy(alpha = 1f),
-            )
+            // Use dynamic colors with full tonal palette support
+            dynamicLightColorScheme(LocalContext.current)
         }
         darkTheme -> ExpressiveDarkColorScheme
         else -> ExpressiveLightColorScheme
@@ -250,7 +258,8 @@ fun expressiveColorScheme(
 
 /**
  * Material 3 Expressive Theme
- * Provides expressive color scheme and typography
+ * Provides expressive color scheme, typography v2024, and shape system v2
+ * Full Material 3 design system with dynamic color support
  */
 @Composable
 fun ExpressiveMaterialTheme(
@@ -263,7 +272,255 @@ fun ExpressiveMaterialTheme(
     MaterialTheme(
         colorScheme = colorScheme,
         typography = ExpressiveTypography,
+        shapes = ExpressiveShapes,
         content = content
     )
+}
+
+/**
+ * Theme-aware color utilities for log entries and badges
+ * Provides consistent colors that adapt to light/dark themes
+ */
+object LogColors {
+    /**
+     * DNS-related colors (cyan theme)
+     */
+    @Composable
+    fun dnsBorderColor(): Color {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) Color(0xFF06B6D4) else Color(0xFF0288D1) // Darker cyan for better contrast
+    }
+    
+    @Composable
+    fun dnsContainerColor(): Color {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) Color(0xFF0A4A52).copy(alpha = 0.3f) else Color(0xFFE0F7FA)
+    }
+    
+    @Composable
+    fun dnsTextColor(): Color {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) Color(0xFF5DD5E8) else Color(0xFF0277BD) // Darker cyan for better contrast
+    }
+    
+    /**
+     * Sniffing-related colors (orange theme)
+     */
+    @Composable
+    fun sniffingBorderColor(): Color {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) Color(0xFFFF8A50) else Color(0xFFFF6F00)
+    }
+    
+    @Composable
+    fun sniffingContainerColor(): Color {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) Color(0xFF5C2E00).copy(alpha = 0.3f) else Color(0xFFFFF3E0)
+    }
+    
+    @Composable
+    fun sniffingTextColor(): Color {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) Color(0xFFFFB366) else Color(0xFFE65100)
+    }
+    
+    /**
+     * SNI-related colors (purple theme)
+     */
+    @Composable
+    fun sniBorderColor(): Color {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) Color(0xFFBA68C8) else Color(0xFF9C27B0)
+    }
+    
+    /**
+     * TCP/UDP connection colors
+     */
+    @Composable
+    fun tcpColor(): Color {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) Color(0xFF64B5F6) else Color(0xFF1976D2) // Darker blue for better contrast
+    }
+    
+    @Composable
+    fun udpColor(): Color {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) Color(0xFF81C784) else Color(0xFF388E3C) // Darker green for better contrast
+    }
+    
+    /**
+     * Warning colors (orange theme)
+     */
+    @Composable
+    fun warnContainerColor(): Color {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) Color(0xFF5C2E00).copy(alpha = 0.4f) else Color(0xFFFFF3E0)
+    }
+    
+    @Composable
+    fun warnTextColor(): Color {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) Color(0xFFFFB366) else Color(0xFFE65100)
+    }
+    
+    /**
+     * Gradient colors for badges (theme-aware)
+     */
+    @Composable
+    fun sniGradientColors(): List<Color> {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) {
+            listOf(
+                Color(0xFFBA68C8), // Lighter purple
+                Color(0xFF9C27B0)  // Standard purple
+            )
+        } else {
+            listOf(
+                Color(0xFF9C27B0), // Standard purple
+                Color(0xFF7B1FA2)  // Darker purple
+            )
+        }
+    }
+    
+    @Composable
+    fun sniffingGradientColors(): List<Color> {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) {
+            listOf(
+                Color(0xFFFF8A50), // Lighter orange
+                Color(0xFFFF6F00)  // Standard orange
+            )
+        } else {
+            listOf(
+                Color(0xFFFF6F00), // Standard orange
+                Color(0xFFE65100)  // Darker orange
+            )
+        }
+    }
+    
+    @Composable
+    fun dnsGradientColors(): List<Color> {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) {
+            listOf(
+                Color(0xFF06B6D4), // Lighter cyan
+                Color(0xFF00BCD4)  // Standard cyan
+            )
+        } else {
+            listOf(
+                Color(0xFF00BCD4), // Standard cyan
+                Color(0xFF0097A7)  // Darker cyan
+            )
+        }
+    }
+    
+    /**
+     * Dashboard gradient colors (theme-aware)
+     */
+    @Composable
+    fun dashboardPerformanceGradient(): List<Color> {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) {
+            listOf(
+                Color(0xFF22D3EE), // Brighter cyan
+                Color(0xFF3B82F6), // Blue
+                Color(0xFF6366F1)  // Indigo
+            )
+        } else {
+            listOf(
+                Color(0xFF0891B2), // Darker cyan for better contrast
+                Color(0xFF2563EB), // Darker blue for better contrast
+                Color(0xFF5B5FEF)  // Darker indigo for better contrast
+            )
+        }
+    }
+    
+    @Composable
+    fun dashboardTrafficGradient(): List<Color> {
+        val colorScheme = MaterialTheme.colorScheme
+        return listOf(
+            colorScheme.primary,
+            colorScheme.secondary,
+            colorScheme.tertiary
+        )
+    }
+    
+    @Composable
+    fun dashboardSystemGradient(): List<Color> {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) {
+            listOf(
+                Color(0xFF34D399), // Brighter green
+                Color(0xFF10B981), // Green
+                Color(0xFF059669)  // Darker green
+            )
+        } else {
+            listOf(
+                Color(0xFF059669), // Darker green for better contrast
+                Color(0xFF047857), // Darker green
+                Color(0xFF065F46)  // Darkest green for maximum contrast
+            )
+        }
+    }
+    
+    @Composable
+    fun dashboardMemoryGradient(): List<Color> {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) {
+            listOf(
+                Color(0xFFFBBF24), // Brighter amber
+                Color(0xFFF59E0B), // Amber
+                Color(0xFFEF4444)  // Red
+            )
+        } else {
+            listOf(
+                Color(0xFFF59E0B), // Amber
+                Color(0xFFEF4444), // Red
+                Color(0xFFDC2626)  // Darker red
+            )
+        }
+    }
+    
+    @Composable
+    fun dashboardTelemetryGradient(): List<Color> {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) {
+            listOf(
+                Color(0xFFF472B6), // Brighter pink
+                Color(0xFFEC4899), // Pink
+                Color(0xFFDB2777)  // Darker pink
+            )
+        } else {
+            listOf(
+                Color(0xFFEC4899), // Pink
+                Color(0xFFDB2777), // Darker pink
+                Color(0xFFBE185D)  // Darkest pink
+            )
+        }
+    }
+    
+    @Composable
+    fun dashboardSuccessColor(): Color {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) Color(0xFF34D399) else Color(0xFF059669) // Darker green for better contrast
+    }
+    
+    @Composable
+    fun dashboardErrorColor(): Color {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) Color(0xFFF87171) else Color(0xFFEF4444)
+    }
+    
+    @Composable
+    fun dashboardWarningColor(): Color {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) Color(0xFFFBBF24) else Color(0xFFF59E0B)
+    }
+    
+    @Composable
+    fun dashboardConnectionActiveColor(): Color {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) Color(0xFF34D399) else Color(0xFF059669) // Darker green for better contrast
+    }
 }
 
