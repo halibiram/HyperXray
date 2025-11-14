@@ -10,6 +10,9 @@ import java.net.MalformedURLException
 /**
  * Converts VLESS protocol links to Xray configuration format.
  * Handles vless:// URI scheme parsing and JSON config generation.
+ * 
+ * Note: This class uses its own interface to avoid circular dependencies.
+ * App module uses reflection to discover and use this converter.
  */
 class VlessLinkConverter: ConfigFormatConverter {
     override fun detect(content: String): Boolean {
@@ -94,7 +97,9 @@ class VlessLinkConverter: ConfigFormatConverter {
 }
 
 /**
- * Interface for config format converters.
+ * Interface for config format converters in feature module.
+ * This interface matches the app module's ConfigFormatConverter interface
+ * but is defined here to avoid circular dependencies.
  */
 interface ConfigFormatConverter {
     fun detect(content: String): Boolean

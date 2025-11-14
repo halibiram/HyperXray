@@ -208,7 +208,7 @@ object OnnxRuntimeRoutingEngine {
         try {
             // Zero-copy tensor creation: reuse thread-local array to minimize GC pressure
             // Direct copy to pre-allocated array (single allocation per thread)
-            val tensorData = tensorArray.get()
+            val tensorData = tensorArray.get() ?: return@withContext RoutingDecision(7, "h2", 0, 0.0f)
             val inputRow = tensorData[0]
             System.arraycopy(features, 0, inputRow, 0, INPUT_SIZE)
             

@@ -26,6 +26,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -39,6 +40,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import com.hyperxray.an.feature.dashboard.DashboardColors
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -116,37 +118,47 @@ fun DashboardScreen(
         }
     }
     
-    // Cache gradient colors to avoid recreation
-    val performanceGradient = remember { listOf(Color(0xFF06B6D4), Color(0xFF3B82F6), Color(0xFF6366F1)) }
-    val trafficGradient = remember { listOf(Color(0xFF6366F1), Color(0xFF8B5CF6), Color(0xFFA855F7)) }
-    val systemGradient = remember { listOf(Color(0xFF10B981), Color(0xFF059669), Color(0xFF047857)) }
-    val memoryGradient = remember { listOf(Color(0xFFF59E0B), Color(0xFFEF4444), Color(0xFFDC2626)) }
-    val telemetryGradient = remember { listOf(Color(0xFFEC4899), Color(0xFFDB2777), Color(0xFFBE185D)) }
+    // Cache theme-aware gradient colors to avoid recreation
+    val performanceGradient = DashboardColors.performanceGradient()
+    val trafficGradient = DashboardColors.trafficGradient()
+    val systemGradient = DashboardColors.systemGradient()
+    val memoryGradient = DashboardColors.memoryGradient()
+    val telemetryGradient = DashboardColors.telemetryGradient()
+    val successColor = DashboardColors.successColor()
+    val errorColor = DashboardColors.errorColor()
+    val warningColor = DashboardColors.warningColor()
+    val connectionActiveColor = DashboardColors.connectionActiveColor()
+
+    // Responsive layout: adjust padding for tablets
+    val configuration = LocalConfiguration.current
+    val isTablet = configuration.screenWidthDp >= 600
+    val horizontalPadding = if (isTablet) 32.dp else 16.dp
+    val cardSpacing = if (isTablet) 24.dp else 16.dp
 
     LazyColumn(
         state = lazyListState,
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = horizontalPadding),
         contentPadding = PaddingValues(
             top = 16.dp,
             bottom = 24.dp
         ),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
+        verticalArrangement = Arrangement.spacedBy(cardSpacing),
     ) {
         // Enhanced Modern Header Section with Glassmorphism
         item(key = "header") {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(24.dp))
+                    .clip(MaterialTheme.shapes.large)
                     .background(
                         Brush.horizontalGradient(
                             colors = if (isServiceEnabled) {
                                 listOf(
-                                    Color(0xFF10B981).copy(alpha = 0.08f),
-                                    Color(0xFF059669).copy(alpha = 0.05f)
+                                    connectionActiveColor.copy(alpha = 0.08f),
+                                    connectionActiveColor.copy(alpha = 0.05f)
                                 )
                             } else {
                                 listOf(
@@ -186,11 +198,11 @@ fun DashboardScreen(
                         
                         // Enhanced Status Badge with Pulse Animation
                         Card(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp)),
+                            modifier = Modifier,
+                            shape = MaterialTheme.shapes.medium,
                             colors = CardDefaults.cardColors(
                                 containerColor = if (isServiceEnabled) {
-                                    Color(0xFF10B981).copy(alpha = 0.2f)
+                                    connectionActiveColor.copy(alpha = 0.2f)
                                 } else {
                                     MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                                 }
@@ -212,7 +224,7 @@ fun DashboardScreen(
                                         .clip(RoundedCornerShape(5.dp))
                                         .background(
                                             if (isServiceEnabled) {
-                                                Color(0xFF10B981)
+                                                connectionActiveColor
                                             } else {
                                                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                                             }
@@ -224,7 +236,7 @@ fun DashboardScreen(
                                         fontWeight = FontWeight.Bold
                                     ),
                                     color = if (isServiceEnabled) {
-                                        Color(0xFF10B981)
+                                        connectionActiveColor
                                     } else {
                                         MaterialTheme.colorScheme.onSurfaceVariant
                                     }
@@ -291,9 +303,8 @@ fun DashboardScreen(
                 ) {
                     // Total Traffic Card - Enhanced with Glassmorphism
                     Card(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(24.dp)),
+                        modifier = Modifier.weight(1f),
+                        shape = MaterialTheme.shapes.large,
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
                         ),
@@ -308,8 +319,8 @@ fun DashboardScreen(
                                 .background(
                                     Brush.verticalGradient(
                                         colors = listOf(
-                                            Color(0xFF6366F1).copy(alpha = 0.12f),
-                                            Color(0xFF8B5CF6).copy(alpha = 0.08f)
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.08f)
                                         )
                                     )
                                 )
@@ -324,7 +335,7 @@ fun DashboardScreen(
                                         modifier = Modifier
                                             .size(8.dp)
                                             .clip(RoundedCornerShape(4.dp))
-                                            .background(Color(0xFF6366F1))
+                                            .background(MaterialTheme.colorScheme.primary)
                                     )
                                     Text(
                                         text = "Total Traffic",
@@ -340,7 +351,7 @@ fun DashboardScreen(
                                     style = MaterialTheme.typography.headlineSmall.copy(
                                         fontWeight = FontWeight.Bold
                                     ),
-                                    color = Color(0xFF6366F1),
+                                    color = MaterialTheme.colorScheme.primary,
                                     fontFamily = FontFamily.Monospace
                                 )
                             }
@@ -349,9 +360,8 @@ fun DashboardScreen(
                     
                     // Connection Time Card - Enhanced with Glassmorphism
                     Card(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(24.dp)),
+                        modifier = Modifier.weight(1f),
+                        shape = MaterialTheme.shapes.large,
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
                         ),
@@ -366,8 +376,8 @@ fun DashboardScreen(
                                 .background(
                                     Brush.verticalGradient(
                                         colors = listOf(
-                                            Color(0xFF10B981).copy(alpha = 0.12f),
-                                            Color(0xFF059669).copy(alpha = 0.08f)
+                                            connectionActiveColor.copy(alpha = 0.12f),
+                                            connectionActiveColor.copy(alpha = 0.08f)
                                         )
                                     )
                                 )
@@ -382,7 +392,7 @@ fun DashboardScreen(
                                         modifier = Modifier
                                             .size(8.dp)
                                             .clip(RoundedCornerShape(4.dp))
-                                            .background(Color(0xFF10B981))
+                                            .background(connectionActiveColor)
                                     )
                                     Text(
                                         text = "Uptime",
@@ -398,7 +408,7 @@ fun DashboardScreen(
                                     style = MaterialTheme.typography.headlineSmall.copy(
                                         fontWeight = FontWeight.Bold
                                     ),
-                                    color = Color(0xFF10B981),
+                                    color = connectionActiveColor,
                                     fontFamily = FontFamily.Monospace
                                 )
                             }
@@ -442,7 +452,7 @@ fun DashboardScreen(
                             label = "Total Throughput",
                             value = throughputRatio,
                             displayValue = formatThroughput(totalThroughput),
-                            color = Color(0xFF06B6D4)
+                            color = performanceGradient.first()
                         )
                         
                         Spacer(modifier = Modifier.height(16.dp))
@@ -451,7 +461,7 @@ fun DashboardScreen(
                             label = "Memory Usage",
                             value = memoryUsage,
                             displayValue = "${(memoryUsage * 100).toInt()}%",
-                            color = if (memoryUsage > 0.8f) Color(0xFFEF4444) else Color(0xFF10B981)
+                            color = if (memoryUsage > 0.8f) errorColor else connectionActiveColor
                         )
                     }
                 )
@@ -468,11 +478,7 @@ fun DashboardScreen(
                 ModernStatCard(
                     title = "Network Speed",
                     iconRes = resources.drawableCloudDownload,
-                    gradientColors = listOf(
-                        Color(0xFF06B6D4),
-                        Color(0xFF3B82F6),
-                        Color(0xFF6366F1)
-                    ),
+                    gradientColors = performanceGradient,
                     content = {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -482,12 +488,12 @@ fun DashboardScreen(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(20.dp))
+                                    .clip(MaterialTheme.shapes.medium)
                                     .background(
                                         Brush.verticalGradient(
                                             colors = listOf(
-                                                Color(0xFF06B6D4).copy(alpha = 0.15f),
-                                                Color(0xFF3B82F6).copy(alpha = 0.1f)
+                                                performanceGradient.first().copy(alpha = 0.15f),
+                                                performanceGradient[1].copy(alpha = 0.1f)
                                             )
                                         )
                                     )
@@ -506,7 +512,7 @@ fun DashboardScreen(
                                             style = MaterialTheme.typography.titleLarge.copy(
                                                 fontWeight = FontWeight.Bold
                                             ),
-                                            color = Color(0xFF06B6D4)
+                                            color = performanceGradient.first()
                                         )
                                         Text(
                                             text = "Upload",
@@ -522,7 +528,7 @@ fun DashboardScreen(
                                         style = MaterialTheme.typography.headlineSmall.copy(
                                             fontWeight = FontWeight.Bold
                                         ),
-                                        color = Color(0xFF06B6D4),
+                                        color = performanceGradient.first(),
                                         fontFamily = FontFamily.Monospace
                                     )
                                 }
@@ -532,12 +538,12 @@ fun DashboardScreen(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(20.dp))
+                                    .clip(MaterialTheme.shapes.medium)
                                     .background(
                                         Brush.verticalGradient(
                                             colors = listOf(
-                                                Color(0xFF8B5CF6).copy(alpha = 0.15f),
-                                                Color(0xFFA855F7).copy(alpha = 0.1f)
+                                                trafficGradient[1].copy(alpha = 0.15f),
+                                                trafficGradient[2].copy(alpha = 0.1f)
                                             )
                                         )
                                     )
@@ -556,7 +562,7 @@ fun DashboardScreen(
                                             style = MaterialTheme.typography.titleLarge.copy(
                                                 fontWeight = FontWeight.Bold
                                             ),
-                                            color = Color(0xFF8B5CF6)
+                                            color = trafficGradient[1]
                                         )
                                         Text(
                                             text = "Download",
@@ -572,7 +578,7 @@ fun DashboardScreen(
                                         style = MaterialTheme.typography.headlineSmall.copy(
                                             fontWeight = FontWeight.Bold
                                         ),
-                                        color = Color(0xFF8B5CF6),
+                                        color = trafficGradient[1],
                                         fontFamily = FontFamily.Monospace
                                     )
                                 }
@@ -608,11 +614,7 @@ fun DashboardScreen(
                 ModernStatCard(
                     title = "Quick Insights",
                     iconRes = resources.drawableOptimizer,
-                    gradientColors = listOf(
-                        Color(0xFFEC4899),
-                        Color(0xFFDB2777),
-                        Color(0xFFBE185D)
-                    ),
+                    gradientColors = telemetryGradient,
                     content = {
                         Column(
                             modifier = Modifier.fillMaxWidth(),
@@ -626,12 +628,12 @@ fun DashboardScreen(
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .clip(RoundedCornerShape(16.dp))
+                                        .clip(MaterialTheme.shapes.small)
                                         .background(
                                             Brush.horizontalGradient(
                                                 colors = listOf(
-                                                    Color(0xFF06B6D4).copy(alpha = 0.15f),
-                                                    Color(0xFF3B82F6).copy(alpha = 0.1f)
+                                                    performanceGradient.first().copy(alpha = 0.15f),
+                                                    performanceGradient[1].copy(alpha = 0.1f)
                                                 )
                                             )
                                         )
@@ -649,7 +651,7 @@ fun DashboardScreen(
                                             style = MaterialTheme.typography.titleLarge.copy(
                                                 fontWeight = FontWeight.Bold
                                             ),
-                                            color = Color(0xFF06B6D4)
+                                            color = performanceGradient.first()
                                         )
                                     }
                                 }
@@ -658,18 +660,18 @@ fun DashboardScreen(
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .clip(RoundedCornerShape(16.dp))
+                                        .clip(MaterialTheme.shapes.small)
                                         .background(
                                             Brush.horizontalGradient(
                                                 colors = if (telemetryState!!.avgLoss > 1.0) {
                                                     listOf(
-                                                        Color(0xFFEF4444).copy(alpha = 0.15f),
-                                                        Color(0xFFDC2626).copy(alpha = 0.1f)
+                                                        errorColor.copy(alpha = 0.15f),
+                                                        errorColor.copy(alpha = 0.1f)
                                                     )
                                                 } else {
                                                     listOf(
-                                                        Color(0xFF10B981).copy(alpha = 0.15f),
-                                                        Color(0xFF059669).copy(alpha = 0.1f)
+                                                        connectionActiveColor.copy(alpha = 0.15f),
+                                                        connectionActiveColor.copy(alpha = 0.1f)
                                                     )
                                                 }
                                             )
@@ -689,9 +691,9 @@ fun DashboardScreen(
                                                 fontWeight = FontWeight.Bold
                                             ),
                                             color = if (telemetryState!!.avgLoss > 1.0) {
-                                                Color(0xFFEF4444)
+                                                errorColor
                                             } else {
-                                                Color(0xFF10B981)
+                                                connectionActiveColor
                                             }
                                         )
                                     }
@@ -702,12 +704,12 @@ fun DashboardScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(16.dp))
+                                    .clip(MaterialTheme.shapes.small)
                                     .background(
                                         Brush.horizontalGradient(
                                             colors = listOf(
-                                                Color(0xFF8B5CF6).copy(alpha = 0.15f),
-                                                Color(0xFFA855F7).copy(alpha = 0.1f)
+                                                trafficGradient[1].copy(alpha = 0.15f),
+                                                trafficGradient[2].copy(alpha = 0.1f)
                                             )
                                         )
                                     )
@@ -730,7 +732,7 @@ fun DashboardScreen(
                                             style = MaterialTheme.typography.titleMedium.copy(
                                                 fontWeight = FontWeight.Bold
                                             ),
-                                            color = Color(0xFF8B5CF6)
+                                            color = trafficGradient[1]
                                         )
                                     }
                                     // Quality indicator dot
@@ -740,11 +742,11 @@ fun DashboardScreen(
                                             .clip(RoundedCornerShape(6.dp))
                                             .background(
                                                 if (telemetryState!!.avgHandshakeTime < 200) {
-                                                    Color(0xFF10B981)
+                                                    connectionActiveColor
                                                 } else if (telemetryState!!.avgHandshakeTime < 300) {
-                                                    Color(0xFFF59E0B)
+                                                    warningColor
                                                 } else {
-                                                    Color(0xFFEF4444)
+                                                    errorColor
                                                 }
                                             )
                                     )
