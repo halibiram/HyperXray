@@ -58,7 +58,9 @@ fun MiniChart(
             .fillMaxWidth()
             .height(height)
             .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+            .background(
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+            )
     ) {
         Canvas(modifier = Modifier.fillMaxWidth()) {
             val width = size.width
@@ -69,16 +71,23 @@ fun MiniChart(
             val horizontalPadding = 8.dp.toPx().coerceAtMost(width / 4f)
             val verticalPadding = 4.dp.toPx().coerceAtMost(chartHeight / 4f)
             
-            // Calculate min/max for normalization with some padding
-            val maxValue = currentPoints.maxOrNull() ?: 0f
+            // Calculate min/max for normalization with better handling for zero/very small values
+            val maxValue = currentPoints.maxOrNull() ?: 0.01f
             val minValue = currentPoints.minOrNull() ?: 0f
             
-            // Add small padding to range to prevent clipping at edges
-            val valueRange = maxValue - minValue
-            val paddingAmount = if (valueRange > 0.01f) valueRange * 0.1f else 0.01f
-            val adjustedMin = (minValue - paddingAmount).coerceAtLeast(0f)
-            val adjustedMax = maxValue + paddingAmount
-            val range = max(adjustedMax - adjustedMin, 0.01f)
+            // For better visibility: if max is very small, use a reference scale
+            // This ensures chart is always visible and scales properly
+            val referenceMax = if (maxValue < 0.05f) {
+                // If values are very small, use 0.1 as reference (10% of max scale)
+                0.1f
+            } else {
+                // Otherwise use actual max with some padding
+                maxValue * 1.1f
+            }
+            
+            val adjustedMin = 0f
+            val adjustedMax = referenceMax
+            val range = max(adjustedMax - adjustedMin, 0.1f) // Minimum range for visibility
             
             val drawableWidth = width - 2 * horizontalPadding
             val drawableHeight = chartHeight - 2 * verticalPadding
@@ -95,11 +104,18 @@ fun MiniChart(
                 }
                 
                 // Normalize value: map from [adjustedMin, adjustedMax] to [0, 1]
+                // Ensure minimum baseline visibility for very small values
                 val normalizedValue = if (range > 0.01f) {
-                    ((value - adjustedMin) / range).coerceIn(0f, 1f)
+                    val normalized = ((value - adjustedMin) / range).coerceIn(0f, 1f)
+                    // If value is very small but not zero, show at least 3% from bottom for visibility
+                    if (value > 0f && normalized < 0.03f) {
+                        0.03f
+                    } else {
+                        normalized
+                    }
                 } else {
-                    // If all values are same (or all 0), show at bottom
-                    0f
+                    // Fallback: show at 3% from bottom
+                    0.03f
                 }
                 
                 // Calculate Y position: 0 at bottom, 1 at top (inverted)
@@ -138,24 +154,27 @@ fun MiniChart(
                     }
                 }
                 
+                // Draw line with smooth appearance
                 drawPath(
                     path = linePath,
                     color = lineColor,
                     style = Stroke(
-                        width = 2.dp.toPx(),
+                        width = 2.5.dp.toPx(),
                         cap = StrokeCap.Round
                     )
                 )
             } else if (points.size == 1) {
-                // Draw a single point as a circle
+                // Draw a single point as a simple circle
                 val point = points.first()
+                val center = Offset(
+                    point.x.coerceIn(0f, width),
+                    point.y.coerceIn(0f, chartHeight)
+                )
                 drawCircle(
                     color = lineColor,
                     radius = 3.dp.toPx(),
-                    center = Offset(
-                        point.x.coerceIn(0f, width),
-                        point.y.coerceIn(0f, chartHeight)
-                    )
+                    center = center,
+                    style = androidx.compose.ui.graphics.drawscope.Fill
                 )
             }
         }

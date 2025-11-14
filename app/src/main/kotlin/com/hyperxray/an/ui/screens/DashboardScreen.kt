@@ -36,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -137,81 +138,125 @@ fun DashboardScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            // Enhanced Modern Header Section
+            // Enhanced Modern Header Section with Glassmorphism
             item(key = "header") {
-                Column(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Dashboard",
-                                style = MaterialTheme.typography.displaySmall.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.padding(bottom = 4.dp)
-                            )
-                            Text(
-                                text = if (isServiceEnabled) "Connected and secured" else "Ready to connect",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        
-                        // Status Badge
-                        Card(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(16.dp)),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isServiceEnabled) {
-                                    Color(0xFF10B981).copy(alpha = 0.15f)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = if (isServiceEnabled) {
+                                    listOf(
+                                        Color(0xFF10B981).copy(alpha = 0.08f),
+                                        Color(0xFF059669).copy(alpha = 0.05f)
+                                    )
                                 } else {
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    listOf(
+                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                                    )
                                 }
-                            ),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                            )
+                        )
+                        .padding(20.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(
-                                            if (isServiceEnabled) Color(0xFF10B981) 
-                                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                        )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Dashboard",
+                                    style = MaterialTheme.typography.displaySmall.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(bottom = 6.dp)
                                 )
                                 Text(
-                                    text = if (isServiceEnabled) "Active" else "Idle",
-                                    style = MaterialTheme.typography.labelMedium.copy(
-                                        fontWeight = FontWeight.SemiBold
+                                    text = if (isServiceEnabled) "Connected and secured" else "Ready to connect",
+                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                        fontWeight = FontWeight.Medium
                                     ),
-                                    color = if (isServiceEnabled) {
-                                        Color(0xFF10B981)
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                            
+                            // Enhanced Status Badge with Pulse Animation
+                            Card(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp)),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isServiceEnabled) {
+                                        Color(0xFF10B981).copy(alpha = 0.2f)
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                                    }
+                                ),
+                                elevation = CardDefaults.cardElevation(
+                                    defaultElevation = 4.dp,
+                                    pressedElevation = 6.dp
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    // Animated Pulse Indicator
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(RoundedCornerShape(5.dp))
+                                            .background(
+                                                if (isServiceEnabled) {
+                                                    Color(0xFF10B981)
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                                }
+                                            )
+                                    )
+                                    Text(
+                                        text = if (isServiceEnabled) "Active" else "Idle",
+                                        style = MaterialTheme.typography.labelLarge.copy(
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = if (isServiceEnabled) {
+                                            Color(0xFF10B981)
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        
+                        // Current Time with Icon-like Styling
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.6f))
+                            )
+                            Text(
+                                text = SimpleDateFormat("EEEE, MMMM d • HH:mm", Locale.getDefault()).format(Date()),
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                            )
                         }
                     }
-                    
-                    // Current Time
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = SimpleDateFormat("EEEE, MMMM d • HH:mm", Locale.getDefault()).format(Date()),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                    )
                 }
             }
             // Connection Status Hero Card
@@ -234,7 +279,7 @@ fun DashboardScreen(
                 )
             }
             
-            // Summary Stats Row (only show when connected) - Animated
+            // Summary Stats Row - Enhanced with Modern Glass Cards
             item(key = "summary_stats") {
                 AnimatedVisibility(
                     visible = isServiceEnabled,
@@ -243,31 +288,123 @@ fun DashboardScreen(
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        // Total Traffic Card - Enhanced
-                        StatBadgeCard(
-                            title = "Total Traffic",
-                            value = formatBytes(coreStats.uplink + coreStats.downlink),
-                            gradientColors = listOf(
-                                Color(0xFF6366F1),
-                                Color(0xFF8B5CF6),
-                                Color(0xFFA855F7)
+                        // Total Traffic Card - Enhanced with Glassmorphism
+                        Card(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(24.dp)),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
                             ),
-                            modifier = Modifier.weight(1f)
-                        )
+                            elevation = CardDefaults.cardElevation(
+                                defaultElevation = 8.dp,
+                                pressedElevation = 12.dp
+                            )
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                Color(0xFF6366F1).copy(alpha = 0.12f),
+                                                Color(0xFF8B5CF6).copy(alpha = 0.08f)
+                                            )
+                                        )
+                                    )
+                                    .padding(20.dp)
+                            ) {
+                                Column {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(Color(0xFF6366F1))
+                                        )
+                                        Text(
+                                            text = "Total Traffic",
+                                            style = MaterialTheme.typography.labelLarge.copy(
+                                                fontWeight = FontWeight.SemiBold
+                                            ),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = formatBytes(coreStats.uplink + coreStats.downlink),
+                                        style = MaterialTheme.typography.headlineSmall.copy(
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = Color(0xFF6366F1),
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                        }
                         
-                        // Connection Time Card - Enhanced
-                        StatBadgeCard(
-                            title = "Uptime",
-                            value = formatUptime(coreStats.uptime),
-                            gradientColors = listOf(
-                                Color(0xFF10B981),
-                                Color(0xFF059669),
-                                Color(0xFF047857)
+                        // Connection Time Card - Enhanced with Glassmorphism
+                        Card(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(24.dp)),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
                             ),
-                            modifier = Modifier.weight(1f)
-                        )
+                            elevation = CardDefaults.cardElevation(
+                                defaultElevation = 8.dp,
+                                pressedElevation = 12.dp
+                            )
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                Color(0xFF10B981).copy(alpha = 0.12f),
+                                                Color(0xFF059669).copy(alpha = 0.08f)
+                                            )
+                                        )
+                                    )
+                                    .padding(20.dp)
+                            ) {
+                                Column {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(Color(0xFF10B981))
+                                        )
+                                        Text(
+                                            text = "Uptime",
+                                            style = MaterialTheme.typography.labelLarge.copy(
+                                                fontWeight = FontWeight.SemiBold
+                                            ),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = formatUptime(coreStats.uptime),
+                                        style = MaterialTheme.typography.headlineSmall.copy(
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = Color(0xFF10B981),
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -321,7 +458,7 @@ fun DashboardScreen(
                 }
             }
             
-            // Network Speed Card - Real-time speed indicators
+            // Network Speed Card - Enhanced Real-time Speed Indicators
             item(key = "network_speed") {
                 AnimatedVisibility(
                     visible = isServiceEnabled,
@@ -339,56 +476,106 @@ fun DashboardScreen(
                         content = {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                horizontalArrangement = Arrangement.spacedBy(20.dp)
                             ) {
-                                // Upload Speed
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text(
-                                        text = "↑ Upload",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = formatThroughput(coreStats.uplinkThroughput),
-                                        style = MaterialTheme.typography.titleLarge.copy(
-                                            fontWeight = FontWeight.Bold
-                                        ),
-                                        color = Color(0xFF06B6D4),
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                }
-                                
-                                // Divider
+                                // Upload Speed - Enhanced
                                 Box(
                                     modifier = Modifier
-                                        .width(1.dp)
-                                        .height(50.dp)
-                                        .background(MaterialTheme.colorScheme.outlineVariant)
-                                )
-                                
-                                // Download Speed
-                                Column(
-                                    modifier = Modifier.weight(1f),
-                                    horizontalAlignment = Alignment.CenterHorizontally
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(
+                                            Brush.verticalGradient(
+                                                colors = listOf(
+                                                    Color(0xFF06B6D4).copy(alpha = 0.15f),
+                                                    Color(0xFF3B82F6).copy(alpha = 0.1f)
+                                                )
+                                            )
+                                        )
+                                        .padding(20.dp)
                                 ) {
-                                    Text(
-                                        text = "↓ Download",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = formatThroughput(coreStats.downlinkThroughput),
-                                        style = MaterialTheme.typography.titleLarge.copy(
-                                            fontWeight = FontWeight.Bold
-                                        ),
-                                        color = Color(0xFF8B5CF6),
-                                        fontFamily = FontFamily.Monospace
-                                    )
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "↑",
+                                                style = MaterialTheme.typography.titleLarge.copy(
+                                                    fontWeight = FontWeight.Bold
+                                                ),
+                                                color = Color(0xFF06B6D4)
+                                            )
+                                            Text(
+                                                text = "Upload",
+                                                style = MaterialTheme.typography.labelLarge.copy(
+                                                    fontWeight = FontWeight.SemiBold
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text(
+                                            text = formatThroughput(coreStats.uplinkThroughput),
+                                            style = MaterialTheme.typography.headlineSmall.copy(
+                                                fontWeight = FontWeight.Bold
+                                            ),
+                                            color = Color(0xFF06B6D4),
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                                
+                                // Download Speed - Enhanced
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(
+                                            Brush.verticalGradient(
+                                                colors = listOf(
+                                                    Color(0xFF8B5CF6).copy(alpha = 0.15f),
+                                                    Color(0xFFA855F7).copy(alpha = 0.1f)
+                                                )
+                                            )
+                                        )
+                                        .padding(20.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "↓",
+                                                style = MaterialTheme.typography.titleLarge.copy(
+                                                    fontWeight = FontWeight.Bold
+                                                ),
+                                                color = Color(0xFF8B5CF6)
+                                            )
+                                            Text(
+                                                text = "Download",
+                                                style = MaterialTheme.typography.labelLarge.copy(
+                                                    fontWeight = FontWeight.SemiBold
+                                                ),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text(
+                                            text = formatThroughput(coreStats.downlinkThroughput),
+                                            style = MaterialTheme.typography.headlineSmall.copy(
+                                                fontWeight = FontWeight.Bold
+                                            ),
+                                            color = Color(0xFF8B5CF6),
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -411,61 +598,161 @@ fun DashboardScreen(
                 }
             }
             
-            // Quick Insights Section - Only show when connected
+            // Quick Insights Section - Enhanced with Modern Design
             item(key = "quick_insights") {
                 AnimatedVisibility(
                     visible = isServiceEnabled && telemetryState != null,
                     enter = fadeIn() + expandVertically(),
                     exit = fadeOut() + shrinkVertically()
                 ) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(
-                            text = "Quick Insights",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
-                        
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            // Average RTT
-                            StatBadgeCard(
-                                title = "Avg RTT",
-                                value = formatRtt(telemetryState!!.rttP95),
-                                gradientColors = listOf(
-                                    Color(0xFF06B6D4),
-                                    Color(0xFF3B82F6)
-                                ),
-                                modifier = Modifier.weight(1f)
-                            )
-                            
-                            // Packet Loss
-                            StatBadgeCard(
-                                title = "Packet Loss",
-                                value = formatLoss(telemetryState!!.avgLoss),
-                                gradientColors = listOf(
-                                    if (telemetryState!!.avgLoss > 1.0) {
-                                        Color(0xFFEF4444)
-                                    } else {
-                                        Color(0xFF10B981)
-                                    },
-                                    if (telemetryState!!.avgLoss > 1.0) {
-                                        Color(0xFFDC2626)
-                                    } else {
-                                        Color(0xFF059669)
+                    ModernStatCard(
+                        title = "Quick Insights",
+                        iconRes = R.drawable.optimizer,
+                        gradientColors = listOf(
+                            Color(0xFFEC4899),
+                            Color(0xFFDB2777),
+                            Color(0xFFBE185D)
+                        ),
+                        content = {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    // Average RTT - Enhanced
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    colors = listOf(
+                                                        Color(0xFF06B6D4).copy(alpha = 0.15f),
+                                                        Color(0xFF3B82F6).copy(alpha = 0.1f)
+                                                    )
+                                                )
+                                            )
+                                            .padding(16.dp)
+                                    ) {
+                                        Column {
+                                            Text(
+                                                text = "Avg RTT",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Text(
+                                                text = formatRtt(telemetryState!!.rttP95),
+                                                style = MaterialTheme.typography.titleLarge.copy(
+                                                    fontWeight = FontWeight.Bold
+                                                ),
+                                                color = Color(0xFF06B6D4)
+                                            )
+                                        }
                                     }
-                                ),
-                                modifier = Modifier.weight(1f)
-                            )
+                                    
+                                    // Packet Loss - Enhanced
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    colors = if (telemetryState!!.avgLoss > 1.0) {
+                                                        listOf(
+                                                            Color(0xFFEF4444).copy(alpha = 0.15f),
+                                                            Color(0xFFDC2626).copy(alpha = 0.1f)
+                                                        )
+                                                    } else {
+                                                        listOf(
+                                                            Color(0xFF10B981).copy(alpha = 0.15f),
+                                                            Color(0xFF059669).copy(alpha = 0.1f)
+                                                        )
+                                                    }
+                                                )
+                                            )
+                                            .padding(16.dp)
+                                    ) {
+                                        Column {
+                                            Text(
+                                                text = "Packet Loss",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Text(
+                                                text = formatLoss(telemetryState!!.avgLoss),
+                                                style = MaterialTheme.typography.titleLarge.copy(
+                                                    fontWeight = FontWeight.Bold
+                                                ),
+                                                color = if (telemetryState!!.avgLoss > 1.0) {
+                                                    Color(0xFFEF4444)
+                                                } else {
+                                                    Color(0xFF10B981)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                                
+                                // Handshake Time - New Addition
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(
+                                            Brush.horizontalGradient(
+                                                colors = listOf(
+                                                    Color(0xFF8B5CF6).copy(alpha = 0.15f),
+                                                    Color(0xFFA855F7).copy(alpha = 0.1f)
+                                                )
+                                            )
+                                        )
+                                        .padding(16.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column {
+                                            Text(
+                                                text = "Handshake Time",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Text(
+                                                text = formatHandshakeTime(telemetryState!!.avgHandshakeTime),
+                                                style = MaterialTheme.typography.titleMedium.copy(
+                                                    fontWeight = FontWeight.Bold
+                                                ),
+                                                color = Color(0xFF8B5CF6)
+                                            )
+                                        }
+                                        // Quality indicator dot
+                                        Box(
+                                            modifier = Modifier
+                                                .size(12.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(
+                                                    if (telemetryState!!.avgHandshakeTime < 200) {
+                                                        Color(0xFF10B981)
+                                                    } else if (telemetryState!!.avgHandshakeTime < 300) {
+                                                        Color(0xFFF59E0B)
+                                                    } else {
+                                                        Color(0xFFEF4444)
+                                                    }
+                                                )
+                                        )
+                                    }
+                                }
+                            }
                         }
-                    }
+                    )
                 }
             }
 
