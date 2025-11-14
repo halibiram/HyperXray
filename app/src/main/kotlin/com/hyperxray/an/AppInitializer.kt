@@ -2,6 +2,7 @@ package com.hyperxray.an
 
 import android.app.Application
 import android.util.Log
+import androidx.work.WorkManager
 import com.hyperxray.an.common.AiLogHelper
 import com.hyperxray.an.data.source.LogFileManager
 import com.hyperxray.an.optimizer.OrtHolder
@@ -213,10 +214,16 @@ class AppInitializer(
     private suspend fun initializeTlsSniOptimizer() {
         try {
             Log.d(TAG, "Initializing TLS SNI Optimizer v5")
+            
+            // Schedule worker - TlsRuntimeWorker.schedule() never throws and handles
+            // WorkManager initialization internally with robust retry logic
             TlsRuntimeWorker.schedule(application)
-            Log.i(TAG, "TLS SNI Optimizer v5 initialized")
+            Log.i(TAG, "TLS SNI Optimizer v5 scheduling initiated (worker handles retries internally)")
         } catch (e: Exception) {
+            // This catch is defensive - TlsRuntimeWorker.schedule() should never throw,
+            // but we catch just in case to prevent app crash
             Log.e(TAG, "Failed to initialize TLS SNI Optimizer v5: ${e.message}", e)
+            // Don't rethrow - allow app to continue without this feature
         }
     }
 
@@ -227,11 +234,26 @@ class AppInitializer(
     private suspend fun initializeAutoLearningOptimizer() {
         try {
             Log.d(TAG, "Initializing Auto-Learning TLS SNI Optimizer v10")
-            OrtHolder.init(application)
+            
+            // Initialize OrtHolder first (optional - RealityWorker can work without it)
+            // OrtHolder initialization is deferred to doWork() if needed, so we don't block here
+            try {
+                OrtHolder.init(application)
+            } catch (e: Exception) {
+                Log.w(TAG, "OrtHolder init failed, continuing without it: ${e.message}")
+                // Continue without OrtHolder - RealityWorker can still work
+            }
+            
+            // Schedule worker - RealityWorker.schedule() handles WorkManager initialization
+            // internally with robust retry logic (10 retries with exponential backoff)
+            // It never throws and will retry automatically if WorkManager is not ready
             RealityWorker.schedule(application)
-            Log.i(TAG, "Auto-Learning TLS SNI Optimizer v10 initialized")
+            Log.i(TAG, "Auto-Learning TLS SNI Optimizer v10 scheduling initiated (worker handles retries internally)")
         } catch (e: Exception) {
+            // This catch is defensive - RealityWorker.schedule() should never throw,
+            // but we catch just in case to prevent app crash
             Log.e(TAG, "Failed to initialize Auto-Learning Optimizer v10: ${e.message}", e)
+            // Don't rethrow - allow app to continue without this feature
         }
     }
 }

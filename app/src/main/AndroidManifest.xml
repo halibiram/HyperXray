@@ -13,6 +13,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_LOGS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
@@ -72,10 +73,11 @@
             android:name="com.hyperxray.an.activity.MainActivity"
             android:configChanges="orientation|screenSize|screenLayout"
             android:enableOnBackInvokedCallback="true"
-            android:excludeFromRecents="true"
+            android:excludeFromRecents="false"
             android:exported="true"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustPan"
+            android:taskAffinity=""
             tools:targetApi="tiramisu">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

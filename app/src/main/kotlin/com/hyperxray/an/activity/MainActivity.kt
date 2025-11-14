@@ -50,41 +50,86 @@ class MainActivity : ComponentActivity() {
     public override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        enableEdgeToEdge()
-        window.isNavigationBarContrastEnforced = false
+        try {
+            enableEdgeToEdge()
+            window.isNavigationBarContrastEnforced = false
 
-        // Initialize intent handler (delegates to MainViewModel for now)
-        intentHandler = IntentHandler { content ->
-            mainViewModel.handleSharedContent(content)
+            // Initialize intent handler (delegates to MainViewModel for now)
+            try {
+                intentHandler = IntentHandler { content ->
+                    mainViewModel.handleSharedContent(content)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to initialize IntentHandler: ${e.message}", e)
+                // Create a no-op handler to prevent crashes
+                intentHandler = IntentHandler { }
+            }
+
+            try {
+                mainViewModel.reloadView = { initView() }
+                initView()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to initialize view: ${e.message}", e)
+                // Show error state or fallback UI
+            }
+
+            // Process share intent (delegated to feature module)
+            try {
+                intent?.let { intentHandler.processShareIntent(it, contentResolver, lifecycleScope) }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to process share intent: ${e.message}", e)
+            }
+            
+            Log.d(TAG, "MainActivity onCreate called.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Critical error in onCreate: ${e.message}", e)
+            // Try to show a basic error UI
+            try {
+                setContent {
+                    Surface(modifier = Modifier.fillMaxSize()) {
+                        // Basic error UI - app will be unusable but won't crash
+                    }
+                }
+            } catch (e2: Exception) {
+                Log.e(TAG, "Failed to show error UI: ${e2.message}", e2)
+            }
         }
-
-        mainViewModel.reloadView = { initView() }
-        initView()
-
-        // Process share intent (delegated to feature module)
-        intent?.let { intentHandler.processShareIntent(it, contentResolver, lifecycleScope) }
-        
-        Log.d(TAG, "MainActivity onCreate called.")
     }
 
     private fun initView() {
-        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
-        val currentNightMode =
-            resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        val isDark = when (mainViewModel.prefs.theme) {
-            ThemeMode.Light -> false
-            ThemeMode.Dark -> true
-            ThemeMode.Auto -> currentNightMode == Configuration.UI_MODE_NIGHT_YES
-        }
-        insetsController.isAppearanceLightStatusBars = !isDark
+        try {
+            val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+            val currentNightMode =
+                resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+            val isDark = try {
+                when (mainViewModel.prefs.theme) {
+                    ThemeMode.Light -> false
+                    ThemeMode.Dark -> true
+                    ThemeMode.Auto -> currentNightMode == Configuration.UI_MODE_NIGHT_YES
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to get theme preference: ${e.message}", e)
+                // Default to auto theme
+                currentNightMode == Configuration.UI_MODE_NIGHT_YES
+            }
+            insetsController.isAppearanceLightStatusBars = !isDark
 
-        setContent {
-            ExpressiveMaterialTheme(darkTheme = isDark) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    AppNavHost(mainViewModel)
+            setContent {
+                ExpressiveMaterialTheme(darkTheme = isDark) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        AppNavHost(mainViewModel)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize view: ${e.message}", e)
+            // Show basic UI as fallback
+            setContent {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    // Basic fallback UI
                 }
             }
         }
