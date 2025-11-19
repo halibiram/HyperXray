@@ -25,6 +25,11 @@ HTTPCUSTOM_JNI_INTERFACE.md
 HTTPCUSTOM_SOCKS5_INTEGRATION.md
 HTTPCUSTOM_SOCKS_PROXY_REPORT.md
 HTTP_CUSTOM_SOURCE_CODE_REQUIREMENTS.md
+HTTP_CUSTOM_V2RAY_CONNECTION.md
+
+# HTTP Custom Java classes
+app/src/main/java/ca/psiphon/PsiphonTunnel.java
+app/src/main/java/org/bugs4u/proxyserver/core/Tun2Socks.java
 
 # HTTP Custom SOCKS5 wrapper integration
 app/src/main/jni/httpcustom-socks5-wrapper/
