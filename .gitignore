@@ -7,3 +7,8 @@ app/release
 app/src/main/jniLibs
 app/src/main/jni/hev-socks5-tunnel
 local.properties
+
+# HTTP Custom extracted files
+httpcustom_*.apk
+httpcustom_extracted/
+httpcustom_v2ray_files/

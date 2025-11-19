@@ -90,6 +90,68 @@ task downloadGeoFiles {
     }
 }
 
+// Check and provide instructions for Xray-core binary
+def xrayVersion = versionProps.XRAY_CORE_VERSION ?: 'v25.10.15'
+def xrayArm64Path = new File("$projectDir/src/main/jniLibs/arm64-v8a/libxray.so")
+def xrayX86Path = new File("$projectDir/src/main/jniLibs/x86_64/libxray.so")
+
+task checkXrayCore {
+    group = 'build'
+    description = 'Check if Xray-core binaries are present and provide instructions if missing'
+    
+    doLast {
+        def missing = []
+        if (!xrayArm64Path.exists()) {
+            missing.add("arm64-v8a")
+        }
+        if (!xrayX86Path.exists()) {
+            missing.add("x86_64")
+        }
+        
+        if (missing.isEmpty()) {
+            println "✓ Xray-core binaries found for all architectures"
+            println "  - arm64-v8a: ${xrayArm64Path.exists() ? '✓' : '✗'}"
+            println "  - x86_64: ${xrayX86Path.exists() ? '✓' : '✗'}"
+        } else {
+            println "⚠ Xray-core binaries missing for: ${missing.join(', ')}"
+            println ""
+            println "To include Xray-core, you need to build it from source:"
+            println ""
+            println "1. Install Go ${versionProps.GO_VERSION ?: '1.25.3'}+ and Android NDK ${versionProps.NDK_VERSION ?: '28.2.13676358'}"
+            println "2. Clone Xray-core:"
+            println "   git clone https://github.com/XTLS/Xray-core.git"
+            println "   cd Xray-core"
+            println "   git checkout ${xrayVersion}"
+            println ""
+            println "3. Build for Android:"
+            println "   # For arm64-v8a:"
+            println "   export GOOS=android GOARCH=arm64 CGO_ENABLED=1"
+            println "   export CC=\$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
+            println "   go build -o xray -trimpath -buildvcs=false -ldflags=\"-s -w -buildid=\" -v ./main"
+            println "   cp xray ${xrayArm64Path.absolutePath}"
+            println ""
+            println "   # For x86_64:"
+            println "   export GOOS=android GOARCH=amd64 CGO_ENABLED=1"
+            println "   export CC=\$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android24-clang"
+            println "   go build -o xray -trimpath -buildvcs=false -ldflags=\"-s -w -buildid=\" -v ./main"
+            println "   cp xray ${xrayX86Path.absolutePath}"
+            println ""
+            println "Alternatively, see .github/workflows/build.yml for automated build process."
+            println ""
+            println "Required paths:"
+            println "  - ${xrayArm64Path.absolutePath}"
+            println "  - ${xrayX86Path.absolutePath}"
+        }
+    }
+}
+
+// Make checkXrayCore run before build tasks
+tasks.whenTaskAdded { task ->
+    if (task.name.startsWith('assemble') || task.name.startsWith('install')) {
+        task.dependsOn checkXrayCore
+    }
+}
+
 // Train ONNX model with synthetic data
 task trainOnnxModel {
     group = 'build'

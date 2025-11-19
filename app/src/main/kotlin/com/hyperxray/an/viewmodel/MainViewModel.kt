@@ -1398,14 +1398,19 @@ class MainViewModel(application: Application) :
     }
 
     fun startTProxyService(action: String) {
-        viewModelScope.launch {
-            if (_selectedConfigFile.value == null) {
+        // Check config file synchronously for immediate feedback
+        if (_selectedConfigFile.value == null) {
+            viewModelScope.launch {
                 _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(application.getString(R.string.not_select_config)))
-                Log.w(TAG, "Cannot start service: no config file selected.")
-                setControlMenuClickable(true)
-                return@launch
             }
-            val intent = Intent(application, TProxyService::class.java).setAction(action)
+            Log.w(TAG, "Cannot start service: no config file selected.")
+            setControlMenuClickable(true)
+            return
+        }
+        
+        // Create and send intent immediately (non-blocking)
+        val intent = Intent(application, TProxyService::class.java).setAction(action)
+        viewModelScope.launch {
             _uiEvent.trySend(MainViewUiEvent.StartService(intent))
         }
     }
@@ -1434,23 +1439,29 @@ class MainViewModel(application: Application) :
     }
 
     fun stopTProxyService() {
+        // Create and send intent immediately (non-blocking)
+        val intent = Intent(
+            application,
+            TProxyService::class.java
+        ).setAction(TProxyService.ACTION_DISCONNECT)
         viewModelScope.launch {
-            val intent = Intent(
-                application,
-                TProxyService::class.java
-            ).setAction(TProxyService.ACTION_DISCONNECT)
             _uiEvent.trySend(MainViewUiEvent.StartService(intent))
         }
     }
 
     fun prepareAndStartVpn(vpnPrepareLauncher: ActivityResultLauncher<Intent>) {
-        viewModelScope.launch {
-            if (_selectedConfigFile.value == null) {
+        // Check config file synchronously for immediate feedback
+        if (_selectedConfigFile.value == null) {
+            viewModelScope.launch {
                 _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(application.getString(R.string.not_select_config)))
-                Log.w(TAG, "Cannot prepare VPN: no config file selected.")
-                setControlMenuClickable(true)
-                return@launch
             }
+            Log.w(TAG, "Cannot prepare VPN: no config file selected.")
+            setControlMenuClickable(true)
+            return
+        }
+        
+        // Check VPN permission and launch immediately
+        viewModelScope.launch {
             val vpnIntent = VpnService.prepare(application)
             if (vpnIntent != null) {
                 vpnPrepareLauncher.launch(vpnIntent)

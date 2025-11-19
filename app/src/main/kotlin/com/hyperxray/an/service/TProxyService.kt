@@ -132,6 +132,11 @@ class TProxyService : VpnService() {
     @Volatile
     private var socks5ReadinessChecked = false
     private var socks5ReadinessJob: Job? = null
+    
+    // TProxy restart throttling - limit restarts to once per 6 hours
+    @Volatile
+    private var lastTProxyRestartTime: Long = 0L
+    private val TPROXY_RESTART_INTERVAL_MS = 6L * 60L * 60L * 1000L // 6 hours
 
     override fun onCreate() {
         super.onCreate()
@@ -1114,9 +1119,14 @@ class TProxyService : VpnService() {
             // Set callback to reload TProxy when configuration changes
             optimizer.onConfigurationApplied = { config, needsReload ->
                 if (needsReload) {
-                    Log.i(TAG, "AI optimizer applied new configuration, reloading TProxy...")
-                    // Reload TProxy configuration by recreating the config file and restarting
-                    serviceScope.launch {
+                    // Check if enough time has passed since last restart (6 hours minimum)
+                    val currentTime = System.currentTimeMillis()
+                    val timeSinceLastRestart = currentTime - lastTProxyRestartTime
+                    
+                    if (timeSinceLastRestart >= TPROXY_RESTART_INTERVAL_MS) {
+                        Log.i(TAG, "AI optimizer applied new configuration, reloading TProxy...")
+                        // Reload TProxy configuration by recreating the config file and restarting
+                        serviceScope.launch {
                         try {
                             // Check if we're stopping before proceeding
                             if (isStopping) {
@@ -1193,6 +1203,8 @@ class TProxyService : VpnService() {
                                 // The only risk is if the file descriptor is closed, but we validate it was
                                 // not null before use, and TProxyStartService will handle invalid fd
                                 TProxyStartService(tproxyFile.absolutePath, fd)
+                                // Update last restart time after successful restart
+                                lastTProxyRestartTime = System.currentTimeMillis()
                                 Log.i(TAG, "TProxy service restarted with AI-optimized configuration")
                             } catch (e: Exception) {
                                 Log.e(TAG, "Error restarting TProxy service: ${e.message}", e)
@@ -1201,6 +1213,11 @@ class TProxyService : VpnService() {
                         } catch (e: Exception) {
                             Log.e(TAG, "Error updating TProxy configuration", e)
                         }
+                        }
+                    } else {
+                        val remainingHours = (TPROXY_RESTART_INTERVAL_MS - timeSinceLastRestart) / (60L * 60L * 1000L)
+                        Log.i(TAG, "TProxy restart throttled: Only ${remainingHours}h since last restart (minimum 6h). " +
+                                "Skipping restart for now. Config updated but restart deferred.")
                     }
                 }
             }

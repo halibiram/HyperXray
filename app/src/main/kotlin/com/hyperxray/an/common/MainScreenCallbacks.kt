@@ -108,11 +108,18 @@ fun rememberMainScreenCallbacks(
     }
 
     val onSwitchVpnService: () -> Unit = {
-        logViewModel.clearLogs()
+        // Immediately disable button for instant UI feedback
+        mainViewModel.setControlMenuClickable(false)
+        
+        // Clear logs asynchronously to not block UI
+        scope.launch {
+            logViewModel.clearLogs()
+        }
+        
+        // Handle connect/disconnect immediately
         if (mainViewModel.isServiceEnabled.value) {
             mainViewModel.stopTProxyService()
         } else {
-            mainViewModel.setControlMenuClickable(false)
             if (mainViewModel.settingsState.value.switches.disableVpn) {
                 mainViewModel.startTProxyService(TProxyService.ACTION_START)
             } else {
