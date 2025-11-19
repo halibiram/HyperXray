@@ -64,8 +64,8 @@ class TProxyAiOptimizer(
     
     // Configuration bounds (safe ranges)
     private val configBounds = ConfigBounds(
-        mtuMin = 1280,
-        mtuMax = 9000,
+        mtuMin = 1380,
+        mtuMax = 1500,
         taskStackMin = 16384,
         taskStackMax = 262144,
         tcpBufferMin = 8192,
@@ -475,8 +475,9 @@ class TProxyAiOptimizer(
         val current = getCurrentConfig()
         
         // Apply recommendations with bounds checking
+        // Smaller step size (50 bytes) for 1380-1500 range
         val newMtu = clamp(
-            current.mtu + (recommendation[0] * 500),
+            current.mtu + (recommendation[0] * 50),
             configBounds.mtuMin,
             configBounds.mtuMax
         )

@@ -55,8 +55,8 @@ def generate_data(n=10000):
     X[:, 6] = X[:, 6] * 100.0   # Downlink (0-100 Mbps normalized)
     X[:, 7] = X[:, 7] * 1000.0  # Goroutines (0-1000)
     X[:, 8] = X[:, 8] * 1.0     # Memory (0-1GB normalized)
-    X[:, 9] = (X[:, 9] * (9000 - 1280) + 1280) / \
-        9000.0  # Current MTU (normalized)
+    X[:, 9] = (X[:, 9] * (1500 - 1380) + 1380) / \
+        1500.0  # Current MTU (normalized, range: 1380-1500)
     X[:, 10] = (X[:, 10] * (65432 - 8192) + 8192) / \
         65432.0  # Current buffer (normalized)
     X[:, 11] = (X[:, 11] * (30000 - 1000) + 1000) / \

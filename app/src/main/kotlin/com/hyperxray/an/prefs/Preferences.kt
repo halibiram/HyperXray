@@ -182,7 +182,7 @@ class Preferences(context: Context) {
         }
 
     val tunnelMtu: Int
-        get() = 8500
+        get() = 1500
 
     val tunnelIpv4Address: String
         get() = "198.18.0.1"
@@ -201,7 +201,7 @@ class Preferences(context: Context) {
 
     // hev-socks5-tunnel Maximum Performance Settings
     var tunnelMtuCustom: Int
-        get() = getPrefData("TunnelMtuCustom").first?.toIntOrNull() ?: 8500
+        get() = getPrefData("TunnelMtuCustom").first?.toIntOrNull() ?: 1500
         set(value) {
             setValueInProvider("TunnelMtuCustom", value.toString())
         }

@@ -1,7 +1,12 @@
 package com.hyperxray.an.ui.screens.log
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,16 +16,22 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -30,6 +41,7 @@ import com.hyperxray.an.ui.theme.LogColors
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LogDetailSheet(logEntry: String) {
+    val context = LocalContext.current
     val logLevel = try { parseLogLevel(logEntry) } catch (e: Exception) { LogLevel.UNKNOWN }
     val connectionType = try { parseConnectionType(logEntry) } catch (e: Exception) { ConnectionType.UNKNOWN }
     val (timestamp, message) = try { parseLogEntry(logEntry) } catch (e: Exception) { Pair("", logEntry) }
@@ -38,6 +50,14 @@ fun LogDetailSheet(logEntry: String) {
     val isDns = try { isDnsLog(logEntry) } catch (e: Exception) { false }
     val dnsQuery = try { extractDnsQuery(logEntry) } catch (e: Exception) { null }
     val scrollState = rememberScrollState()
+    
+    // Copy to clipboard function
+    val copyToClipboard: () -> Unit = {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = ClipData.newPlainText("Log Message", logEntry)
+        clipboard.setPrimaryClip(clip)
+        Toast.makeText(context, "Log message copied to clipboard", Toast.LENGTH_SHORT).show()
+    }
     
     Column(
         modifier = Modifier
@@ -107,13 +127,31 @@ fun LogDetailSheet(logEntry: String) {
         Column(
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(
-                text = "Full Message",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Full Message",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                Button(
+                    onClick = copyToClipboard,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copy",
+                        modifier = Modifier.padding(end = 4.dp)
+                    )
+                    Text("Copy")
+                }
+            }
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(

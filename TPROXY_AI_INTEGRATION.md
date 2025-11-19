@@ -31,7 +31,7 @@ AI-powered TProxy optimizer has been integrated into HyperXray to dynamically op
 
 The AI optimizer adjusts the following TProxy parameters:
 
-- **MTU** (`tunnelMtuCustom`): Maximum Transmission Unit (1280-9000)
+- **MTU** (`tunnelMtuCustom`): Maximum Transmission Unit (1380-1500)
 - **Task Stack Size** (`taskStackSizeCustom`): Thread stack size (16KB-256KB)
 - **TCP Buffer Size** (`tcpBufferSize`): TCP buffer size (8KB-65KB)
 - **File Descriptor Limit** (`limitNofile`): Maximum open files (1024-1M)
@@ -88,7 +88,7 @@ The optimizer aims to:
 ## Safety Constraints
 
 Configuration changes are validated against safe bounds:
-- MTU: 1280-9000 bytes
+- MTU: 1380-1500 bytes
 - Task Stack: 16KB-256KB
 - TCP Buffer: 8KB-65KB
 - File Descriptors: 1024-1M

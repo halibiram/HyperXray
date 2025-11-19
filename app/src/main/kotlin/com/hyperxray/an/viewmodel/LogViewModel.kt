@@ -255,10 +255,14 @@ class LogViewModel(application: Application) :
     fun clearLogs() {
         viewModelScope.launch(Dispatchers.Default) {
             logBuffer.clear()
+            // Also clear the log file on disk
+            withContext(Dispatchers.IO) {
+                logFileManager.clearLogs()
+            }
             withContext(Dispatchers.Main) {
                 _filteredEntries.value = emptyList()
             }
-            Log.d(TAG, "Logs cleared.")
+            Log.d(TAG, "Logs cleared from memory and disk.")
         }
     }
 
