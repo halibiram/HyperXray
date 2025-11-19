@@ -280,7 +280,9 @@ fun DashboardScreen(
                 onToggleConnection = onSwitchVpnService,
                 uptime = coreStats.uptime,
                 playIconRes = resources.drawablePlay,
-                pauseIconRes = resources.drawablePause
+                pauseIconRes = resources.drawablePause,
+                uplinkThroughput = coreStats.uplinkThroughput,
+                downlinkThroughput = coreStats.downlinkThroughput
             )
         }
 
