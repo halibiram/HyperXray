@@ -25,3 +25,13 @@ HTTPCUSTOM_JNI_INTERFACE.md
 HTTPCUSTOM_SOCKS5_INTEGRATION.md
 HTTPCUSTOM_SOCKS_PROXY_REPORT.md
 HTTP_CUSTOM_SOURCE_CODE_REQUIREMENTS.md
+
+# HTTP Custom SOCKS5 wrapper integration
+app/src/main/jni/httpcustom-socks5-wrapper/
+
+# Analysis and decompilation scripts
+analyze_httpcustom_jni.py
+analyze_v2ray_connection.sh
+decompile_libsocks2tun.py
+decompile_libsocks2tun_python.py
+libsocks2tun_decompiled/
