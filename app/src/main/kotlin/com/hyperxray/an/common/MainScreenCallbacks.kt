@@ -118,8 +118,11 @@ fun rememberMainScreenCallbacks(
         
         // Handle connect/disconnect immediately
         if (mainViewModel.isServiceEnabled.value) {
+            mainViewModel.setConnectionStateDisconnecting()
             mainViewModel.stopTProxyService()
         } else {
+            // Start connection process with stages
+            mainViewModel.startConnectionProcess()
             if (mainViewModel.settingsState.value.switches.disableVpn) {
                 mainViewModel.startTProxyService(TProxyService.ACTION_START)
             } else {

@@ -78,6 +78,9 @@ val MainViewModel.dashboardViewModel: DashboardViewModel
             override val controlMenuClickable: StateFlow<Boolean> =
                 mainViewModel.controlMenuClickable
             
+            override val connectionState: StateFlow<com.hyperxray.an.feature.dashboard.ConnectionState> =
+                mainViewModel.connectionState
+            
             override fun updateCoreStats() {
                 mainViewModel.viewModelScope.launch {
                     mainViewModel.updateCoreStats()

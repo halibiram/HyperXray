@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -77,6 +78,7 @@ fun DashboardScreen(
     val telemetryState by viewModel.telemetryState.collectAsState()
     val isServiceEnabled by viewModel.isServiceEnabled.collectAsState()
     val controlMenuClickable by viewModel.controlMenuClickable.collectAsState()
+    val connectionState by viewModel.connectionState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     LaunchedEffect(Unit) {
@@ -135,18 +137,20 @@ fun DashboardScreen(
     val horizontalPadding = if (isTablet) 32.dp else 16.dp
     val cardSpacing = if (isTablet) 24.dp else 16.dp
 
-    LazyColumn(
-        state = lazyListState,
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = horizontalPadding),
-        contentPadding = PaddingValues(
-            top = 16.dp,
-            bottom = 24.dp
-        ),
-        verticalArrangement = Arrangement.spacedBy(cardSpacing),
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = lazyListState,
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = horizontalPadding),
+            contentPadding = PaddingValues(
+                top = 16.dp,
+                bottom = 24.dp
+            ),
+            verticalArrangement = Arrangement.spacedBy(cardSpacing),
+            userScrollEnabled = isServiceEnabled,
+        ) {
         // Enhanced Modern Header Section with Glassmorphism
         item(key = "header") {
             Box(
@@ -271,7 +275,7 @@ fun DashboardScreen(
         // Connection Status Hero Card
         item(key = "connection_status") {
             ConnectionStatusCard(
-                isConnected = isServiceEnabled,
+                connectionState = connectionState,
                 isClickable = controlMenuClickable,
                 onToggleConnection = onSwitchVpnService,
                 uptime = coreStats.uptime,
@@ -282,12 +286,18 @@ fun DashboardScreen(
 
         // Quick Stats Summary - Enhanced with better spacing
         item(key = "quick_stats") {
-            QuickStatsCard(
-                uplink = coreStats.uplink,
-                downlink = coreStats.downlink,
-                uplinkThroughput = coreStats.uplinkThroughput,
-                downlinkThroughput = coreStats.downlinkThroughput
-            )
+            AnimatedVisibility(
+                visible = isServiceEnabled,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                QuickStatsCard(
+                    uplink = coreStats.uplink,
+                    downlink = coreStats.downlink,
+                    uplinkThroughput = coreStats.uplinkThroughput,
+                    downlinkThroughput = coreStats.downlinkThroughput
+                )
+            }
         }
         
         // Summary Stats Row - Enhanced with Modern Glass Cards
@@ -759,12 +769,17 @@ fun DashboardScreen(
         }
 
     item(key = "traffic") {
-        AnimatedStatCard(
-            title = "Traffic",
-            iconRes = resources.drawableCloudDownload,
-            gradientColors = trafficGradient,
-            animationDelay = 100,
-            content = {
+        AnimatedVisibility(
+            visible = isServiceEnabled,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically()
+        ) {
+            AnimatedStatCard(
+                title = "Traffic",
+                iconRes = resources.drawableCloudDownload,
+                gradientColors = trafficGradient,
+                animationDelay = 100,
+                content = {
                 StatRow(
                     label = stringResource(id = resources.stringStatsUplink),
                     value = formatBytes(coreStats.uplink)
@@ -783,15 +798,21 @@ fun DashboardScreen(
                 )
             }
         )
+        }
     }
 
     item(key = "system_stats") {
-        AnimatedStatCard(
-            title = "System Stats",
-            iconRes = resources.drawableDashboard,
-            gradientColors = systemGradient,
-            animationDelay = 200,
-            content = {
+        AnimatedVisibility(
+            visible = isServiceEnabled,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically()
+        ) {
+            AnimatedStatCard(
+                title = "System Stats",
+                iconRes = resources.drawableDashboard,
+                gradientColors = systemGradient,
+                animationDelay = 200,
+                content = {
                 StatRow(
                     label = stringResource(id = resources.stringStatsNumGoroutine),
                     value = formatNumber(coreStats.numGoroutine.toLong())
@@ -806,15 +827,21 @@ fun DashboardScreen(
                 )
             }
         )
+        }
     }
 
     item(key = "memory_stats") {
-        AnimatedStatCard(
-            title = "Memory Stats",
-            iconRes = resources.drawableSettings,
-            gradientColors = memoryGradient,
-            animationDelay = 300,
-            content = {
+        AnimatedVisibility(
+            visible = isServiceEnabled,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically()
+        ) {
+            AnimatedStatCard(
+                title = "Memory Stats",
+                iconRes = resources.drawableSettings,
+                gradientColors = memoryGradient,
+                animationDelay = 300,
+                content = {
                 StatRow(
                     label = stringResource(id = resources.stringStatsAlloc),
                     value = formatBytes(coreStats.alloc)
@@ -845,15 +872,21 @@ fun DashboardScreen(
                 )
             }
         )
+        }
     }
 
     item(key = "ai_telemetry") {
-        AnimatedStatCard(
-            title = "AI Telemetry",
-            iconRes = resources.drawableOptimizer,
-            gradientColors = telemetryGradient,
-            animationDelay = 400,
-            content = {
+        AnimatedVisibility(
+            visible = isServiceEnabled,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically()
+        ) {
+            AnimatedStatCard(
+                title = "AI Telemetry",
+                iconRes = resources.drawableOptimizer,
+                gradientColors = telemetryGradient,
+                animationDelay = 400,
+                content = {
                 if (telemetryState != null) {
                     StatRow(
                         label = "Avg Throughput",
@@ -885,6 +918,8 @@ fun DashboardScreen(
                 }
             }
         )
+        }
+    }
     }
     }
 }

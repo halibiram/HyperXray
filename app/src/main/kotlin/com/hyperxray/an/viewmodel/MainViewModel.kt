@@ -201,6 +201,11 @@ class MainViewModel(application: Application) :
 
     private val _isServiceEnabled = MutableStateFlow(false)
     val isServiceEnabled: StateFlow<Boolean> = _isServiceEnabled.asStateFlow()
+    
+    private val _connectionState = MutableStateFlow<com.hyperxray.an.feature.dashboard.ConnectionState>(
+        com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+    )
+    val connectionState: StateFlow<com.hyperxray.an.feature.dashboard.ConnectionState> = _connectionState.asStateFlow()
 
     private val _uiEvent = Channel<MainViewUiEvent>(Channel.BUFFERED)
     val uiEvent = _uiEvent.receiveAsFlow()
@@ -230,6 +235,9 @@ class MainViewModel(application: Application) :
             Log.d(TAG, "Service started")
             setServiceEnabled(true)
             setControlMenuClickable(true)
+            // Don't change connection state here - let startConnectionProcess handle it
+            // This prevents race conditions where startReceiver fires before startConnectionProcess
+            // or while startConnectionProcess is still in INITIALIZING stage
         }
     }
 
@@ -238,7 +246,15 @@ class MainViewModel(application: Application) :
             Log.d(TAG, "Service stopped")
             setServiceEnabled(false)
             setControlMenuClickable(true)
+            
+            // Only set to Disconnected if not already in Disconnecting state
+            // This allows the disconnection process to complete its stages
+            if (_connectionState.value !is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting) {
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+            }
+            
             _coreStatsState.value = CoreStatsState()
+            _socks5Ready.value = false // Reset SOCKS5 ready state
             // Reset throughput calculation state
             lastUplink = 0L
             lastDownlink = 0L
@@ -260,6 +276,18 @@ class MainViewModel(application: Application) :
             // Also stop the service state since it failed to start
             setServiceEnabled(false)
             setControlMenuClickable(true)
+            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+        }
+    }
+
+    // Track connection stage states
+    private val _socks5Ready = MutableStateFlow(false)
+    private val socks5Ready: StateFlow<Boolean> = _socks5Ready.asStateFlow()
+
+    private val socks5ReadyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            Log.d(TAG, "SOCKS5 ready")
+            _socks5Ready.value = true
         }
     }
 
@@ -268,7 +296,14 @@ class MainViewModel(application: Application) :
         // Register broadcast receivers in init to ensure they're always registered
         registerTProxyServiceReceivers()
         viewModelScope.launch(Dispatchers.IO) {
-            _isServiceEnabled.value = isServiceRunning(application, TProxyService::class.java)
+            val isRunning = isServiceRunning(application, TProxyService::class.java)
+            _isServiceEnabled.value = isRunning
+            // Set initial connection state based on service status
+            _connectionState.value = if (isRunning) {
+                com.hyperxray.an.feature.dashboard.ConnectionState.Connected
+            } else {
+                com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+            }
 
             updateSettingsState()
             loadKernelVersion()
@@ -426,6 +461,316 @@ class MainViewModel(application: Application) :
     fun setServiceEnabled(enabled: Boolean) {
         _isServiceEnabled.value = enabled
         prefs.enable = enabled
+    }
+    
+    fun setConnectionStateDisconnecting() {
+        // Start disconnection process with initial stage
+        startDisconnectionProcess()
+    }
+    
+    /**
+     * Starts the disconnection process with real-time stage checking.
+     * Each stage has a minimum display time so users can see the progress.
+     */
+    fun startDisconnectionProcess() {
+        viewModelScope.launch {
+            // Only start if we're not already disconnected
+            if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected) {
+                return@launch
+            }
+            
+            val minStageDisplayTime = 800L // Minimum time to show each stage (800ms)
+            val checkInterval = 100L // Check every 100ms
+            
+            // Stage 1: STOPPING_XRAY - Stopping Xray core
+            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
+                stage = com.hyperxray.an.feature.dashboard.DisconnectionStage.STOPPING_XRAY,
+                progress = 0.2f
+            )
+            
+            // Show this stage for minimum time
+            var elapsed = 0L
+            while (elapsed < minStageDisplayTime) {
+                kotlinx.coroutines.delay(checkInterval)
+                elapsed += checkInterval
+                
+                // Check if already disconnected (shouldn't happen, but safety check)
+                if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected) {
+                    return@launch
+                }
+            }
+            
+            // Stage 2: CLOSING_TUNNEL - Closing network tunnel
+            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
+                stage = com.hyperxray.an.feature.dashboard.DisconnectionStage.CLOSING_TUNNEL,
+                progress = 0.5f
+            )
+            
+            // Show this stage for minimum time
+            elapsed = 0L
+            while (elapsed < minStageDisplayTime) {
+                kotlinx.coroutines.delay(checkInterval)
+                elapsed += checkInterval
+                
+                if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected) {
+                    return@launch
+                }
+            }
+            
+            // Stage 3: STOPPING_VPN - Closing VPN interface
+            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
+                stage = com.hyperxray.an.feature.dashboard.DisconnectionStage.STOPPING_VPN,
+                progress = 0.7f
+            )
+            
+            // Show this stage for minimum time, or wait for service to stop
+            elapsed = 0L
+            val maxWait = 3000L // Max 3 seconds for VPN stop
+            while (elapsed < minStageDisplayTime || (_isServiceEnabled.value && elapsed < maxWait)) {
+                kotlinx.coroutines.delay(checkInterval)
+                elapsed += checkInterval
+                
+                if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected) {
+                    return@launch
+                }
+            }
+            
+            // Stage 4: CLEANING_UP - Releasing resources
+            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
+                stage = com.hyperxray.an.feature.dashboard.DisconnectionStage.CLEANING_UP,
+                progress = 0.9f
+            )
+            
+            // Show final cleanup stage and wait for service to completely stop
+            elapsed = 0L
+            val maxWaitForService = 10000L // Max 10 seconds for service to stop
+            var serviceStopped = false
+            
+            while (elapsed < minStageDisplayTime || !serviceStopped) {
+                kotlinx.coroutines.delay(checkInterval)
+                elapsed += checkInterval
+                
+                // Check if already disconnected (shouldn't happen, but safety check)
+                if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected) {
+                    return@launch
+                }
+                
+                // Check if service is completely stopped
+                if (!serviceStopped) {
+                    serviceStopped = !MainViewModel.isServiceRunning(application, TProxyService::class.java)
+                    if (serviceStopped && elapsed < minStageDisplayTime) {
+                        // Service stopped but we still need to show the stage for minimum time
+                        continue
+                    }
+                }
+                
+                // If service stopped and minimum time passed, we can proceed
+                if (serviceStopped && elapsed >= minStageDisplayTime) {
+                    break
+                }
+                
+                // Timeout check
+                if (elapsed >= maxWaitForService) {
+                    // Service might still be running, but we've waited long enough
+                    // Check one more time
+                    serviceStopped = !MainViewModel.isServiceRunning(application, TProxyService::class.java)
+                    break
+                }
+            }
+            
+            // Final state: DISCONNECTED (only after service is confirmed stopped)
+            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+        }
+    }
+    
+    /**
+     * Starts the connection process with real-time stage checking.
+     * Each stage waits for actual service state changes instead of timeouts.
+     */
+    fun startConnectionProcess() {
+        viewModelScope.launch {
+            // Only start if we're not already connected
+            if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
+                return@launch
+            }
+            
+            // Reset SOCKS5 ready state
+            _socks5Ready.value = false
+            
+            // Stage 1: INITIALIZING - Service start command sent
+            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connecting(
+                stage = com.hyperxray.an.feature.dashboard.ConnectionStage.INITIALIZING,
+                progress = 0.1f
+            )
+            
+            // Wait for VPN service to start (check _isServiceEnabled)
+            val checkInterval = 200L // Check every 200ms
+            var maxWait = 10000L // 10 seconds max for VPN start
+            var elapsed = 0L
+            
+            while (elapsed < maxWait) {
+                kotlinx.coroutines.delay(checkInterval)
+                elapsed += checkInterval
+                
+                // Check if already connected
+                if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
+                    return@launch
+                }
+                
+                // Check if service is disabled (error occurred)
+                if (!_isServiceEnabled.value && elapsed > 1000) {
+                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+                    return@launch
+                }
+                
+                // Check if VPN service started
+                if (_isServiceEnabled.value) {
+                    break // VPN started, move to next stage
+                }
+            }
+            
+            // If timeout and service still not enabled, show error
+            if (!_isServiceEnabled.value) {
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+                return@launch
+            }
+            
+            // Check if already connected
+            if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
+                return@launch
+            }
+            
+            // Stage 2: STARTING_VPN - VPN service is starting
+            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connecting(
+                stage = com.hyperxray.an.feature.dashboard.ConnectionStage.STARTING_VPN,
+                progress = 0.3f
+            )
+            
+            // VPN is already started (we checked above), move to Xray stage
+            // Small delay to show the stage
+            kotlinx.coroutines.delay(300)
+            
+            // Check if already connected
+            if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
+                return@launch
+            }
+            
+            // Stage 3: STARTING_XRAY - Xray service is starting
+            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connecting(
+                stage = com.hyperxray.an.feature.dashboard.ConnectionStage.STARTING_XRAY,
+                progress = 0.5f
+            )
+            
+            // Wait for Xray to start (service is enabled, but Xray might need time)
+            // We'll wait for SOCKS5 ready as indicator that Xray is fully started
+            elapsed = 0L
+            maxWait = 15000L // 15 seconds max for Xray start
+            
+            while (elapsed < maxWait) {
+                kotlinx.coroutines.delay(checkInterval)
+                elapsed += checkInterval
+                
+                // Check if already connected
+                if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
+                    return@launch
+                }
+                
+                // Check if service is disabled
+                if (!_isServiceEnabled.value) {
+                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+                    return@launch
+                }
+                
+                // Check if SOCKS5 is ready (indicates Xray is started)
+                if (_socks5Ready.value) {
+                    break // Xray started, move to next stage
+                }
+            }
+            
+            // Check if already connected
+            if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
+                return@launch
+            }
+            
+            // Stage 4: ESTABLISHING - Connection is being established
+            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connecting(
+                stage = com.hyperxray.an.feature.dashboard.ConnectionStage.ESTABLISHING,
+                progress = 0.7f
+            )
+            
+            // SOCKS5 is ready, connection is being established
+            // Small delay to show the stage
+            kotlinx.coroutines.delay(500)
+            
+            // Check if already connected
+            if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
+                return@launch
+            }
+            
+            // Stage 5: VERIFYING - Wait for real data to arrive
+            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connecting(
+                stage = com.hyperxray.an.feature.dashboard.ConnectionStage.VERIFYING,
+                progress = 0.9f
+            )
+            
+            // Wait for real connection data (uptime > 0 or throughput > 0)
+            // No timeout - wait until data arrives or service stops
+            elapsed = 0L
+            maxWait = 30000L // 30 seconds max wait for data
+            val progressCheckInterval = 1000L // Update progress every second
+            
+            while (elapsed < maxWait) {
+                kotlinx.coroutines.delay(checkInterval)
+                elapsed += checkInterval
+                
+                // Check if already marked as connected
+                if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
+                    return@launch
+                }
+                
+                // Check if service is still enabled
+                if (!_isServiceEnabled.value) {
+                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+                    return@launch
+                }
+                
+                // Check for real connection data
+                val stats = _coreStatsState.value
+                val hasRealConnection = stats.uptime > 0 || 
+                                       stats.uplinkThroughput > 0 || 
+                                       stats.downlinkThroughput > 0 ||
+                                       stats.uplink > 0 || 
+                                       stats.downlink > 0
+                
+                if (hasRealConnection) {
+                    // Real data is flowing, connection is established
+                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connected
+                    return@launch
+                }
+                
+                // Update progress periodically (slowly increase to 0.98)
+                if (elapsed % progressCheckInterval < checkInterval) {
+                    val progress = 0.9f + (elapsed.toFloat() / maxWait.toFloat()) * 0.08f
+                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connecting(
+                        stage = com.hyperxray.an.feature.dashboard.ConnectionStage.VERIFYING,
+                        progress = progress.coerceAtMost(0.98f)
+                    )
+                }
+            }
+            
+            // If still no data after timeout, check one more time
+            val finalStats = _coreStatsState.value
+            val hasFinalConnection = finalStats.uptime > 0 || 
+                                     finalStats.uplinkThroughput > 0 || 
+                                     finalStats.downlinkThroughput > 0 ||
+                                     finalStats.uplink > 0 || 
+                                     finalStats.downlink > 0
+            
+            if (hasFinalConnection && _isServiceEnabled.value) {
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connected
+            }
+            // Otherwise keep showing VERIFYING - updateCoreStats will update when data arrives
+        }
     }
 
     fun clearCompressedBackupData() {
@@ -776,7 +1121,7 @@ class MainViewModel(application: Application) :
         lastDownlink = newDownlink
         lastStatsTime = now
 
-        _coreStatsState.value = CoreStatsState(
+        val newStats = CoreStatsState(
             uplink = newUplink,
             downlink = newDownlink,
             uplinkThroughput = uplinkThroughput,
@@ -792,6 +1137,29 @@ class MainViewModel(application: Application) :
             pauseTotalNs = stats?.pauseTotalNs ?: currentState.pauseTotalNs,
             uptime = stats?.uptime ?: currentState.uptime
         )
+        _coreStatsState.value = newStats
+        
+        // Only update to Connected if we're in VERIFYING stage and real data has arrived
+        // Don't update during INITIALIZING, STARTING_VPN, STARTING_XRAY, or ESTABLISHING stages
+        val currentConnectionState = _connectionState.value
+        if (currentConnectionState is com.hyperxray.an.feature.dashboard.ConnectionState.Connecting) {
+            // Only proceed if we're in VERIFYING stage
+            if (currentConnectionState.stage == com.hyperxray.an.feature.dashboard.ConnectionStage.VERIFYING) {
+                val hasRealConnection = newStats.uptime > 0 || 
+                                       newStats.uplinkThroughput > 0 || 
+                                       newStats.downlinkThroughput > 0 ||
+                                       newStats.uplink > 0 || 
+                                       newStats.downlink > 0
+                
+                if (hasRealConnection && _isServiceEnabled.value) {
+                    Log.d(TAG, "Real connection data detected in VERIFYING stage, updating to Connected state")
+                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connected
+                }
+            }
+            // For other stages (INITIALIZING, STARTING_VPN, STARTING_XRAY, ESTABLISHING), 
+            // don't update to Connected - let startConnectionProcess handle the progression
+        }
+        
         Log.d(TAG, "Core stats updated - Uplink: ${formatBytes(newUplink)}, Downlink: ${formatBytes(newDownlink)}, Uplink Throughput: ${formatThroughput(uplinkThroughput)}, Downlink Throughput: ${formatThroughput(downlinkThroughput)}")
     }
 
@@ -1709,6 +2077,18 @@ class MainViewModel(application: Application) :
                 } else {
                     @Suppress("UnspecifiedRegisterReceiverFlag")
                     application.registerReceiver(errorReceiver, errorFilter)
+                }
+
+                val socks5ReadyFilter = IntentFilter(TProxyService.ACTION_SOCKS5_READY)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    application.registerReceiver(
+                        socks5ReadyReceiver,
+                        socks5ReadyFilter,
+                        Context.RECEIVER_NOT_EXPORTED
+                    )
+                } else {
+                    @Suppress("UnspecifiedRegisterReceiverFlag")
+                    application.registerReceiver(socks5ReadyReceiver, socks5ReadyFilter)
                 }
                 
                 receiversRegistered = true

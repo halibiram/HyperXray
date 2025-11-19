@@ -61,6 +61,7 @@ interface DashboardViewModel {
     val telemetryState: StateFlow<AggregatedTelemetry?>
     val isServiceEnabled: StateFlow<Boolean>
     val controlMenuClickable: StateFlow<Boolean>
+    val connectionState: StateFlow<ConnectionState>
     
     fun updateCoreStats()
     fun updateTelemetryStats()
