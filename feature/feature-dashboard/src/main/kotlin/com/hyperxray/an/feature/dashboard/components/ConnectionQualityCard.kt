@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * A card component displaying connection quality metrics.
@@ -99,27 +101,32 @@ fun ConnectionQualityCard(
         )
     }
 
-    Card(
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .scale(cardScale)
             .alpha(cardAlpha)
-            .clip(RoundedCornerShape(24.dp)),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
-        ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = 8.dp,
-            pressedElevation = 12.dp,
-            hoveredElevation = 10.dp
-        )
+            .clip(RoundedCornerShape(24.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF000000).copy(alpha = 0.7f), // Obsidian glass
+                        Color(0xFF0A0A0A).copy(alpha = 0.5f)
+                    )
+                )
+            )
+            .border(
+                width = 1.5.dp,
+                brush = Brush.linearGradient(qualityGradient),
+                shape = RoundedCornerShape(24.dp)
+            )
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(
                     Brush.verticalGradient(
-                        colors = qualityGradient.map { it.copy(alpha = 0.1f) }
+                        colors = qualityGradient.map { it.copy(alpha = 0.12f) } // Enhanced neon tint
                     )
                 )
         ) {
@@ -136,9 +143,10 @@ fun ConnectionQualityCard(
                     Text(
                         text = "Connection Quality",
                         style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.3).sp
                         ),
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = Color.White
                     )
                     
                     // Quality Badge

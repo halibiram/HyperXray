@@ -5,6 +5,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +36,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
 /**
@@ -87,27 +89,32 @@ fun AnimatedStatCard(
         }
     }
 
-    Card(
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .scale(scale)
             .alpha(alpha)
-            .clip(RoundedCornerShape(28.dp)),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
-        ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = 10.dp,
-            pressedElevation = 14.dp,
-            hoveredElevation = 12.dp
-        )
+            .clip(RoundedCornerShape(28.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF000000).copy(alpha = 0.7f), // Obsidian glass
+                        Color(0xFF0A0A0A).copy(alpha = 0.5f)
+                    )
+                )
+            )
+            .border(
+                width = 1.5.dp,
+                brush = Brush.linearGradient(gradientColors),
+                shape = RoundedCornerShape(28.dp)
+            )
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(
                     Brush.verticalGradient(
-                        colors = gradientColors.map { it.copy(alpha = 0.08f) }
+                        colors = gradientColors.map { it.copy(alpha = 0.12f) } // Enhanced neon tint
                     )
                 )
         ) {
@@ -146,9 +153,10 @@ fun AnimatedStatCard(
                         Text(
                             text = title,
                             style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = (-0.3).sp
                             ),
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = Color.White // High contrast on obsidian
                         )
                     }
                 }

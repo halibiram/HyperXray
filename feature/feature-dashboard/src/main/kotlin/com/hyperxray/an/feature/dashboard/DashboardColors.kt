@@ -18,27 +18,36 @@ object DashboardColors {
         val isDark = isSystemInDarkTheme()
         return if (isDark) {
             listOf(
-                Color(0xFF22D3EE), // Brighter cyan
-                Color(0xFF3B82F6), // Blue
-                Color(0xFF6366F1)  // Indigo
+                Color(0xFF00E5FF), // Neon Cyan - High contrast
+                Color(0xFF2979FF), // Electric Blue
+                Color(0xFF651FFF)  // Deep Purple
             )
         } else {
             listOf(
-                Color(0xFF0891B2), // Darker cyan for better contrast
-                Color(0xFF2563EB), // Darker blue for better contrast
-                Color(0xFF5B5FEF)  // Darker indigo for better contrast
+                Color(0xFF0891B2),
+                Color(0xFF2563EB),
+                Color(0xFF5B5FEF)
             )
         }
     }
     
     @Composable
     fun trafficGradient(): List<Color> {
-        val colorScheme = MaterialTheme.colorScheme
-        return listOf(
-            colorScheme.primary,
-            colorScheme.secondary,
-            colorScheme.tertiary
-        )
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) {
+            listOf(
+                Color(0xFF00E5FF), // Neon Cyan - Bright for high contrast
+                Color(0xFFD500F9), // Neon Purple
+                Color(0xFFFF00E5)  // Neon Magenta
+            )
+        } else {
+            val colorScheme = MaterialTheme.colorScheme
+            listOf(
+                colorScheme.primary,
+                colorScheme.secondary,
+                colorScheme.tertiary
+            )
+        }
     }
     
     @Composable
@@ -46,15 +55,15 @@ object DashboardColors {
         val isDark = isSystemInDarkTheme()
         return if (isDark) {
             listOf(
-                Color(0xFF34D399), // Brighter green
-                Color(0xFF10B981), // Green
-                Color(0xFF059669)  // Darker green
+                Color(0xFF00E676), // Neon Green
+                Color(0xFF00C853), // Vibrant Green
+                Color(0xFF64DD17)  // Lime Green
             )
         } else {
             listOf(
-                Color(0xFF059669), // Darker green for better contrast
-                Color(0xFF047857), // Darker green
-                Color(0xFF065F46)  // Darkest green for maximum contrast
+                Color(0xFF059669),
+                Color(0xFF047857),
+                Color(0xFF065F46)
             )
         }
     }
@@ -64,15 +73,15 @@ object DashboardColors {
         val isDark = isSystemInDarkTheme()
         return if (isDark) {
             listOf(
-                Color(0xFFFBBF24), // Brighter amber
-                Color(0xFFF59E0B), // Amber
-                Color(0xFFEF4444)  // Red
+                Color(0xFFFFD600), // Neon Yellow
+                Color(0xFFFFAB00), // Amber
+                Color(0xFFFF3D00)  // Deep Orange
             )
         } else {
             listOf(
-                Color(0xFFF59E0B), // Amber
-                Color(0xFFEF4444), // Red
-                Color(0xFFDC2626)  // Darker red
+                Color(0xFFF59E0B),
+                Color(0xFFEF4444),
+                Color(0xFFDC2626)
             )
         }
     }
@@ -82,15 +91,15 @@ object DashboardColors {
         val isDark = isSystemInDarkTheme()
         return if (isDark) {
             listOf(
-                Color(0xFFF472B6), // Brighter pink
-                Color(0xFFEC4899), // Pink
-                Color(0xFFDB2777)  // Darker pink
+                Color(0xFFFF4081), // Neon Pink
+                Color(0xFFF50057), // Deep Pink
+                Color(0xFFC51162)  // Dark Pink
             )
         } else {
             listOf(
-                Color(0xFFEC4899), // Pink
-                Color(0xFFDB2777), // Darker pink
-                Color(0xFFBE185D)  // Darkest pink
+                Color(0xFFEC4899),
+                Color(0xFFDB2777),
+                Color(0xFFBE185D)
             )
         }
     }
@@ -116,7 +125,7 @@ object DashboardColors {
     @Composable
     fun connectionActiveColor(): Color {
         val isDark = isSystemInDarkTheme()
-        return if (isDark) Color(0xFF34D399) else Color(0xFF059669) // Darker green for better contrast
+        return if (isDark) Color(0xFF00FF88) else Color(0xFF059669) // Neon green for high contrast on obsidian
     }
 }
 

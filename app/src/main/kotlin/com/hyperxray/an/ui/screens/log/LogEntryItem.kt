@@ -25,6 +25,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import com.hyperxray.an.ui.theme.LogColors
 
 @Composable
@@ -83,28 +86,43 @@ fun LogEntryItem(
         else -> Color.Transparent
     }
     
-    // Use error container color for failed logs, theme-aware colors for DNS, sniffing, SNI logs
-    val cardColor = when {
-        containsFailed -> MaterialTheme.colorScheme.errorContainer
-        isDns -> LogColors.dnsContainerColor() // Theme-aware cyan container
-        isSniffing -> LogColors.sniffingContainerColor() // Theme-aware orange container
-        hasSNI -> MaterialTheme.colorScheme.tertiaryContainer
-        else -> MaterialTheme.colorScheme.surfaceContainerLow
+    // Glassmorphism background colors
+    val glassBackground = when {
+        containsFailed -> listOf(
+            Color(0xFF000000).copy(alpha = 0.7f),
+            Color(0xFF1A0000).copy(alpha = 0.5f)
+        )
+        isDns -> listOf(
+            Color(0xFF000000).copy(alpha = 0.7f),
+            Color(0xFF001A1A).copy(alpha = 0.5f)
+        )
+        isSniffing -> listOf(
+            Color(0xFF000000).copy(alpha = 0.7f),
+            Color(0xFF1A0F00).copy(alpha = 0.5f)
+        )
+        hasSNI -> listOf(
+            Color(0xFF000000).copy(alpha = 0.7f),
+            Color(0xFF0A0A1A).copy(alpha = 0.5f)
+        )
+        else -> listOf(
+            Color(0xFF000000).copy(alpha = 0.6f),
+            Color(0xFF0A0A0A).copy(alpha = 0.4f)
+        )
     }
     
-    Card(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = cardColor
-        ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = 2.dp,
-            pressedElevation = 6.dp,
-            hoveredElevation = 4.dp
-        )
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                Brush.verticalGradient(glassBackground)
+            )
+            .border(
+                width = 1.dp,
+                color = borderColor.copy(alpha = 0.6f),
+                shape = RoundedCornerShape(20.dp)
+            )
+            .clickable(onClick = onClick)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth()
@@ -170,8 +188,10 @@ fun LogEntryItem(
                     if (timestamp.isNotEmpty()) {
                         Text(
                             text = timestamp,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                letterSpacing = 0.1.sp
+                            ),
+                            color = borderColor.copy(alpha = 0.9f),
                             fontWeight = FontWeight.Medium,
                             fontFamily = FontFamily.Monospace
                         )
@@ -183,9 +203,11 @@ fun LogEntryItem(
                 // Log message
                 Text(
                     text = message,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        letterSpacing = 0.1.sp
+                    ),
                     fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = Color(0xFFE0E0E0), // Light gray for better contrast on obsidian
                     lineHeight = 18.sp
                 )
             }

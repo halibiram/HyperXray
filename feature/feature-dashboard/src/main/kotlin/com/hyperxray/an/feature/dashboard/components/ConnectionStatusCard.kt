@@ -16,6 +16,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -56,6 +57,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.hyperxray.an.feature.dashboard.ConnectionState
 import com.hyperxray.an.feature.dashboard.ConnectionStage
 import com.hyperxray.an.feature.dashboard.DisconnectionStage
@@ -111,16 +113,16 @@ fun ConnectionStatusCard(
     
     // Cache gradient colors to avoid recreation
     val connectedGradient = remember { 
-        listOf(Color(0xFF10B981), Color(0xFF059669), Color(0xFF047857))
+        listOf(Color(0xFF00E5FF), Color(0xFF00B8D4), Color(0xFF006064)) // Neon Cyan
     }
     val connectingGradient = remember {
-        listOf(Color(0xFF3B82F6), Color(0xFF2563EB), Color(0xFF1D4ED8))
+        listOf(Color(0xFF2979FF), Color(0xFF2962FF), Color(0xFF0D47A1)) // Electric Blue
     }
     val disconnectedGradient = remember { 
-        listOf(Color(0xFF6B7280), Color(0xFF4B5563), Color(0xFF374151))
+        listOf(Color(0xFF424242), Color(0xFF212121), Color(0xFF000000)) // Dark Gray
     }
     val disconnectingGradient = remember {
-        listOf(Color(0xFFF59E0B), Color(0xFFD97706), Color(0xFFB45309))
+        listOf(Color(0xFFFF00E5), Color(0xFFAA00FF), Color(0xFF4A148C)) // Neon Magenta/Purple
     }
     
     val statusGradient = remember(connectionState) {
@@ -169,20 +171,25 @@ fun ConnectionStatusCard(
         label = "pulse_alpha"
     )
 
-    Card(
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .scale(cardScale)
             .alpha(cardAlpha)
-            .clip(RoundedCornerShape(32.dp)),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
-        ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = 16.dp,
-            pressedElevation = 20.dp,
-            hoveredElevation = 18.dp
-        )
+            .clip(RoundedCornerShape(32.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF000000).copy(alpha = 0.8f), // Obsidian glass base
+                        Color(0xFF0A0A0A).copy(alpha = 0.6f)
+                    )
+                )
+            )
+            .border(
+                width = 1.5.dp,
+                brush = Brush.linearGradient(statusGradient),
+                shape = RoundedCornerShape(32.dp)
+            )
     ) {
         Box(
             modifier = Modifier
@@ -278,9 +285,10 @@ fun ConnectionStatusCard(
                                 is ConnectionState.Disconnected -> "Disconnected"
                             },
                             style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = (-0.5).sp
                             ),
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = Color.White // High contrast on obsidian
                         )
                         
                         // Connection stage description
@@ -293,8 +301,10 @@ fun ConnectionStatusCard(
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
                                     text = connectingStage?.description ?: "",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        letterSpacing = 0.2.sp
+                                    ),
+                                    color = Color(0xFFB0B0B0)
                                 )
                                 
                                 // Progress bar for connecting state
@@ -340,8 +350,10 @@ fun ConnectionStatusCard(
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
                                     text = disconnectingStage?.description ?: "",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        letterSpacing = 0.2.sp
+                                    ),
+                                    color = Color(0xFFB0B0B0)
                                 )
                                 
                                 // Progress bar for disconnecting state
@@ -393,8 +405,10 @@ fun ConnectionStatusCard(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = "Uptime: ${formatUptime(uptime)}",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                        letterSpacing = 0.2.sp
+                                    ),
+                                    color = Color(0xFFB0B0B0)
                                 )
                             }
                         }

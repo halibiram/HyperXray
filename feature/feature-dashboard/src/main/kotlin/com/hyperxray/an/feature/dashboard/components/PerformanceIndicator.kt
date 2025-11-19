@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * A performance indicator component showing a metric with a progress bar.
@@ -54,15 +55,18 @@ fun PerformanceIndicator(
         ) {
             Text(
                 text = label,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    letterSpacing = 0.2.sp
+                ),
+                color = Color(0xFFB0B0B0) // Subtle gray on obsidian
             )
             Text(
                 text = displayValue ?: "${(animatedProgress * 100).toInt()}%",
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = (-0.2).sp
                 ),
-                color = MaterialTheme.colorScheme.onSurface
+                color = Color.White // High contrast on obsidian
             )
         }
         Spacer(modifier = Modifier.height(10.dp))
@@ -72,7 +76,7 @@ fun PerformanceIndicator(
                 .height(12.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(
-                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                    Color(0xFF0A0A0A).copy(alpha = 0.6f) // Obsidian background
                 )
         ) {
             LinearProgressIndicator(

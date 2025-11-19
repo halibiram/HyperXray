@@ -124,9 +124,28 @@ fun AppScaffold(
     val configuration = LocalConfiguration.current
     val isTablet = configuration.screenWidthDp >= 600 // Tablet threshold
     
-    Scaffold(
-        modifier = Modifier,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+    Box(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        // Obsidian background
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF000000), // Pure obsidian black
+                            Color(0xFF0A0A0A), // Slight gradient for depth
+                            Color(0xFF000000)
+                        )
+                    )
+                )
+        )
+        
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color.Transparent, // Transparent to show obsidian background
+            snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             AppTopAppBar(
                 currentRoute,
@@ -175,6 +194,7 @@ fun AppScaffold(
             // Phone layout
             content(paddingValues)
         }
+    }
     }
 }
 
@@ -243,17 +263,17 @@ fun AppTopAppBar(
 
     val colorScheme = MaterialTheme.colorScheme
     val animatedContainerColor = androidx.compose.ui.graphics.lerp(
-        colorScheme.surface,
-        colorScheme.surfaceContainer,
+        Color(0xFF000000).copy(alpha = 0.7f), // Obsidian glass base
+        Color(0xFF0A0A0A).copy(alpha = 0.8f), // Slightly more opaque when scrolled
         containerColor
     )
 
     val appBarColors = TopAppBarDefaults.topAppBarColors(
         containerColor = animatedContainerColor,
         scrolledContainerColor = animatedContainerColor,
-        navigationIconContentColor = colorScheme.onSurface,
-        titleContentColor = colorScheme.onSurface,
-        actionIconContentColor = colorScheme.onSurface
+        navigationIconContentColor = Color.White,
+        titleContentColor = Color.White,
+        actionIconContentColor = Color.White
     )
 
     val roundedShape = remember(showScrolledColor) {
@@ -312,9 +332,9 @@ fun AppTopAppBar(
                         text = title,
                         style = MaterialTheme.typography.titleLarge.copy(
                             fontWeight = FontWeight.SemiBold,
-                            letterSpacing = (-0.02).sp
+                            letterSpacing = (-0.3).sp
                         ),
-                        color = colorScheme.onSurface
+                        color = Color.White // High contrast on obsidian
                     )
                 }
             },

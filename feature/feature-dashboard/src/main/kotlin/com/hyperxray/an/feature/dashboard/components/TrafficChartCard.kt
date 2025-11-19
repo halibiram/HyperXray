@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.hyperxray.an.feature.dashboard.formatThroughput
 import kotlinx.coroutines.delay
 
@@ -77,9 +78,9 @@ fun TrafficChartCard(
         title = "Traffic Chart",
         iconRes = iconRes,
         gradientColors = listOf(
-            Color(0xFF6366F1),
-            Color(0xFF8B5CF6),
-            Color(0xFFA855F7)
+            Color(0xFF00E5FF), // Neon Cyan
+            Color(0xFFD500F9), // Neon Purple
+            Color(0xFFFF00E5)  // Neon Magenta
         ),
         modifier = modifier,
         content = {
@@ -95,8 +96,8 @@ fun TrafficChartCard(
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(
-                                    Color(0xFF06B6D4).copy(alpha = 0.1f),
-                                    Color(0xFF3B82F6).copy(alpha = 0.05f)
+                                    Color(0xFF00E5FF).copy(alpha = 0.1f),
+                                    Color(0xFF00B8D4).copy(alpha = 0.05f)
                                 )
                             )
                         )
@@ -117,33 +118,35 @@ fun TrafficChartCard(
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold
                                     ),
-                                    color = Color(0xFF06B6D4)
+                                    color = Color(0xFF00E5FF) // Neon Cyan
                                 )
                                 Text(
                                     text = "Upload",
                                     style = MaterialTheme.typography.labelLarge.copy(
-                                        fontWeight = FontWeight.SemiBold
+                                        fontWeight = FontWeight.SemiBold,
+                                        letterSpacing = 0.2.sp
                                     ),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = Color(0xFFB0B0B0)
                                 )
                             }
                             Text(
                                 text = formatThroughput(uplinkThroughput),
                                 style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = (-0.2).sp
                                 ),
-                                color = Color(0xFF06B6D4),
+                                color = Color(0xFF00E5FF), // Neon Cyan
                                 fontFamily = FontFamily.Monospace
                             )
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         MiniChart(
                             dataPoints = uplinkHistory,
-                            lineColor = Color(0xFF06B6D4),
+                            lineColor = Color(0xFF00E5FF),
                             fillGradient = listOf(
-                                Color(0xFF06B6D4).copy(alpha = 0.3f),
-                                Color(0xFF06B6D4).copy(alpha = 0.1f),
-                                Color(0xFF06B6D4).copy(alpha = 0.0f)
+                                Color(0xFF00E5FF).copy(alpha = 0.3f),
+                                Color(0xFF00E5FF).copy(alpha = 0.1f),
+                                Color(0xFF00E5FF).copy(alpha = 0.0f)
                             ),
                             height = 70.dp
                         )
@@ -158,8 +161,8 @@ fun TrafficChartCard(
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(
-                                    Color(0xFF8B5CF6).copy(alpha = 0.1f),
-                                    Color(0xFFA855F7).copy(alpha = 0.05f)
+                                    Color(0xFFD500F9).copy(alpha = 0.1f),
+                                    Color(0xFFAA00FF).copy(alpha = 0.05f)
                                 )
                             )
                         )
@@ -180,33 +183,35 @@ fun TrafficChartCard(
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Bold
                                     ),
-                                    color = Color(0xFF8B5CF6)
+                                    color = Color(0xFFD500F9) // Neon Purple
                                 )
                                 Text(
                                     text = "Download",
                                     style = MaterialTheme.typography.labelLarge.copy(
-                                        fontWeight = FontWeight.SemiBold
+                                        fontWeight = FontWeight.SemiBold,
+                                        letterSpacing = 0.2.sp
                                     ),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = Color(0xFFB0B0B0)
                                 )
                             }
                             Text(
                                 text = formatThroughput(downlinkThroughput),
                                 style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = (-0.2).sp
                                 ),
-                                color = Color(0xFF8B5CF6),
+                                color = Color(0xFFD500F9), // Neon Purple
                                 fontFamily = FontFamily.Monospace
                             )
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         MiniChart(
                             dataPoints = downlinkHistory,
-                            lineColor = Color(0xFF8B5CF6),
+                            lineColor = Color(0xFFD500F9),
                             fillGradient = listOf(
-                                Color(0xFF8B5CF6).copy(alpha = 0.3f),
-                                Color(0xFF8B5CF6).copy(alpha = 0.1f),
-                                Color(0xFF8B5CF6).copy(alpha = 0.0f)
+                                Color(0xFFD500F9).copy(alpha = 0.3f),
+                                Color(0xFFD500F9).copy(alpha = 0.1f),
+                                Color(0xFFD500F9).copy(alpha = 0.0f)
                             ),
                             height = 70.dp
                         )

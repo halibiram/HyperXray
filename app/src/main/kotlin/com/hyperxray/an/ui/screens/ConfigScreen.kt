@@ -53,6 +53,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.border
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -123,8 +125,7 @@ fun ConfigScreen(
         } else {
             LazyColumn(
                 modifier = Modifier
-                    .fillMaxHeight()
-                    .background(MaterialTheme.colorScheme.surface),
+                    .fillMaxHeight(),
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
                 state = listState,
                 verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)
@@ -227,25 +228,46 @@ private fun ModernConfigCard(
         )
     }
 
-    Card(
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .scale(cardScale)
             .alpha(cardAlpha)
-            .clip(RoundedCornerShape(20.dp))
-            .clickable(onClick = onConfigClick),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) {
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerHighest
-            }
-        ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = if (isSelected) 8.dp else 4.dp,
-            pressedElevation = 12.dp,
-            hoveredElevation = 6.dp
-        )
+            .clip(RoundedCornerShape(24.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = if (isSelected) {
+                        listOf(
+                            Color(0xFF000000).copy(alpha = 0.8f),
+                            Color(0xFF0A0A0A).copy(alpha = 0.6f)
+                        )
+                    } else {
+                        listOf(
+                            Color(0xFF000000).copy(alpha = 0.6f),
+                            Color(0xFF0A0A0A).copy(alpha = 0.4f)
+                        )
+                    }
+                )
+            )
+            .border(
+                width = if (isSelected) 1.5.dp else 1.dp,
+                brush = Brush.linearGradient(
+                    colors = if (isSelected) {
+                        listOf(
+                            Color(0xFF00E5FF), // Neon Cyan
+                            Color(0xFF2979FF), // Electric Blue
+                            Color(0xFF651FFF)  // Deep Purple
+                        )
+                    } else {
+                        listOf(
+                            Color(0xFF1A1A1A),
+                            Color(0xFF0F0F0F)
+                        )
+                    }
+                ),
+                shape = RoundedCornerShape(24.dp)
+            )
+            .clickable(onClick = onConfigClick)
     ) {
         Box(
             modifier = Modifier
@@ -324,18 +346,21 @@ private fun ModernConfigCard(
                     Text(
                         text = file.name.removeSuffix(".json"),
                         style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = (-0.3).sp
                         ),
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = Color.White
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = if (isSelected) "Active configuration" else "Tap to select",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            letterSpacing = 0.2.sp
+                        ),
                         color = if (isSelected) {
-                            MaterialTheme.colorScheme.primary
+                            Color(0xFF00E5FF) // Neon Cyan
                         } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
+                            Color(0xFFB0B0B0)
                         }
                     )
                 }

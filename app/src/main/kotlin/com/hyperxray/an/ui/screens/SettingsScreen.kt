@@ -3,8 +3,10 @@ package com.hyperxray.an.ui.screens
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.result.ActivityResultLauncher
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -58,6 +60,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hyperxray.an.R
 import com.hyperxray.an.common.ThemeMode
@@ -254,19 +262,32 @@ fun SettingsScreen(
     val horizontalPadding = if (isTablet) 24.dp else 16.dp
     val verticalPadding = if (isTablet) 16.dp else 8.dp
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(horizontal = horizontalPadding, vertical = verticalPadding)
+    Box(
+        modifier = Modifier.fillMaxSize()
     ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(horizontal = horizontalPadding, vertical = verticalPadding)
+        ) {
         Spacer(modifier = Modifier.height(8.dp))
         
         // General Settings Card
         SettingsCategoryCard(title = stringResource(R.string.general)) {
             ListItem(
-                headlineContent = { Text(stringResource(R.string.use_template_title)) },
-                supportingContent = { Text(stringResource(R.string.use_template_summary)) },
+                headlineContent = { 
+                    Text(
+                        stringResource(R.string.use_template_title),
+                        color = Color.White
+                    ) 
+                },
+                supportingContent = { 
+                    Text(
+                        stringResource(R.string.use_template_summary),
+                        color = Color(0xFFB0B0B0)
+                    ) 
+                },
                 trailingContent = {
                     Switch(
                         checked = settingsState.switches.useTemplateEnabled,
@@ -1167,7 +1188,7 @@ fun SettingsScreen(
                 )
             )
         }
-
+        }
     }
 }
 
@@ -1282,23 +1303,40 @@ fun SettingsCategoryCard(
     title: String,
     content: @Composable () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = 1.dp
-        )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF000000).copy(alpha = 0.7f), // Obsidian glass
+                        Color(0xFF0A0A0A).copy(alpha = 0.5f)
+                    )
+                )
+            )
+            .border(
+                width = 1.5.dp,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFF00E5FF), // Neon Cyan
+                        Color(0xFF2979FF), // Electric Blue
+                        Color(0xFF651FFF)  // Deep Purple
+                    )
+                ),
+                shape = RoundedCornerShape(24.dp)
+            )
     ) {
         Column(
             modifier = Modifier.padding(vertical = 8.dp)
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.3).sp
+                ),
+                color = Color(0xFF00E5FF), // Neon Cyan
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
             )
             content()

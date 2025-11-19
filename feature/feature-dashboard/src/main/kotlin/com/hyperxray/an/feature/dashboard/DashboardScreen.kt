@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +45,7 @@ import androidx.compose.ui.text.font.FontFamily
 import com.hyperxray.an.feature.dashboard.DashboardColors
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -138,11 +140,25 @@ fun DashboardScreen(
     val cardSpacing = if (isTablet) 24.dp else 16.dp
 
     Box(modifier = Modifier.fillMaxSize()) {
+        // Obsidian background with subtle gradient
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF000000), // Pure obsidian black
+                            Color(0xFF0A0A0A), // Slight gradient for depth
+                            Color(0xFF000000)
+                        )
+                    )
+                )
+        )
+        
         LazyColumn(
             state = lazyListState,
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.surface)
                 .padding(horizontal = horizontalPadding),
             contentPadding = PaddingValues(
                 top = 16.dp,
@@ -151,28 +167,39 @@ fun DashboardScreen(
             verticalArrangement = Arrangement.spacedBy(cardSpacing),
             userScrollEnabled = isServiceEnabled,
         ) {
-        // Enhanced Modern Header Section with Glassmorphism
-        item(key = "header") {
+                item(key = "header") {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.large)
+                    .clip(RoundedCornerShape(24.dp))
                     .background(
-                        Brush.horizontalGradient(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF000000).copy(alpha = 0.7f), // Glassmorphism base
+                                Color(0xFF0A0A0A).copy(alpha = 0.5f)
+                            )
+                        )
+                    )
+                    .border(
+                        width = 1.5.dp,
+                        brush = Brush.horizontalGradient(
                             colors = if (isServiceEnabled) {
                                 listOf(
-                                    connectionActiveColor.copy(alpha = 0.08f),
-                                    connectionActiveColor.copy(alpha = 0.05f)
+                                    Color(0xFF00E5FF), // Neon Cyan
+                                    Color(0xFF2979FF), // Electric Blue
+                                    Color(0xFF651FFF)  // Deep Purple
                                 )
                             } else {
                                 listOf(
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                                    Color(0xFF1A1A1A),
+                                    Color(0xFF0F0F0F),
+                                    Color(0xFF1A1A1A)
                                 )
                             }
-                        )
+                        ),
+                        shape = RoundedCornerShape(24.dp)
                     )
-                    .padding(20.dp)
+                    .padding(24.dp)
             ) {
                 Column(
                     modifier = Modifier.fillMaxWidth()
@@ -186,35 +213,60 @@ fun DashboardScreen(
                             Text(
                                 text = "Dashboard",
                                 style = MaterialTheme.typography.displaySmall.copy(
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = (-0.5).sp
                                 ),
-                                color = MaterialTheme.colorScheme.onSurface,
+                                color = Color.White,
                                 modifier = Modifier.padding(bottom = 6.dp)
                             )
                             Text(
                                 text = if (isServiceEnabled) "Connected and secured" else "Ready to connect",
                                 style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.Medium
+                                    fontWeight = FontWeight.Medium,
+                                    letterSpacing = 0.2.sp
                                 ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = Color(0xFFB0B0B0)
                             )
                         }
                         
-                        // Enhanced Status Badge with Pulse Animation
-                        Card(
-                            modifier = Modifier,
-                            shape = MaterialTheme.shapes.medium,
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isServiceEnabled) {
-                                    connectionActiveColor.copy(alpha = 0.2f)
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                                }
-                            ),
-                            elevation = CardDefaults.cardElevation(
-                                defaultElevation = 4.dp,
-                                pressedElevation = 6.dp
-                            )
+                        // Enhanced Status Badge with Glassmorphism
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(
+                                    if (isServiceEnabled) {
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                connectionActiveColor.copy(alpha = 0.15f),
+                                                connectionActiveColor.copy(alpha = 0.08f)
+                                            )
+                                        )
+                                    } else {
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                Color(0xFF1A1A1A).copy(alpha = 0.6f),
+                                                Color(0xFF0F0F0F).copy(alpha = 0.4f)
+                                            )
+                                        )
+                                    }
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    brush = Brush.linearGradient(
+                                        colors = if (isServiceEnabled) {
+                                            listOf(
+                                                connectionActiveColor.copy(alpha = 0.8f),
+                                                connectionActiveColor.copy(alpha = 0.5f)
+                                            )
+                                        } else {
+                                            listOf(
+                                                Color(0xFF2A2A2A),
+                                                Color(0xFF1A1A1A)
+                                            )
+                                        }
+                                    ),
+                                    shape = RoundedCornerShape(16.dp)
+                                )
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
@@ -237,12 +289,13 @@ fun DashboardScreen(
                                 Text(
                                     text = if (isServiceEnabled) "Active" else "Idle",
                                     style = MaterialTheme.typography.labelLarge.copy(
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.3.sp
                                     ),
                                     color = if (isServiceEnabled) {
                                         connectionActiveColor
                                     } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                        Color(0xFF808080)
                                     }
                                 )
                             }
@@ -264,9 +317,10 @@ fun DashboardScreen(
                         Text(
                             text = SimpleDateFormat("EEEE, MMMM d • HH:mm", Locale.getDefault()).format(Date()),
                             style = MaterialTheme.typography.bodyMedium.copy(
-                                fontWeight = FontWeight.Medium
+                                fontWeight = FontWeight.Medium,
+                                letterSpacing = 0.2.sp
                             ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                            color = Color(0xFF808080)
                         )
                     }
                 }
@@ -314,26 +368,30 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     // Total Traffic Card - Enhanced with Glassmorphism
-                    Card(
-                        modifier = Modifier.weight(1f),
-                        shape = MaterialTheme.shapes.large,
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                        ),
-                        elevation = CardDefaults.cardElevation(
-                            defaultElevation = 8.dp,
-                            pressedElevation = 12.dp
-                        )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0xFF000000).copy(alpha = 0.6f),
+                                        Color(0xFF0A0A0A).copy(alpha = 0.4f)
+                                    )
+                                )
+                            )
+                            .border(
+                                width = 1.5.dp,
+                                brush = Brush.linearGradient(trafficGradient),
+                                shape = RoundedCornerShape(24.dp)
+                            )
                     ) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(
                                     Brush.verticalGradient(
-                                        colors = listOf(
-                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.08f)
-                                        )
+                                        colors = trafficGradient.map { it.copy(alpha = 0.08f) }
                                     )
                                 )
                                 .padding(20.dp)
@@ -352,18 +410,20 @@ fun DashboardScreen(
                                     Text(
                                         text = "Total Traffic",
                                         style = MaterialTheme.typography.labelLarge.copy(
-                                            fontWeight = FontWeight.SemiBold
+                                            fontWeight = FontWeight.SemiBold,
+                                            letterSpacing = 0.2.sp
                                         ),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = Color(0xFFB0B0B0)
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Text(
                                     text = formatBytes(coreStats.uplink + coreStats.downlink),
                                     style = MaterialTheme.typography.headlineSmall.copy(
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = (-0.5).sp
                                     ),
-                                    color = MaterialTheme.colorScheme.primary,
+                                    color = trafficGradient.first(),
                                     fontFamily = FontFamily.Monospace
                                 )
                             }
@@ -371,26 +431,30 @@ fun DashboardScreen(
                     }
                     
                     // Connection Time Card - Enhanced with Glassmorphism
-                    Card(
-                        modifier = Modifier.weight(1f),
-                        shape = MaterialTheme.shapes.large,
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                        ),
-                        elevation = CardDefaults.cardElevation(
-                            defaultElevation = 8.dp,
-                            pressedElevation = 12.dp
-                        )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0xFF000000).copy(alpha = 0.6f),
+                                        Color(0xFF0A0A0A).copy(alpha = 0.4f)
+                                    )
+                                )
+                            )
+                            .border(
+                                width = 1.5.dp,
+                                brush = Brush.linearGradient(performanceGradient),
+                                shape = RoundedCornerShape(24.dp)
+                            )
                     ) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .background(
                                     Brush.verticalGradient(
-                                        colors = listOf(
-                                            connectionActiveColor.copy(alpha = 0.12f),
-                                            connectionActiveColor.copy(alpha = 0.08f)
-                                        )
+                                        colors = performanceGradient.map { it.copy(alpha = 0.08f) }
                                     )
                                 )
                                 .padding(20.dp)
@@ -409,16 +473,18 @@ fun DashboardScreen(
                                     Text(
                                         text = "Uptime",
                                         style = MaterialTheme.typography.labelLarge.copy(
-                                            fontWeight = FontWeight.SemiBold
+                                            fontWeight = FontWeight.SemiBold,
+                                            letterSpacing = 0.2.sp
                                         ),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = Color(0xFFB0B0B0)
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Text(
                                     text = formatUptime(coreStats.uptime),
                                     style = MaterialTheme.typography.headlineSmall.copy(
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = (-0.5).sp
                                     ),
                                     color = connectionActiveColor,
                                     fontFamily = FontFamily.Monospace

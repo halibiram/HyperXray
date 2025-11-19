@@ -59,7 +59,7 @@ fun MiniChart(
             .height(height)
             .clip(RoundedCornerShape(8.dp))
             .background(
-                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                Color(0xFF0A0A0A).copy(alpha = 0.4f) // Obsidian background for chart
             )
     ) {
         Canvas(modifier = Modifier.fillMaxWidth()) {
@@ -154,7 +154,17 @@ fun MiniChart(
                     }
                 }
                 
-                // Draw line with smooth appearance
+                // Draw line with neon glow effect
+                // Outer glow
+                drawPath(
+                    path = linePath,
+                    color = lineColor.copy(alpha = 0.3f),
+                    style = Stroke(
+                        width = 4.5.dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                )
+                // Main neon line
                 drawPath(
                     path = linePath,
                     color = lineColor,
@@ -164,12 +174,20 @@ fun MiniChart(
                     )
                 )
             } else if (points.size == 1) {
-                // Draw a single point as a simple circle
+                // Draw a single point with neon glow
                 val point = points.first()
                 val center = Offset(
                     point.x.coerceIn(0f, width),
                     point.y.coerceIn(0f, chartHeight)
                 )
+                // Outer glow
+                drawCircle(
+                    color = lineColor.copy(alpha = 0.4f),
+                    radius = 5.dp.toPx(),
+                    center = center,
+                    style = Fill
+                )
+                // Main point
                 drawCircle(
                     color = lineColor,
                     radius = 3.dp.toPx(),

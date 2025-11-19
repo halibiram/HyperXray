@@ -47,6 +47,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.border
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -184,7 +186,11 @@ private fun LearnerDebugScreenContent() {
     ) {
         Text(
             text = "TLS SNI Learner Debug",
-            style = MaterialTheme.typography.headlineMedium
+            style = MaterialTheme.typography.headlineMedium.copy(
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.5).sp
+            ),
+            color = Color.White
         )
         
         // Temperature Card - Modernized
@@ -377,20 +383,25 @@ private fun ModernOptimizerCard(
         isVisible = true
     }
 
-    Card(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .scale(cardScale)
             .alpha(cardAlpha)
-            .clip(MaterialTheme.shapes.medium),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
-        ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = 6.dp,
-            pressedElevation = 10.dp,
-            hoveredElevation = 8.dp
-        )
+            .clip(RoundedCornerShape(24.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF000000).copy(alpha = 0.7f), // Obsidian glass
+                        Color(0xFF0A0A0A).copy(alpha = 0.5f)
+                    )
+                )
+            )
+            .border(
+                width = 1.5.dp,
+                brush = Brush.linearGradient(gradientColors),
+                shape = RoundedCornerShape(24.dp)
+            )
     ) {
         Box(
             modifier = Modifier
@@ -420,9 +431,10 @@ private fun ModernOptimizerCard(
                     Text(
                         text = title,
                         style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.3).sp
                         ),
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = Color.White
                     )
                 }
                 

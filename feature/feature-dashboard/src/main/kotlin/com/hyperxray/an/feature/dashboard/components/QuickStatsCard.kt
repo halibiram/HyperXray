@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.hyperxray.an.feature.dashboard.formatBytes
 import com.hyperxray.an.feature.dashboard.formatThroughput
 
@@ -76,20 +78,31 @@ fun QuickStatsCard(
         }
     }
 
-    Card(
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .scale(cardScale)
             .alpha(cardAlpha)
-            .clip(RoundedCornerShape(28.dp)),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
-        ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = 8.dp,
-            pressedElevation = 12.dp,
-            hoveredElevation = 10.dp
-        )
+            .clip(RoundedCornerShape(28.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF000000).copy(alpha = 0.7f), // Obsidian glass
+                        Color(0xFF0A0A0A).copy(alpha = 0.5f)
+                    )
+                )
+            )
+            .border(
+                width = 1.5.dp,
+                brush = Brush.horizontalGradient(
+                    colors = listOf(
+                        Color(0xFF00E5FF), // Neon Cyan
+                        Color(0xFFD500F9), // Neon Purple
+                        Color(0xFFFF00E5)  // Neon Magenta
+                    )
+                ),
+                shape = RoundedCornerShape(28.dp)
+            )
     ) {
         Box(
             modifier = Modifier
@@ -97,8 +110,8 @@ fun QuickStatsCard(
                 .background(
                     Brush.horizontalGradient(
                         colors = listOf(
-                            Color(0xFF6366F1).copy(alpha = 0.1f),
-                            Color(0xFF8B5CF6).copy(alpha = 0.1f)
+                            Color(0xFF00E5FF).copy(alpha = 0.12f), // Enhanced neon tint
+                            Color(0xFFD500F9).copy(alpha = 0.12f)
                         )
                     )
                 )
@@ -123,42 +136,53 @@ fun QuickStatsCard(
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold
                             ),
-                            color = Color(0xFF06B6D4)
+                            color = Color(0xFF00E5FF) // Neon Cyan
                         )
                         Text(
                             text = "Upload",
                             style = MaterialTheme.typography.labelLarge.copy(
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.SemiBold,
+                                letterSpacing = 0.2.sp
                             ),
-                            color = Color(0xFF06B6D4)
+                            color = Color(0xFF00E5FF) // Neon Cyan
                         )
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = formatBytes(uplink),
                         style = MaterialTheme.typography.headlineSmall.copy(
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.5).sp
                         ),
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = Color.White,
                         fontFamily = FontFamily.Monospace
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = formatThroughput(uplinkThroughput),
                         style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = 0.1.sp
                         ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = Color(0xFFB0B0B0),
                         fontFamily = FontFamily.Monospace
                     )
                 }
                 
-                // Divider
+                // Divider with neon glow
                 Box(
                     modifier = Modifier
                         .width(1.dp)
                         .height(80.dp)
-                        .background(MaterialTheme.colorScheme.outlineVariant)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0xFF00E5FF).copy(alpha = 0.3f),
+                                    Color(0xFFD500F9).copy(alpha = 0.3f),
+                                    Color(0xFF00E5FF).copy(alpha = 0.3f)
+                                )
+                            )
+                        )
                 )
                 
                 // Download Stats
@@ -175,32 +199,35 @@ fun QuickStatsCard(
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold
                             ),
-                            color = Color(0xFF8B5CF6)
+                            color = Color(0xFFD500F9) // Neon Purple
                         )
                         Text(
                             text = "Download",
                             style = MaterialTheme.typography.labelLarge.copy(
-                                fontWeight = FontWeight.SemiBold
+                                fontWeight = FontWeight.SemiBold,
+                                letterSpacing = 0.2.sp
                             ),
-                            color = Color(0xFF8B5CF6)
+                            color = Color(0xFFD500F9) // Neon Purple
                         )
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = formatBytes(downlink),
                         style = MaterialTheme.typography.headlineSmall.copy(
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.5).sp
                         ),
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = Color.White,
                         fontFamily = FontFamily.Monospace
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = formatThroughput(downlinkThroughput),
                         style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Medium,
+                            letterSpacing = 0.1.sp
                         ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = Color(0xFFB0B0B0),
                         fontFamily = FontFamily.Monospace
                     )
                 }

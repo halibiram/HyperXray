@@ -8,6 +8,12 @@ app/src/main/jniLibs
 app/src/main/jni/hev-socks5-tunnel
 local.properties
 
+# Build directories
+build/
+**/build/
+*.dex
+*.class
+
 # HTTP Custom extracted files
 httpcustom_*.apk
 httpcustom_extracted/

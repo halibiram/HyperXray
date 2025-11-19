@@ -47,3 +47,4 @@ echo "Logları izlemeye başlıyorum..."
 adb logcat -c
 adb logcat | grep -iE "xray|v2ray|socks5|TProxyService|XrayRuntimeService|connection|connect" --color=never
 
+

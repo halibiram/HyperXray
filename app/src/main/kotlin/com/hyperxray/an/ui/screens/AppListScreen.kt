@@ -57,7 +57,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -119,9 +125,30 @@ fun AppListScreen(viewModel: AppListViewModel, onBackClick: () -> Unit) {
         }
     }
 
-    Scaffold(
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+    Box(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        // Obsidian background
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF000000), // Pure obsidian black
+                            Color(0xFF0A0A0A),
+                            Color(0xFF000000)
+                        )
+                    )
+                )
+        )
+        
+        Scaffold(
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(scrollBehavior.nestedScrollConnection),
+            containerColor = Color.Transparent, // Transparent to show obsidian background
+            snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             if (isSearching) {
                 TopAppBar(
@@ -170,7 +197,14 @@ fun AppListScreen(viewModel: AppListViewModel, onBackClick: () -> Unit) {
             } else {
                 TopAppBar(
                     title = {
-                        Text(text = stringResource(R.string.apps_title))
+                        Text(
+                            text = stringResource(R.string.apps_title),
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = (-0.3).sp
+                            ),
+                            color = Color.White
+                        )
                     },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
@@ -310,11 +344,15 @@ fun AppListScreen(viewModel: AppListViewModel, onBackClick: () -> Unit) {
                     Text(
                         text = stringResource(R.string.apps_not_found),
                         modifier = Modifier.align(Alignment.Center),
-                        style = MaterialTheme.typography.bodyLarge
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            letterSpacing = 0.2.sp
+                        ),
+                        color = Color(0xFFB0B0B0)
                     )
                 }
             }
         }
+    }
     }
 }
 
@@ -323,18 +361,45 @@ fun AppItem(pkg: Package, onCheckedChange: (Boolean) -> Unit) {
     val iconBitmap = remember(pkg.icon) {
         drawableToBitmap(pkg.icon)?.asImageBitmap()
     }
-    Card(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp)
-            .clip(MaterialTheme.shapes.extraLarge)
-            .clickable { onCheckedChange(!pkg.selected) },
-        shape = MaterialTheme.shapes.extraLarge,
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (pkg.selected) MaterialTheme.colorScheme.secondaryContainer
-            else MaterialTheme.colorScheme.surfaceContainerHighest
-        )
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = if (pkg.selected) {
+                        listOf(
+                            Color(0xFF000000).copy(alpha = 0.8f),
+                            Color(0xFF0A0A0A).copy(alpha = 0.6f)
+                        )
+                    } else {
+                        listOf(
+                            Color(0xFF000000).copy(alpha = 0.6f),
+                            Color(0xFF0A0A0A).copy(alpha = 0.4f)
+                        )
+                    }
+                )
+            )
+            .border(
+                width = if (pkg.selected) 1.5.dp else 1.dp,
+                brush = Brush.linearGradient(
+                    colors = if (pkg.selected) {
+                        listOf(
+                            Color(0xFF00E5FF), // Neon Cyan
+                            Color(0xFF2979FF), // Electric Blue
+                            Color(0xFF651FFF)  // Deep Purple
+                        )
+                    } else {
+                        listOf(
+                            Color(0xFF1A1A1A),
+                            Color(0xFF0F0F0F)
+                        )
+                    }
+                ),
+                shape = RoundedCornerShape(20.dp)
+            )
+            .clickable { onCheckedChange(!pkg.selected) }
     ) {
         Row(
             modifier = Modifier
@@ -356,7 +421,10 @@ fun AppItem(pkg: Package, onCheckedChange: (Boolean) -> Unit) {
             Text(
                 text = pkg.label,
                 modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    letterSpacing = 0.1.sp
+                ),
+                color = Color.White,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

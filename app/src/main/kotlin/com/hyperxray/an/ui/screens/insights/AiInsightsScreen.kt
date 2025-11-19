@@ -2,6 +2,7 @@ package com.hyperxray.an.ui.screens.insights
 
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,9 +41,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hyperxray.an.common.formatThroughput
@@ -89,15 +97,48 @@ fun AiInsightsScreen(
         }
     }
     
-    Scaffold(
-        topBar = {
+    Box(
+        modifier = Modifier.fillMaxSize()
+    ) {
+        // Obsidian background
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF000000), // Pure obsidian black
+                            Color(0xFF0A0A0A),
+                            Color(0xFF000000)
+                        )
+                    )
+                )
+        )
+        
+        Scaffold(
+            containerColor = Color.Transparent, // Transparent to show obsidian background
+            topBar = {
             TopAppBar(
-                title = { Text("AI Insights Dashboard") },
+                title = { 
+                    Text(
+                        "AI Insights Dashboard",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = (-0.3).sp
+                        ),
+                        color = Color.White
+                    ) 
+                },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color(0xFF000000).copy(alpha = 0.7f),
+                    titleContentColor = Color.White,
+                    navigationIconContentColor = Color.White
+                )
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
@@ -112,6 +153,7 @@ fun AiInsightsScreen(
             },
             paddingValues = paddingValues
         )
+    }
     }
 }
 
@@ -281,59 +323,97 @@ fun AiInsightsContent(
 }
 
 @Composable
-private fun SummaryCard(
+fun SummaryCard(
     title: String,
     value: String,
     modifier: Modifier = Modifier
 ) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF000000).copy(alpha = 0.6f),
+                        Color(0xFF0A0A0A).copy(alpha = 0.4f)
+                    )
+                )
+            )
+            .border(
+                width = 1.dp,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFF00E5FF).copy(alpha = 0.5f),
+                        Color(0xFF651FFF).copy(alpha = 0.5f)
+                    )
+                ),
+                shape = RoundedCornerShape(16.dp)
+            )
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = Color(0xFFB0B0B0)
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = value,
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace
+                fontFamily = FontFamily.Monospace,
+                color = Color.White
             )
         }
     }
 }
 
 @Composable
-private fun BiasSectionCard(
+fun BiasSectionCard(
     title: String,
     biases: FloatArray,
     labels: List<String>,
     modifier: Modifier = Modifier
 ) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF000000).copy(alpha = 0.6f),
+                        Color(0xFF0A0A0A).copy(alpha = 0.4f)
+                    )
+                )
+            )
+            .border(
+                width = 1.dp,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFF00E5FF).copy(alpha = 0.5f),
+                        Color(0xFF651FFF).copy(alpha = 0.5f)
+                    )
+                ),
+                shape = RoundedCornerShape(16.dp)
+            )
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.1.sp
+                ),
+                color = Color(0xFF00E5FF)
             )
             Spacer(modifier = Modifier.height(12.dp))
             
@@ -350,6 +430,7 @@ private fun BiasSectionCard(
                     Text(
                         text = if (index < labels.size) labels[index] else "Bias[$index]",
                         style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White,
                         modifier = Modifier.weight(1f)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -369,6 +450,7 @@ private fun BiasSectionCard(
                         text = String.format("%.3f", bias),
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
+                        color = Color(0xFFB0B0B0),
                         modifier = Modifier.width(60.dp)
                     )
                 }
@@ -378,25 +460,45 @@ private fun BiasSectionCard(
 }
 
 @Composable
-private fun PolicyTableCard(
+fun PolicyTableCard(
     title: String,
     entries: List<com.hyperxray.an.viewmodel.PolicyEntry>,
     modifier: Modifier = Modifier
 ) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF000000).copy(alpha = 0.6f),
+                        Color(0xFF0A0A0A).copy(alpha = 0.4f)
+                    )
+                )
+            )
+            .border(
+                width = 1.dp,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFF00E5FF).copy(alpha = 0.5f),
+                        Color(0xFF651FFF).copy(alpha = 0.5f)
+                    )
+                ),
+                shape = RoundedCornerShape(16.dp)
+            )
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.1.sp
+                ),
+                color = Color(0xFF00E5FF)
             )
             Spacer(modifier = Modifier.height(12.dp))
             
@@ -450,25 +552,45 @@ private fun PolicyTableCard(
 }
 
 @Composable
-private fun PolicyChangesCard(
+fun PolicyChangesCard(
     title: String,
     changes: List<com.hyperxray.an.viewmodel.PolicyChange>,
     modifier: Modifier = Modifier
 ) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.7f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF000000).copy(alpha = 0.6f),
+                        Color(0xFF0A0A0A).copy(alpha = 0.4f)
+                    )
+                )
+            )
+            .border(
+                width = 1.dp,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFF00E5FF).copy(alpha = 0.5f),
+                        Color(0xFF651FFF).copy(alpha = 0.5f)
+                    )
+                ),
+                shape = RoundedCornerShape(16.dp)
+            )
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.1.sp
+                ),
+                color = Color(0xFF00E5FF)
             )
             Spacer(modifier = Modifier.height(12.dp))
             
@@ -516,25 +638,45 @@ private fun PolicyChangesCard(
 }
 
 @Composable
-private fun FeedbackListCard(
+fun FeedbackListCard(
     title: String,
     feedback: List<com.hyperxray.an.viewmodel.FeedbackEntry>,
     modifier: Modifier = Modifier
 ) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF000000).copy(alpha = 0.6f),
+                        Color(0xFF0A0A0A).copy(alpha = 0.4f)
+                    )
+                )
+            )
+            .border(
+                width = 1.dp,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFF00E5FF).copy(alpha = 0.5f),
+                        Color(0xFF651FFF).copy(alpha = 0.5f)
+                    )
+                ),
+                shape = RoundedCornerShape(16.dp)
+            )
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.1.sp
+                ),
+                color = Color(0xFF00E5FF)
             )
             Spacer(modifier = Modifier.height(12.dp))
             
@@ -589,7 +731,7 @@ private fun FeedbackListCard(
     }
 }
 
-private fun formatLatency(latencyMs: Long): String {
+fun formatLatency(latencyMs: Long): String {
     return when {
         latencyMs < 1000 -> "${latencyMs}ms"
         latencyMs < 60000 -> "${latencyMs / 1000.0}s"

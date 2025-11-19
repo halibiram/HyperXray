@@ -17,6 +17,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * A reusable row component for displaying statistics with label and value.
@@ -56,16 +57,19 @@ fun StatRow(
             }
             Text(
                 text = label,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    letterSpacing = 0.2.sp
+                ),
+                color = Color(0xFFB0B0B0) // Subtle gray on obsidian
             )
         }
         Text(
             text = value,
             style = MaterialTheme.typography.bodyLarge.copy(
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = (-0.2).sp
             ),
-            color = MaterialTheme.colorScheme.onSurface,
+            color = Color.White, // High contrast on obsidian
             fontFamily = FontFamily.Monospace
         )
     }
