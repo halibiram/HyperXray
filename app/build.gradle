@@ -705,12 +705,12 @@ android {
     ndkVersion versionProps.NDK_VERSION
     
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_22
-        targetCompatibility JavaVersion.VERSION_22
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
     
     kotlinOptions {
-        jvmTarget = '22'
+        jvmTarget = '17'
     }
 
     splits {
@@ -830,5 +830,6 @@ dependencies {
     implementation project(':feature:feature-hysteria2')
     implementation project(':feature:feature-routing')
     implementation project(':feature:feature-profiles')
+    implementation project(':feature:feature-telegram')
     implementation project(':feature:feature-policy-ai')
 }

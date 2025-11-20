@@ -39,6 +39,7 @@ import com.hyperxray.an.xray.runtime.MultiXrayCoreManager
 import com.hyperxray.an.core.network.dns.SystemDnsCacheServer
 import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.xray.runtime.LogLineCallback
+import com.hyperxray.an.notification.TelegramNotificationManager
 import com.hyperxray.an.ui.screens.log.extractDnsQuery
 import com.hyperxray.an.ui.screens.log.extractSniffedDomain
 import java.net.InetAddress
@@ -222,6 +223,9 @@ class TProxyService : VpnService() {
     @Volatile
     private var lastTProxyRestartTime: Long = 0L
     private val TPROXY_RESTART_INTERVAL_MS = 6L * 60L * 60L * 1000L // 6 hours
+    
+    // Telegram notification manager
+    private var telegramNotificationManager: TelegramNotificationManager? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -249,6 +253,9 @@ class TProxyService : VpnService() {
         
         // Start heartbeat coroutine to keep service alive and update notification
         heartbeatJob = serviceScope.launch {
+            var lastDnsCacheNotificationTime = 0L
+            val DNS_CACHE_NOTIFICATION_INTERVAL_MS = 10L * 60L * 1000L // 10 minutes
+            
             while (isActive) {
                 try {
                     // Adaptive polling: adjust interval based on traffic
@@ -258,6 +265,18 @@ class TProxyService : VpnService() {
                     val currentChannelName = if (Preferences(this@TProxyService).disableVpn) "nosocks" else "socks5"
                     createNotification(currentChannelName)
                     Log.d(TProxyService.TAG, "Heartbeat: Service alive, notification updated")
+                    
+                    // Send periodic DNS cache statistics (every 10 minutes)
+                    val now = System.currentTimeMillis()
+                    if (lastDnsCacheNotificationTime == 0L || 
+                        (now - lastDnsCacheNotificationTime) >= DNS_CACHE_NOTIFICATION_INTERVAL_MS) {
+                        telegramNotificationManager?.let { manager ->
+                            serviceScope.launch {
+                                manager.notifyDnsCacheInfo()
+                                lastDnsCacheNotificationTime = now
+                            }
+                        }
+                    }
                 } catch (e: Exception) {
                     Log.e(TProxyService.TAG, "Heartbeat error: ${e.message}", e)
                     delay(30000) // Wait before retry
@@ -281,6 +300,14 @@ class TProxyService : VpnService() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize TLS SNI optimizer: ${e.message}", e)
+        }
+        
+        // Initialize Telegram notification manager
+        try {
+            telegramNotificationManager = TelegramNotificationManager.getInstance(this)
+            Log.d(TAG, "Telegram notification manager initialized")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize Telegram notification manager", e)
         }
     }
 
@@ -323,6 +350,12 @@ class TProxyService : VpnService() {
                 if (prefs.disableVpn) {
                     serviceScope.launch { runXrayProcess() }
                     val successIntent = Intent(TProxyService.ACTION_START)
+                    // Send Telegram notification
+                    telegramNotificationManager?.let { manager ->
+                        serviceScope.launch {
+                            manager.notifyVpnStatus(true)
+                        }
+                    }
                     successIntent.setPackage(application.packageName)
                     sendBroadcast(successIntent)
 
@@ -793,6 +826,18 @@ class TProxyService : VpnService() {
             if (libraryDir == null) {
                 val errorMessage = "Failed to get native library directory."
                 Log.e(TAG, errorMessage)
+                
+                // Send Telegram notification for library directory error
+                telegramNotificationManager?.let { manager ->
+                    serviceScope.launch {
+                        manager.notifyError(
+                            "Xray Library Error\n\n" +
+                            "Failed to get native library directory.\n" +
+                            "Xray-core cannot start."
+                        )
+                    }
+                }
+                
                 val errorIntent = Intent(ACTION_ERROR)
                 errorIntent.setPackage(application.packageName)
                 errorIntent.putExtra(TProxyService.EXTRA_ERROR_MESSAGE, errorMessage)
@@ -814,6 +859,18 @@ class TProxyService : VpnService() {
             if (apiPort == null) {
                 val errorMessage = "Failed to find available port. All ports in range 10000-65535 are in use or excluded."
                 Log.e(TAG, errorMessage)
+                
+                // Send Telegram notification for port allocation error
+                telegramNotificationManager?.let { manager ->
+                    serviceScope.launch {
+                        manager.notifyError(
+                            "Port Allocation Error\n\n" +
+                            "All ports in range 10000-65535 are in use or excluded.\n" +
+                            "Xray-core cannot start without an available port."
+                        )
+                    }
+                }
+                
                 val errorIntent = Intent(ACTION_ERROR)
                 errorIntent.setPackage(application.packageName)
                 errorIntent.putExtra(TProxyService.EXTRA_ERROR_MESSAGE, errorMessage)
@@ -858,6 +915,19 @@ class TProxyService : VpnService() {
                         }
                         val errorMessage = "Xray process exited during startup after ${checksPerformed * checkInterval}ms (exit code: $exitValue)"
                         Log.e(TProxyService.TAG, errorMessage)
+                        
+                        // Send Telegram notification for Xray startup crash
+                        telegramNotificationManager?.let { manager ->
+                            serviceScope.launch {
+                                manager.notifyError(
+                                    "Xray Startup Crash\n\n" +
+                                    "Xray process exited during startup.\n" +
+                                    "Exit code: $exitValue\n" +
+                                    "Startup time: ${checksPerformed * checkInterval}ms"
+                                )
+                            }
+                        }
+                        
                         throw IOException(errorMessage)
                     }
                     
@@ -882,6 +952,18 @@ class TProxyService : VpnService() {
                         }
                         val errorMessage = "Xray process exited during startup validation (exit code: $exitValue)"
                         Log.e(TProxyService.TAG, errorMessage)
+                        
+                        // Send Telegram notification for Xray validation crash
+                        telegramNotificationManager?.let { manager ->
+                            serviceScope.launch {
+                                manager.notifyError(
+                                    "Xray Validation Crash\n\n" +
+                                    "Xray process exited during startup validation.\n" +
+                                    "Exit code: $exitValue"
+                                )
+                            }
+                        }
+                        
                         throw IOException(errorMessage)
                     }
                     // Process is alive but we hit timeout - log warning but proceed
@@ -972,6 +1054,16 @@ class TProxyService : VpnService() {
             Log.d(TAG, "Xray process reading interrupted.")
         } catch (e: Exception) {
             Log.e(TAG, "Error executing xray", e)
+            
+            // Send Telegram error notification for Xray crash
+            telegramNotificationManager?.let { manager ->
+                serviceScope.launch {
+                    manager.notifyError(
+                        "Xray process error: ${e.message ?: "Unknown error"}\n\n" +
+                        "Error type: ${e.javaClass.simpleName}"
+                    )
+                }
+            }
         } finally {
             Log.d(TAG, "Xray process task finished.")
             
@@ -988,6 +1080,25 @@ class TProxyService : VpnService() {
                 reloadingRequested = false
             } else if (!isStopping) {
                 Log.d(TAG, "Xray process exited unexpectedly or due to stop request. Stopping VPN.")
+                
+                // Send Telegram notification for unexpected process exit
+                if (currentProcess != null && !currentProcess.isAlive) {
+                    val exitValue = try {
+                        currentProcess.exitValue()
+                    } catch (e: IllegalThreadStateException) {
+                        -1
+                    }
+                    telegramNotificationManager?.let { manager ->
+                        serviceScope.launch {
+                            manager.notifyError(
+                                "Xray process exited unexpectedly\n\n" +
+                                "Exit code: $exitValue\n" +
+                                "Process may have crashed"
+                            )
+                        }
+                    }
+                }
+                
                 // Use handler to call stopXray on main thread to avoid reentrancy issues
                 handler.post {
                     if (!isStopping) {
@@ -1402,6 +1513,16 @@ class TProxyService : VpnService() {
         }
 
         if (newTunFd == null) {
+            // Send Telegram notification for VPN setup failure
+            telegramNotificationManager?.let { manager ->
+                serviceScope.launch {
+                    manager.notifyError(
+                        "VPN setup failed\n\n" +
+                        "Failed to establish VPN interface (TUN).\n" +
+                        "Please check VPN permissions."
+                    )
+                }
+            }
             stopXray()
             return
         }
@@ -1415,6 +1536,18 @@ class TProxyService : VpnService() {
             }
         } catch (e: IOException) {
             Log.e(TAG, e.toString())
+            
+            // Send Telegram notification for TProxy config write failure
+            telegramNotificationManager?.let { manager ->
+                serviceScope.launch {
+                    manager.notifyError(
+                        "TProxy configuration error\n\n" +
+                        "Failed to write TProxy config file: ${e.message}\n" +
+                        "VPN connection may not work properly."
+                    )
+                }
+            }
+            
             stopXray()
             return
         }
@@ -2103,6 +2236,19 @@ class TProxyService : VpnService() {
                 Log.e(TProxyService.TAG, "🚨 CRITICAL: Very high UDP error rate (${pattern.errorRate.toInt()}/min) - ${errorRecord.category}")
                 Log.e(TProxyService.TAG, "Error details: ${errorRecord.logEntry}")
                 Log.e(TProxyService.TAG, "Pattern: ${pattern.errorsByCategory}")
+                
+                // Send Telegram notification for critical UDP errors
+                telegramNotificationManager?.let { manager ->
+                    serviceScope.launch {
+                        manager.notifyError(
+                            "🚨 Critical UDP Error Rate\n\n" +
+                            "Error rate: ${pattern.errorRate.toInt()}/min\n" +
+                            "Category: ${errorRecord.category}\n" +
+                            "Errors: ${pattern.errorsByCategory}\n\n" +
+                            "Recent error: ${errorRecord.logEntry.take(200)}"
+                        )
+                    }
+                }
             }
             
             // Warning: Frequent errors
@@ -2301,8 +2447,32 @@ class TProxyService : VpnService() {
                 
                 Log.i(TProxyService.TAG, "✅ Critical UDP recovery: Xray restarted")
                 
+                // Send Telegram notification for critical UDP recovery
+                telegramNotificationManager?.let { manager ->
+                    serviceScope.launch {
+                        manager.notifyError(
+                            "🚨 Critical UDP Recovery\n\n" +
+                            "Xray restarted due to critical UDP errors.\n" +
+                            "Error rate: ${pattern.errorRate.toInt()}/min\n" +
+                            "Recovery action: Xray process restarted"
+                        )
+                    }
+                }
+                
             } catch (e: Exception) {
                 Log.e(TProxyService.TAG, "Error during critical UDP recovery (Xray restart): ${e.message}", e)
+                
+                // Send Telegram notification for recovery failure
+                telegramNotificationManager?.let { manager ->
+                    serviceScope.launch {
+                        manager.notifyError(
+                            "🚨 UDP Recovery Failed\n\n" +
+                            "Failed to recover from critical UDP errors.\n" +
+                            "Error: ${e.message}\n" +
+                            "Error rate: ${pattern.errorRate.toInt()}/min"
+                        )
+                    }
+                }
             }
         } else {
             Log.w(TProxyService.TAG, "Critical UDP recovery skipped: errorRate=${pattern.errorRate.toInt()}, " +
@@ -2762,6 +2932,33 @@ class TProxyService : VpnService() {
         coreStatsState = stats
         // Notify AI optimizer if it's running
         // The optimizer will pick up the new stats in its next cycle
+        
+        // Send periodic performance metrics notification (every 5 minutes)
+        // Only send if there's significant traffic
+        val totalBytes = stats.uplink + stats.downlink
+        val lastPerformanceNotificationTime = getLastPerformanceNotificationTime()
+        val now = System.currentTimeMillis()
+        val PERFORMANCE_NOTIFICATION_INTERVAL_MS = 5L * 60L * 1000L // 5 minutes
+        
+        if (totalBytes > 10 * 1024 * 1024 && // At least 10 MB transferred
+            (lastPerformanceNotificationTime == 0L || 
+             (now - lastPerformanceNotificationTime) >= PERFORMANCE_NOTIFICATION_INTERVAL_MS)) {
+            
+            telegramNotificationManager?.let { manager ->
+                serviceScope.launch {
+                    manager.notifyPerformanceMetrics(stats)
+                    setLastPerformanceNotificationTime(now)
+                }
+            }
+        }
+    }
+    
+    // Track last performance notification time
+    private var lastPerformanceNotificationTime: Long = 0L
+    
+    private fun getLastPerformanceNotificationTime(): Long = lastPerformanceNotificationTime
+    private fun setLastPerformanceNotificationTime(time: Long) {
+        lastPerformanceNotificationTime = time
     }
     
     /**
@@ -3312,6 +3509,12 @@ class TProxyService : VpnService() {
         val stopIntent = Intent(TProxyService.ACTION_STOP)
         stopIntent.setPackage(application.packageName)
         sendBroadcast(stopIntent)
+        // Send Telegram notification
+        telegramNotificationManager?.let { manager ->
+            serviceScope.launch {
+                manager.notifyVpnStatus(false)
+            }
+        }
         stopSelf()
     }
 

@@ -111,8 +111,9 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     init {
         // Initialize stats for all DNS servers
         upstreamDnsServers.forEach { server ->
-            dnsServerStats[server.hostAddress] = DnsServerStats(server)
-            adaptiveTimeouts[server.hostAddress] = BASE_TIMEOUT_MS
+            val hostAddress = server.hostAddress ?: return@forEach
+            dnsServerStats[hostAddress] = DnsServerStats(server)
+            adaptiveTimeouts[hostAddress] = BASE_TIMEOUT_MS
         }
         
         // Start socket pool cleanup job
@@ -148,7 +149,17 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
      * Get or create socket from pool
      */
     private fun getPooledSocket(server: InetAddress, timeoutMs: Long): DatagramSocket {
-        val serverKey = server.hostAddress
+        val serverKey = server.hostAddress ?: run {
+            // If hostAddress is null, create a new socket without pooling
+            return DatagramSocket().apply {
+                soTimeout = timeoutMs.toInt()
+                try {
+                    reuseAddress = true
+                } catch (e: Exception) {
+                    // Some platforms may not support this
+                }
+            }
+        }
         val pooled = socketPool[serverKey]
         
         if (pooled != null) {
@@ -186,8 +197,9 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
      * Get adaptive timeout for a DNS server based on its performance
      */
     private fun getAdaptiveTimeout(server: InetAddress): Long {
-        val stats = dnsServerStats[server.hostAddress] ?: return BASE_TIMEOUT_MS
-        val currentTimeout = adaptiveTimeouts[server.hostAddress] ?: BASE_TIMEOUT_MS
+        val hostAddress = server.hostAddress ?: return BASE_TIMEOUT_MS
+        val stats = dnsServerStats[hostAddress] ?: return BASE_TIMEOUT_MS
+        val currentTimeout = adaptiveTimeouts[hostAddress] ?: BASE_TIMEOUT_MS
         
         // Adjust timeout based on average latency
         val avgLatency = stats.averageLatency
@@ -220,7 +232,7 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                             val addresses = resolveDomain(domain)
                             if (addresses.isNotEmpty()) {
                                 successCount++
-                                Log.d(TAG, "✅ Warm-up: $domain -> ${addresses.map { it.hostAddress }}")
+                                Log.d(TAG, "✅ Warm-up: $domain -> ${addresses.map { it.hostAddress ?: "unknown" }}")
                             }
                         } catch (e: Exception) {
                             Log.d(TAG, "⚠️ Warm-up failed for $domain: ${e.message}")
@@ -261,7 +273,7 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
      * This is a simple heuristic - real geolocation would require a database
      */
     private fun estimateGeographicDistance(server: InetAddress): Int {
-        val ip = server.hostAddress
+        val ip = server.hostAddress ?: return 5
         // Simple heuristic: prioritize well-known fast DNS servers
         // Cloudflare and Google are typically well-distributed globally
         return when {
@@ -293,7 +305,8 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
      * Update DNS server performance stats
      */
     private fun updateDnsServerStats(server: InetAddress, latency: Long, success: Boolean = true) {
-        val stats = dnsServerStats[server.hostAddress] ?: return
+        val hostAddress = server.hostAddress ?: return
+        val stats = dnsServerStats[hostAddress] ?: return
         
         if (success) {
             stats.successCount++
@@ -304,7 +317,7 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
             if (!stats.isHealthy && stats.successCount >= 2) {
                 stats.isHealthy = true
                 stats.failureCount = 0
-                Log.d(TAG, "✅ DNS server ${server.hostAddress} recovered and marked as healthy")
+                Log.d(TAG, "✅ DNS server ${server.hostAddress ?: "unknown"} recovered and marked as healthy")
             }
         } else {
             stats.failureCount++
@@ -314,7 +327,7 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
             val totalAttempts = stats.successCount + stats.failureCount
             if (totalAttempts >= 3 && (stats.failureCount >= MAX_FAILURES_BEFORE_UNHEALTHY || stats.successRate < MIN_SUCCESS_RATE)) {
                 stats.isHealthy = false
-                Log.w(TAG, "⚠️ DNS server ${server.hostAddress} marked as unhealthy (failures: ${stats.failureCount}/${totalAttempts}, success rate: ${(stats.successRate * 100).toInt()}%)")
+                Log.w(TAG, "⚠️ DNS server ${server.hostAddress ?: "unknown"} marked as unhealthy (failures: ${stats.failureCount}/${totalAttempts}, success rate: ${(stats.successRate * 100).toInt()}%)")
             }
         }
     }
@@ -430,7 +443,7 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                 // Check cache first
                 val cached = DnsCacheManager.getFromCache(domain)
                 if (cached != null && cached.isNotEmpty()) {
-                    Log.d(TAG, "✅ DNS CACHE HIT (resolveDomain): $domain -> ${cached.map { it.hostAddress }}")
+                    Log.d(TAG, "✅ DNS CACHE HIT (resolveDomain): $domain -> ${cached.map { it.hostAddress ?: "unknown" }}")
                     return@withContext cached
                 }
                 
@@ -448,7 +461,7 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                     if (addresses.isNotEmpty()) {
                         // Save to cache
                         DnsCacheManager.saveToCache(domain, addresses)
-                        Log.i(TAG, "✅ DNS resolved and cached (resolveDomain): $domain -> ${addresses.map { it.hostAddress }}")
+                        Log.i(TAG, "✅ DNS resolved and cached (resolveDomain): $domain -> ${addresses.map { it.hostAddress ?: "unknown" }}")
                         return@withContext addresses
                     }
                 }
@@ -590,7 +603,7 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
             // Check cache first
             val cachedResult = DnsCacheManager.getFromCache(hostname)
             if (cachedResult != null && cachedResult.isNotEmpty()) {
-                Log.i(TAG, "✅ DNS CACHE HIT (SystemDnsCacheServer): $hostname -> ${cachedResult.map { it.hostAddress }} (served from cache)")
+                Log.i(TAG, "✅ DNS CACHE HIT (SystemDnsCacheServer): $hostname -> ${cachedResult.map { it.hostAddress ?: "unknown" }} (served from cache)")
                 
                 // Build DNS response from cache
                 val response = DnsResponseBuilder.buildResponse(requestData, cachedResult)
@@ -618,7 +631,7 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                 val resolvedAddresses = parseDnsResponse(upstreamResponse, hostname)
                 if (resolvedAddresses.isNotEmpty()) {
                     DnsCacheManager.saveToCache(hostname, resolvedAddresses)
-                    Log.i(TAG, "✅ DNS resolved from upstream and cached: $hostname -> ${resolvedAddresses.map { it.hostAddress }}")
+                    Log.i(TAG, "✅ DNS resolved from upstream and cached: $hostname -> ${resolvedAddresses.map { it.hostAddress ?: "unknown" }}")
                     
                     // Send response to client
                     val responsePacket = DatagramPacket(
@@ -707,7 +720,7 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                     // Build DNS response packet from resolved addresses
                     val queryData = buildDnsQuery(hostname) ?: return@withContext null
                     val responseData = buildDnsResponse(queryData, addresses.toList())
-                    Log.i(TAG, "✅ DoH fallback successful for $hostname -> ${addresses.map { it.hostAddress }}")
+                    Log.i(TAG, "✅ DoH fallback successful for $hostname -> ${addresses.map { it.hostAddress ?: "unknown" }}")
                     return@withContext responseData
                 }
             } catch (e: Exception) {
@@ -800,7 +813,8 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                 async {
                     try {
                         // Skip unhealthy servers immediately (fast failover)
-                        val stats = dnsServerStats[dnsServer.hostAddress]
+                        val hostAddress = dnsServer.hostAddress ?: return@async null
+                        val stats = dnsServerStats[hostAddress]
                         if (stats != null && !stats.isHealthy) {
                             val now = System.currentTimeMillis()
                             if (now - stats.lastFailureTime < HEALTH_CHECK_INTERVAL_MS) {
@@ -839,22 +853,22 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                                 val elapsed = System.currentTimeMillis() - sendStart
                                 
                                 // Update adaptive timeout based on performance
-                                val currentTimeout = adaptiveTimeouts[dnsServer.hostAddress] ?: BASE_TIMEOUT_MS
+                                val currentTimeout = adaptiveTimeouts[hostAddress] ?: BASE_TIMEOUT_MS
                                 val newTimeout = when {
                                     elapsed < currentTimeout * 0.7 -> (currentTimeout * 0.9).toLong().coerceAtLeast(200L) // Faster, reduce timeout
                                     elapsed > currentTimeout * 1.5 -> (currentTimeout * 1.2).toLong().coerceAtMost(MAX_TIMEOUT_MS) // Slower, increase timeout
                                     else -> currentTimeout // Keep current
                                 }
-                                adaptiveTimeouts[dnsServer.hostAddress] = newTimeout
+                                adaptiveTimeouts[hostAddress] = newTimeout
                                 
                                 // Update performance stats for this DNS server (success)
                                 updateDnsServerStats(dnsServer, elapsed, success = true)
                                 
-                                Log.d(TAG, "✅ DNS response from ${dnsServer.hostAddress} for $hostname (${elapsed}ms, timeout: ${adaptiveTimeout}ms)")
+                                Log.d(TAG, "✅ DNS response from ${dnsServer.hostAddress ?: "unknown"} for $hostname (${elapsed}ms, timeout: ${adaptiveTimeout}ms)")
                                 response
                             } catch (e: Exception) {
                                 // Socket error - remove from pool and create new one (fast failover)
-                                socketPool.remove(dnsServer.hostAddress)
+                                socketPool.remove(hostAddress)
                                 try {
                                     socket.close()
                                 } catch (closeError: Exception) {
@@ -869,7 +883,7 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                         
                         // Only log failures on final attempt to reduce log noise
                         if (timeoutMs >= 800L) {
-                            Log.d(TAG, "Upstream DNS server ${dnsServer.hostAddress} failed: ${e.message}")
+                            Log.d(TAG, "Upstream DNS server ${dnsServer.hostAddress ?: "unknown"} failed: ${e.message}")
                         }
                         null
                     }
@@ -884,7 +898,7 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                         if (result != null) {
                             val totalElapsed = System.currentTimeMillis() - startTime
                             val fastestServer = sortedServers[index]
-                            Log.d(TAG, "✅ Fastest DNS response from ${fastestServer.hostAddress} for $hostname (${totalElapsed}ms)")
+                            Log.d(TAG, "✅ Fastest DNS response from ${fastestServer.hostAddress ?: "unknown"} for $hostname (${totalElapsed}ms)")
                             result
                         } else null
                     }
@@ -936,7 +950,7 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                 null
             }
         }
-        Log.i(TAG, "✅ Upstream DNS servers updated: ${upstreamDnsServers.map { it.hostAddress }}")
+        Log.i(TAG, "✅ Upstream DNS servers updated: ${upstreamDnsServers.map { it.hostAddress ?: "unknown" }}")
     }
     
     /**

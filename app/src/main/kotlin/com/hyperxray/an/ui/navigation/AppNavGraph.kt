@@ -20,11 +20,17 @@ import com.hyperxray.an.common.ROUTE_AI_INSIGHTS
 import com.hyperxray.an.common.ROUTE_APP_LIST
 import com.hyperxray.an.common.ROUTE_CONFIG_EDIT
 import com.hyperxray.an.common.ROUTE_MAIN
+import com.hyperxray.an.common.ROUTE_TELEGRAM_SETTINGS
 import com.hyperxray.an.ui.screens.AppListScreen
 import com.hyperxray.an.ui.screens.ConfigEditScreen
 import com.hyperxray.an.ui.screens.MainScreen
 import com.hyperxray.an.ui.screens.insights.AiInsightsScreen
 import com.hyperxray.an.viewmodel.MainViewModel
+import com.hyperxray.an.feature.telegram.presentation.ui.TelegramSettingsScreen
+import com.hyperxray.an.feature.telegram.presentation.viewmodel.TelegramSettingsViewModel
+import androidx.compose.ui.platform.LocalContext
+import android.app.Application
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 @Composable
 fun AppNavHost(
@@ -85,6 +91,29 @@ fun AppNavHost(
             popExitTransition = { popExitTransition() }
         ) {
             AiInsightsScreen(
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = ROUTE_TELEGRAM_SETTINGS,
+            enterTransition = { enterTransition() },
+            exitTransition = { exitTransition() },
+            popEnterTransition = { EnterTransition.None },
+            popExitTransition = { popExitTransition() }
+        ) {
+            val context = LocalContext.current
+            val application = context.applicationContext as Application
+            val viewModel: TelegramSettingsViewModel = viewModel(
+                factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+                    override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                        @Suppress("UNCHECKED_CAST")
+                        return TelegramSettingsViewModel(application) as T
+                    }
+                }
+            )
+            TelegramSettingsScreen(
+                viewModel = viewModel,
                 onBackClick = { navController.popBackStack() }
             )
         }

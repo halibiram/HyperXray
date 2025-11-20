@@ -17,5 +17,6 @@ const val ROUTE_REALITY = "reality"
 const val ROUTE_HYSTERIA2 = "hysteria2"
 const val ROUTE_ROUTING = "routing"
 const val ROUTE_POLICY_AI = "policy_ai"
+const val ROUTE_TELEGRAM_SETTINGS = "telegram_settings"
 
 const val NAVIGATION_DEBOUNCE_DELAY = 500L

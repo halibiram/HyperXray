@@ -69,6 +69,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hyperxray.an.R
 import com.hyperxray.an.common.ThemeMode
+import com.hyperxray.an.common.ROUTE_TELEGRAM_SETTINGS
 import com.hyperxray.an.viewmodel.MainViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -542,6 +543,28 @@ fun SettingsScreen(
                             mainViewModel.setBypassLanEnabled(it)
                         },
                         enabled = !vpnDisabled
+                    )
+                },
+                colors = ListItemDefaults.colors(
+                    containerColor = Color.Transparent
+                )
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Notifications Card
+        SettingsCategoryCard(title = "Notifications") {
+            ListItem(
+                modifier = Modifier.clickable {
+                    mainViewModel.navigate(ROUTE_TELEGRAM_SETTINGS)
+                },
+                headlineContent = { Text("Telegram Notifications") },
+                supportingContent = { Text("Configure Telegram bot for notifications and status updates") },
+                trailingContent = {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null
                     )
                 },
                 colors = ListItemDefaults.colors(

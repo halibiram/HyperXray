@@ -43,6 +43,21 @@ class AppInitializer(
     private var optimizerReady: Boolean = false
 
     /**
+     * Get OptimizerOrchestrator instance (if initialized)
+     */
+    fun getOptimizerOrchestrator(): OptimizerOrchestrator? = optimizerOrchestrator
+
+    /**
+     * Get DeepPolicyModel instance (if initialized)
+     */
+    fun getDeepPolicyModel(): DeepPolicyModel? = deepPolicyModel
+
+    /**
+     * Check if optimizer is ready
+     */
+    fun isOptimizerReady(): Boolean = optimizerReady
+
+    /**
      * Initialize all app components.
      * Called from HyperXrayApplication.onCreate().
      */

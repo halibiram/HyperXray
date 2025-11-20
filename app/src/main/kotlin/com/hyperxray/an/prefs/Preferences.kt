@@ -535,6 +535,43 @@ class Preferences(context: Context) {
             setValueInProvider(XRAY_CORE_INSTANCE_COUNT, clampedCount.toString())
         }
 
+    // Telegram notification preferences
+    var telegramEnabled: Boolean
+        get() = getBooleanPref(TELEGRAM_ENABLED, false)
+        set(enable) {
+            setValueInProvider(TELEGRAM_ENABLED, enable)
+        }
+
+    var telegramNotifyVpnStatus: Boolean
+        get() = getBooleanPref(TELEGRAM_NOTIFY_VPN_STATUS, true)
+        set(enable) {
+            setValueInProvider(TELEGRAM_NOTIFY_VPN_STATUS, enable)
+        }
+
+    var telegramNotifyErrors: Boolean
+        get() = getBooleanPref(TELEGRAM_NOTIFY_ERRORS, true)
+        set(enable) {
+            setValueInProvider(TELEGRAM_NOTIFY_ERRORS, enable)
+        }
+
+    var telegramNotifyPerformance: Boolean
+        get() = getBooleanPref(TELEGRAM_NOTIFY_PERFORMANCE, false)
+        set(enable) {
+            setValueInProvider(TELEGRAM_NOTIFY_PERFORMANCE, enable)
+        }
+
+    var telegramNotifyDnsCache: Boolean
+        get() = getBooleanPref(TELEGRAM_NOTIFY_DNS_CACHE, false)
+        set(enable) {
+            setValueInProvider(TELEGRAM_NOTIFY_DNS_CACHE, enable)
+        }
+
+    var telegramNotifyManual: Boolean
+        get() = getBooleanPref(TELEGRAM_NOTIFY_MANUAL, true)
+        set(enable) {
+            setValueInProvider(TELEGRAM_NOTIFY_MANUAL, enable)
+        }
+
     companion object {
         const val SOCKS_ADDR: String = "SocksAddr"
         const val SOCKS_PORT: String = "SocksPort"
@@ -585,6 +622,14 @@ class Preferences(context: Context) {
         const val EXTREME_DNS_CACHE_SIZE: String = "ExtremeDnsCacheSize"
         const val EXTREME_DISABLE_FAKE_DNS: String = "ExtremeDisableFakeDns"
         const val EXTREME_ROUTING_OPTIMIZATION: String = "ExtremeRoutingOptimization"
+        
+        // Telegram notification keys
+        const val TELEGRAM_ENABLED: String = "TelegramEnabled"
+        const val TELEGRAM_NOTIFY_VPN_STATUS: String = "TelegramNotifyVpnStatus"
+        const val TELEGRAM_NOTIFY_ERRORS: String = "TelegramNotifyErrors"
+        const val TELEGRAM_NOTIFY_PERFORMANCE: String = "TelegramNotifyPerformance"
+        const val TELEGRAM_NOTIFY_DNS_CACHE: String = "TelegramNotifyDnsCache"
+        const val TELEGRAM_NOTIFY_MANUAL: String = "TelegramNotifyManual"
         const val MAX_CONCURRENT_CONNECTIONS: String = "MaxConcurrentConnections"
         const val PARALLEL_DNS_QUERIES: String = "ParallelDnsQueries"
         const val EXTREME_PROXY_OPTIMIZATION: String = "ExtremeProxyOptimization"

@@ -2210,6 +2210,12 @@ class MainViewModel(application: Application) :
         }
     }
 
+    fun navigate(route: String) {
+        viewModelScope.launch {
+            _uiEvent.trySend(MainViewUiEvent.Navigate(route))
+        }
+    }
+
     fun moveConfigFile(fromIndex: Int, toIndex: Int) {
         val currentList = _configFiles.value.toMutableList()
         val movedItem = currentList.removeAt(fromIndex)

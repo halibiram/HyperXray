@@ -363,6 +363,11 @@ class OptimizerOrchestrator(
     fun getCycleCount(): Int = cycleCount
     
     /**
+     * Get RealityBandit instance (for status reporting)
+     */
+    fun getBandit(): RealityBandit = bandit
+    
+    /**
      * Print sample cycle output and summary
      */
     fun printSummary() {

@@ -38,6 +38,12 @@ class HyperXrayApplication : Application() {
     // Temporary app initializer (will be moved to feature modules)
     private var appInitializer: AppInitializer? = null
 
+    /**
+     * Get AppInitializer instance (if initialized)
+     * Used by notification features to access AI optimizer components
+     */
+    fun getAppInitializer(): AppInitializer? = appInitializer
+
     override fun onCreate() {
         super.onCreate()
         

@@ -45,7 +45,10 @@ object NetworkCapabilityDetector {
      * Get CPU architecture
      */
     fun getCpuArchitecture(): CpuArchitecture {
-        val abi = Build.SUPPORTED_ABIS.firstOrNull() ?: Build.CPU_ABI
+        val abi = Build.SUPPORTED_ABIS.firstOrNull() 
+            ?: Build.SUPPORTED_32_BIT_ABIS.firstOrNull() 
+            ?: Build.SUPPORTED_64_BIT_ABIS.firstOrNull() 
+            ?: "unknown"
         return when {
             abi.contains("arm64") || abi.contains("aarch64") -> CpuArchitecture.ARM64
             abi.contains("arm") -> CpuArchitecture.ARM32
