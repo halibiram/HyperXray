@@ -273,19 +273,22 @@ jobs:
           VERSION_NAME="${{ steps.version.outputs.version_name }}"
           BUILD_DATE=$(date -u +'%Y-%m-%d %H:%M:%S UTC')
           
-          NOTES="## Release ${TAG_NAME}
-
-### Changes
-- **Xray-core**: Updated to version **${XRAY_VERSION}**
-- **Version**: ${VERSION_NAME}
-- **Build Date**: ${BUILD_DATE}
-
-### APKs
-- Universal APK (all architectures)
-- ARM64-v8a APK
-- x86_64 APK"
+          {
+            echo "## Release ${TAG_NAME}"
+            echo ""
+            echo "### Changes"
+            echo "- **Xray-core**: Updated to version **${XRAY_VERSION}**"
+            echo "- **Version**: ${VERSION_NAME}"
+            echo "- **Build Date**: ${BUILD_DATE}"
+            echo ""
+            echo "### APKs"
+            echo "- Universal APK (all architectures)"
+            echo "- ARM64-v8a APK"
+            echo "- x86_64 APK"
+          } > /tmp/release_notes.txt
+          
           echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
+          cat /tmp/release_notes.txt >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create or Update GitHub Release
