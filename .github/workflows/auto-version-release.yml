@@ -268,12 +268,17 @@ jobs:
       - name: Get Release Notes
         id: release_notes
         run: |
-          NOTES="## Release ${{ steps.version.outputs.tag_name }}
+          XRAY_VERSION="${{ needs.check-for-updates.outputs.new_xray_version }}"
+          TAG_NAME="${{ steps.version.outputs.tag_name }}"
+          VERSION_NAME="${{ steps.version.outputs.version_name }}"
+          BUILD_DATE=$(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          
+          NOTES="## Release ${TAG_NAME}
 
 ### Changes
-- **Xray-core**: Updated to version **${{ needs.check-for-updates.outputs.new_xray_version }}**
-- **Version**: ${{ steps.version.outputs.version_name }}
-- **Build Date**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+- **Xray-core**: Updated to version **${XRAY_VERSION}**
+- **Version**: ${VERSION_NAME}
+- **Build Date**: ${BUILD_DATE}
 
 ### APKs
 - Universal APK (all architectures)
