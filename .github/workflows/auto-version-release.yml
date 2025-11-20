@@ -455,19 +455,26 @@ jobs:
         id: release_notes
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
-          NOTES="## Release $TAG_NAME
-
-### Changes
-- **Version**: ${{ steps.version.outputs.version_name }}
-- **Xray-core**: ${{ env.XRAY_VERSION }}
-- **Build Date**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
-
-### APKs
-- Universal APK (all architectures)
-- ARM64-v8a APK
-- x86_64 APK"
+          VERSION_NAME="${{ steps.version.outputs.version_name }}"
+          XRAY_VERSION="${{ env.XRAY_VERSION }}"
+          BUILD_DATE=$(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          
+          {
+            echo "## Release ${TAG_NAME}"
+            echo ""
+            echo "### Changes"
+            echo "- **Version**: ${VERSION_NAME}"
+            echo "- **Xray-core**: ${XRAY_VERSION}"
+            echo "- **Build Date**: ${BUILD_DATE}"
+            echo ""
+            echo "### APKs"
+            echo "- Universal APK (all architectures)"
+            echo "- ARM64-v8a APK"
+            echo "- x86_64 APK"
+          } > /tmp/release_notes.txt
+          
           echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
+          cat /tmp/release_notes.txt >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create or Update GitHub Release
