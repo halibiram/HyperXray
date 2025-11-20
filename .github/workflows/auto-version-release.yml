@@ -133,8 +133,11 @@ jobs:
 
       - name: Explicit Submodule Update
         run: |
-          git submodule sync --recursive || true
-          git submodule update --init --recursive || true
+          # Only update submodules that exist in .gitmodules
+          if [ -f .gitmodules ]; then
+            git submodule sync --recursive || true
+            git submodule update --init --recursive || true
+          fi
 
       - name: Determine version
         id: version
@@ -320,8 +323,11 @@ jobs:
 
       - name: Explicit Submodule Update
         run: |
-          git submodule sync --recursive || true
-          git submodule update --init --recursive || true
+          # Only update submodules that exist in .gitmodules
+          if [ -f .gitmodules ]; then
+            git submodule sync --recursive || true
+            git submodule update --init --recursive || true
+          fi
 
       - name: Determine version
         id: version
