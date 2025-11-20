@@ -57,7 +57,8 @@ import com.hyperxray.an.feature.dashboard.components.ModernStatCard
 import com.hyperxray.an.feature.dashboard.components.PerformanceIndicator
 import com.hyperxray.an.feature.dashboard.components.QuickStatsCard
 import com.hyperxray.an.feature.dashboard.components.StatRow
-import com.hyperxray.an.feature.dashboard.components.TrafficChartCard
+import com.hyperxray.an.feature.dashboard.components.FuturisticTrafficChart
+
 import com.hyperxray.an.feature.dashboard.formatBytes
 import com.hyperxray.an.feature.dashboard.formatNumber
 import com.hyperxray.an.feature.dashboard.formatUptime
@@ -518,10 +519,9 @@ fun DashboardScreen(
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
             ) {
-                TrafficChartCard(
+                FuturisticTrafficChart(
                     uplinkThroughput = coreStats.uplinkThroughput,
-                    downlinkThroughput = coreStats.downlinkThroughput,
-                    iconRes = resources.drawableCloudDownload
+                    downlinkThroughput = coreStats.downlinkThroughput
                 )
             }
         }

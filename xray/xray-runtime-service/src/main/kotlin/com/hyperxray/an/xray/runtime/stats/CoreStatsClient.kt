@@ -119,10 +119,10 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
         
         // Channel is not usable, try to wait for it to become ready
         val state = channel.getState(true) // true = try to connect
-        if (state == ConnectivityState.READY || state == ConnectivityState.CONNECTING) {
-            // Wait up to 200ms for connection (optimized from 1s for faster response)
+        if (state == ConnectivityState.READY || state == ConnectivityState.CONNECTING || state == ConnectivityState.IDLE) {
+            // Wait up to 500ms for connection (increased from 200ms for better reliability)
             var waited = 0L
-            val maxWait = 200L
+            val maxWait = 500L
             val checkInterval = 50L
             
             while (waited < maxWait) {
@@ -242,6 +242,10 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
             var totalUplink = 0L
             var totalDownlink = 0L
             val seenStats = mutableSetOf<String>() // Track seen stat names to avoid duplicates
+            val allStatNames = mutableListOf<String>() // Track all stat names for debugging
+            var matchedStatsCount = 0 // Track how many stats matched our patterns
+            
+            Log.d("CoreStatsClient", "Processing $statCount stats for traffic data...")
             
             response?.statList?.forEach { stat ->
                 // Skip if we've already processed this stat
@@ -250,25 +254,94 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
                     return@forEach
                 }
                 seenStats.add(stat.name)
+                allStatNames.add(stat.name)
                 
                 Log.d("CoreStatsClient", "Stat: ${stat.name} = ${stat.value}")
                 
-                // Check for uplink/downlink in stat name
+                val statNameLower = stat.name.lowercase()
+                val isUplink = statNameLower.contains("uplink", ignoreCase = true)
+                val isDownlink = statNameLower.contains("downlink", ignoreCase = true)
+                val hasTraffic = statNameLower.contains("traffic", ignoreCase = true)
+                val isOutbound = statNameLower.contains("outbound", ignoreCase = true)
+                val isInbound = statNameLower.contains("inbound", ignoreCase = true)
+                
+                // Improved pattern matching:
+                // 1. First priority: stat names containing both "uplink"/"downlink" AND "traffic"
+                // 2. Second priority: stat names containing "uplink"/"downlink" (even without "traffic")
+                // 3. Also check for "outbound" (usually uplink) and "inbound" (usually downlink) patterns
+                // Note: Check downlink patterns BEFORE uplink patterns to avoid conflicts
+                var matched = false
                 when {
-                    stat.name.contains("uplink", ignoreCase = true) && 
-                    stat.name.contains("traffic", ignoreCase = true) -> {
-                        totalUplink += stat.value
-                        Log.d("CoreStatsClient", "Found uplink stat: ${stat.name} = ${stat.value}, total now: $totalUplink")
-                    }
-                    stat.name.contains("downlink", ignoreCase = true) && 
-                    stat.name.contains("traffic", ignoreCase = true) -> {
+                    // Downlink patterns (checked first to prioritize)
+                    (isDownlink && hasTraffic) -> {
                         totalDownlink += stat.value
-                        Log.d("CoreStatsClient", "Found downlink stat: ${stat.name} = ${stat.value}, total now: $totalDownlink")
+                        matched = true
+                        matchedStatsCount++
+                        Log.d("CoreStatsClient", "✓ Found downlink+traffic stat: ${stat.name} = ${stat.value}, total now: $totalDownlink")
                     }
+                    (isDownlink && !isUplink) -> {
+                        // Only downlink, no uplink - likely downlink traffic
+                        totalDownlink += stat.value
+                        matched = true
+                        matchedStatsCount++
+                        Log.d("CoreStatsClient", "✓ Found downlink-only stat: ${stat.name} = ${stat.value}, total now: $totalDownlink")
+                    }
+                    (isInbound && hasTraffic) -> {
+                        // Inbound usually means downlink
+                        totalDownlink += stat.value
+                        matched = true
+                        matchedStatsCount++
+                        Log.d("CoreStatsClient", "✓ Found inbound+traffic stat (downlink): ${stat.name} = ${stat.value}, total now: $totalDownlink")
+                    }
+                    (isInbound && !isOutbound && !isUplink) -> {
+                        // Inbound without outbound/uplink - likely downlink (even without "traffic" keyword)
+                        totalDownlink += stat.value
+                        matched = true
+                        matchedStatsCount++
+                        Log.d("CoreStatsClient", "✓ Found inbound-only stat (downlink): ${stat.name} = ${stat.value}, total now: $totalDownlink")
+                    }
+                    // Uplink patterns
+                    (isUplink && hasTraffic) -> {
+                        totalUplink += stat.value
+                        matched = true
+                        matchedStatsCount++
+                        Log.d("CoreStatsClient", "✓ Found uplink+traffic stat: ${stat.name} = ${stat.value}, total now: $totalUplink")
+                    }
+                    (isUplink && !isDownlink) -> {
+                        // Only uplink, no downlink - likely uplink traffic
+                        totalUplink += stat.value
+                        matched = true
+                        matchedStatsCount++
+                        Log.d("CoreStatsClient", "✓ Found uplink-only stat: ${stat.name} = ${stat.value}, total now: $totalUplink")
+                    }
+                    (isOutbound && hasTraffic) -> {
+                        // Outbound usually means uplink
+                        totalUplink += stat.value
+                        matched = true
+                        matchedStatsCount++
+                        Log.d("CoreStatsClient", "✓ Found outbound+traffic stat (uplink): ${stat.name} = ${stat.value}, total now: $totalUplink")
+                    }
+                    (isOutbound && !isInbound && !isDownlink) -> {
+                        // Outbound without inbound/downlink - likely uplink (even without "traffic" keyword)
+                        totalUplink += stat.value
+                        matched = true
+                        matchedStatsCount++
+                        Log.d("CoreStatsClient", "✓ Found outbound-only stat (uplink): ${stat.name} = ${stat.value}, total now: $totalUplink")
+                    }
+                }
+                
+                // Log unmatched stats for debugging (only if they seem traffic-related)
+                if (!matched && (isUplink || isDownlink || isOutbound || isInbound || hasTraffic)) {
+                    Log.d("CoreStatsClient", "⚠ Unmatched traffic-related stat: ${stat.name} = ${stat.value} (uplink=$isUplink, downlink=$isDownlink, traffic=$hasTraffic, outbound=$isOutbound, inbound=$isInbound)")
                 }
             }
             
-            Log.d("CoreStatsClient", "Total Uplink: $totalUplink, Total Downlink: $totalDownlink")
+            // Log summary
+            if (totalUplink == 0L && totalDownlink == 0L && allStatNames.isNotEmpty()) {
+                Log.w("CoreStatsClient", "⚠ No traffic stats found! Processed ${allStatNames.size} unique stats, matched $matchedStatsCount. All stat names: ${allStatNames.joinToString(", ")}")
+            } else {
+                Log.i("CoreStatsClient", "✓ Traffic stats summary: Uplink=${totalUplink} bytes, Downlink=${totalDownlink} bytes (matched $matchedStatsCount/${allStatNames.size} stats)")
+            }
             
             if (totalUplink > 0 || totalDownlink > 0) {
                 TrafficState(totalUplink, totalDownlink)
@@ -304,6 +377,10 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
         var totalUplink = 0L
         var totalDownlink = 0L
         val seenStats = mutableSetOf<String>() // Track seen stat names to avoid duplicates
+        val allStatNames = mutableListOf<String>() // Track all stat names for debugging
+        var matchedStatsCount = 0 // Track how many stats matched our patterns
+        
+        Log.d("CoreStatsClient", "Trying fallback patterns: ${patterns.joinToString(", ")}")
         
         for (pattern in patterns) {
             val request = QueryStatsRequest.newBuilder()
@@ -327,7 +404,7 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
                 })
             }
             val statCount = response?.statList?.size ?: 0
-            Log.d("CoreStatsClient", "Pattern '$pattern' returned $statCount stats")
+            Log.d("CoreStatsClient", "Fallback pattern '$pattern' returned $statCount stats")
             
             response?.statList?.forEach { stat ->
                 // Skip if we've already processed this stat
@@ -336,26 +413,95 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
                     return@forEach
                 }
                 seenStats.add(stat.name)
+                allStatNames.add(stat.name)
                 
-                Log.d("CoreStatsClient", "Stat: ${stat.name} = ${stat.value}")
+                Log.d("CoreStatsClient", "Fallback stat: ${stat.name} = ${stat.value}")
                 
-                // Check for uplink/downlink in stat name
+                val statNameLower = stat.name.lowercase()
+                val isUplink = statNameLower.contains("uplink", ignoreCase = true)
+                val isDownlink = statNameLower.contains("downlink", ignoreCase = true)
+                val hasTraffic = statNameLower.contains("traffic", ignoreCase = true)
+                val isOutbound = statNameLower.contains("outbound", ignoreCase = true)
+                val isInbound = statNameLower.contains("inbound", ignoreCase = true)
+                
+                // Improved pattern matching (same as main function):
+                // 1. First priority: stat names containing both "uplink"/"downlink" AND "traffic"
+                // 2. Second priority: stat names containing "uplink"/"downlink" (even without "traffic")
+                // 3. Also check for "outbound" (usually uplink) and "inbound" (usually downlink) patterns
+                // Note: Check downlink patterns BEFORE uplink patterns to avoid conflicts
+                var matched = false
                 when {
-                    stat.name.contains("uplink", ignoreCase = true) && 
-                    stat.name.contains("traffic", ignoreCase = true) -> {
-                        totalUplink += stat.value
-                        Log.d("CoreStatsClient", "Found uplink stat: ${stat.name} = ${stat.value}, total now: $totalUplink")
-                    }
-                    stat.name.contains("downlink", ignoreCase = true) && 
-                    stat.name.contains("traffic", ignoreCase = true) -> {
+                    // Downlink patterns (checked first to prioritize)
+                    (isDownlink && hasTraffic) -> {
                         totalDownlink += stat.value
-                        Log.d("CoreStatsClient", "Found downlink stat: ${stat.name} = ${stat.value}, total now: $totalDownlink")
+                        matched = true
+                        matchedStatsCount++
+                        Log.d("CoreStatsClient", "✓ Found downlink+traffic stat (fallback): ${stat.name} = ${stat.value}, total now: $totalDownlink")
                     }
+                    (isDownlink && !isUplink) -> {
+                        // Only downlink, no uplink - likely downlink traffic
+                        totalDownlink += stat.value
+                        matched = true
+                        matchedStatsCount++
+                        Log.d("CoreStatsClient", "✓ Found downlink-only stat (fallback): ${stat.name} = ${stat.value}, total now: $totalDownlink")
+                    }
+                    (isInbound && hasTraffic) -> {
+                        // Inbound usually means downlink
+                        totalDownlink += stat.value
+                        matched = true
+                        matchedStatsCount++
+                        Log.d("CoreStatsClient", "✓ Found inbound+traffic stat (downlink, fallback): ${stat.name} = ${stat.value}, total now: $totalDownlink")
+                    }
+                    (isInbound && !isOutbound && !isUplink) -> {
+                        // Inbound without outbound/uplink - likely downlink (even without "traffic" keyword)
+                        totalDownlink += stat.value
+                        matched = true
+                        matchedStatsCount++
+                        Log.d("CoreStatsClient", "✓ Found inbound-only stat (downlink, fallback): ${stat.name} = ${stat.value}, total now: $totalDownlink")
+                    }
+                    // Uplink patterns
+                    (isUplink && hasTraffic) -> {
+                        totalUplink += stat.value
+                        matched = true
+                        matchedStatsCount++
+                        Log.d("CoreStatsClient", "✓ Found uplink+traffic stat (fallback): ${stat.name} = ${stat.value}, total now: $totalUplink")
+                    }
+                    (isUplink && !isDownlink) -> {
+                        // Only uplink, no downlink - likely uplink traffic
+                        totalUplink += stat.value
+                        matched = true
+                        matchedStatsCount++
+                        Log.d("CoreStatsClient", "✓ Found uplink-only stat (fallback): ${stat.name} = ${stat.value}, total now: $totalUplink")
+                    }
+                    (isOutbound && hasTraffic) -> {
+                        // Outbound usually means uplink
+                        totalUplink += stat.value
+                        matched = true
+                        matchedStatsCount++
+                        Log.d("CoreStatsClient", "✓ Found outbound+traffic stat (uplink, fallback): ${stat.name} = ${stat.value}, total now: $totalUplink")
+                    }
+                    (isOutbound && !isInbound && !isDownlink) -> {
+                        // Outbound without inbound/downlink - likely uplink (even without "traffic" keyword)
+                        totalUplink += stat.value
+                        matched = true
+                        matchedStatsCount++
+                        Log.d("CoreStatsClient", "✓ Found outbound-only stat (uplink, fallback): ${stat.name} = ${stat.value}, total now: $totalUplink")
+                    }
+                }
+                
+                // Log unmatched stats for debugging (only if they seem traffic-related)
+                if (!matched && (isUplink || isDownlink || isOutbound || isInbound || hasTraffic)) {
+                    Log.d("CoreStatsClient", "⚠ Unmatched traffic-related stat (fallback): ${stat.name} = ${stat.value} (uplink=$isUplink, downlink=$isDownlink, traffic=$hasTraffic, outbound=$isOutbound, inbound=$isInbound)")
                 }
             }
         }
         
-        Log.d("CoreStatsClient", "Fallback Total Uplink: $totalUplink, Total Downlink: $totalDownlink")
+        // Log summary
+        if (totalUplink == 0L && totalDownlink == 0L && allStatNames.isNotEmpty()) {
+            Log.w("CoreStatsClient", "⚠ Fallback: No traffic stats found! Processed ${allStatNames.size} unique stats, matched $matchedStatsCount. All stat names: ${allStatNames.joinToString(", ")}")
+        } else {
+            Log.i("CoreStatsClient", "✓ Fallback traffic stats summary: Uplink=${totalUplink} bytes, Downlink=${totalDownlink} bytes (matched $matchedStatsCount/${allStatNames.size} stats)")
+        }
         
         return if (totalUplink > 0 || totalDownlink > 0) {
             TrafficState(totalUplink, totalDownlink)
@@ -497,4 +643,6 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
         }
     }
 }
+
+
 

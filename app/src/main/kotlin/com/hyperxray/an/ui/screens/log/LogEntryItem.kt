@@ -6,15 +6,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -25,9 +20,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.border
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import com.hyperxray.an.ui.theme.LogColors
 
 @Composable
@@ -35,8 +27,6 @@ fun LogEntryItem(
     logEntry: String,
     onClick: () -> Unit = {}
 ) {
-    // Cache all parsing results to avoid recomputation on every recomposition
-    // This prevents GC pressure from repeated string operations
     val parsedData = remember(logEntry) {
         try {
             val upperEntry = logEntry.uppercase()
@@ -64,154 +54,88 @@ fun LogEntryItem(
             )
         }
     }
-    
-    val logLevel = parsedData.logLevel
-    val connectionType = parsedData.connectionType
-    val timestamp = parsedData.timestamp
-    val message = parsedData.message
-    val containsFailed = parsedData.containsFailed
-    val hasSNI = parsedData.hasSNI
-    val isSniffing = parsedData.isSniffing
-    val isDns = parsedData.isDns
-    
-    // Get connection type color for left border
-    // Priority: Failed > DNS > Sniffing > SNI > TCP/UDP
-    val borderColor = when {
-        containsFailed -> MaterialTheme.colorScheme.error // Red for failed logs
-        isDns -> LogColors.dnsBorderColor() // Theme-aware cyan for DNS logs
-        isSniffing -> LogColors.sniffingBorderColor() // Theme-aware orange for sniffing logs
-        hasSNI -> LogColors.sniBorderColor() // Theme-aware purple for SNI logs
-        connectionType == ConnectionType.TCP -> LogColors.tcpColor() // Theme-aware blue for TCP
-        connectionType == ConnectionType.UDP -> LogColors.udpColor() // Theme-aware green for UDP
-        else -> Color.Transparent
+
+    val accentColor = when {
+        parsedData.containsFailed -> Color(0xFFFF0055) // Neon Red
+        parsedData.logLevel == LogLevel.WARN -> Color(0xFFFFD700) // Gold
+        parsedData.isDns -> Color(0xFF00FFFF) // Cyan
+        parsedData.isSniffing -> Color(0xFFFF9900) // Orange
+        parsedData.hasSNI -> Color(0xFFBD00FF) // Purple
+        else -> Color(0xFF00FF99) // Spring Green
     }
-    
-    // Glassmorphism background colors
-    val glassBackground = when {
-        containsFailed -> listOf(
-            Color(0xFF000000).copy(alpha = 0.7f),
-            Color(0xFF1A0000).copy(alpha = 0.5f)
-        )
-        isDns -> listOf(
-            Color(0xFF000000).copy(alpha = 0.7f),
-            Color(0xFF001A1A).copy(alpha = 0.5f)
-        )
-        isSniffing -> listOf(
-            Color(0xFF000000).copy(alpha = 0.7f),
-            Color(0xFF1A0F00).copy(alpha = 0.5f)
-        )
-        hasSNI -> listOf(
-            Color(0xFF000000).copy(alpha = 0.7f),
-            Color(0xFF0A0A1A).copy(alpha = 0.5f)
-        )
-        else -> listOf(
-            Color(0xFF000000).copy(alpha = 0.6f),
-            Color(0xFF0A0A0A).copy(alpha = 0.4f)
-        )
-    }
-    
-    Box(
+
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(
-                Brush.verticalGradient(glassBackground)
-            )
-            .border(
-                width = 1.dp,
-                color = borderColor.copy(alpha = 0.6f),
-                shape = RoundedCornerShape(20.dp)
-            )
             .clickable(onClick = onClick)
+            .background(Color(0xFF050505)) // Match screen bg
+            .padding(horizontal = 16.dp, vertical = 4.dp) // Tighter vertical padding for terminal look
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            // Left border indicator
-            if (borderColor != Color.Transparent) {
-                Box(
-                    modifier = Modifier
-                        .width(4.dp)
-                        .fillMaxSize()
-                        .background(
-                            borderColor,
-                            shape = RoundedCornerShape(
-                                topStart = 12.dp,
-                                bottomStart = 12.dp,
-                                topEnd = 0.dp,
-                                bottomEnd = 0.dp
-                            )
-                        )
+        // Timestamp Column
+        if (parsedData.timestamp.isNotEmpty()) {
+            Text(
+                text = parsedData.timestamp,
+                color = Color.Gray,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+        }
+
+        // Content Column
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Futuristic Marker
+                Text(
+                    text = ">>",
+                    color = accentColor,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
                 )
-            }
-            
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            ) {
-                // Log level badge, connection type badge, SNI badge, and timestamp row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Log level badge
-                    LogLevelBadge(level = logLevel)
-                    
-                    // Connection type badge (TCP/UDP)
-                    if (connectionType != ConnectionType.UNKNOWN) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        ConnectionTypeBadge(type = connectionType)
-                    }
-                    
-                    // SNI badge
-                    if (hasSNI) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        SNIBadge()
-                    }
-                    
-                    // Sniffing badge
-                    if (isSniffing) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        SniffingBadge()
-                    }
-                    
-                    // DNS badge
-                    if (isDns) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        DnsBadge()
-                    }
-                    
-                    Spacer(modifier = Modifier.width(8.dp))
-                    
-                    // Timestamp
-                    if (timestamp.isNotEmpty()) {
-                        Text(
-                            text = timestamp,
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                letterSpacing = 0.1.sp
-                            ),
-                            color = borderColor.copy(alpha = 0.9f),
-                            fontWeight = FontWeight.Medium,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
+                
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // Badges (Text-only for terminal look)
+                if (parsedData.logLevel != LogLevel.UNKNOWN && parsedData.logLevel != LogLevel.INFO) {
+                    Text(
+                        text = "[${parsedData.logLevel.name}]",
+                        color = accentColor,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
                 }
                 
-                Spacer(modifier = Modifier.height(6.dp))
-                
-                // Log message
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        letterSpacing = 0.1.sp
-                    ),
-                    fontFamily = FontFamily.Monospace,
-                    color = Color(0xFFE0E0E0), // Light gray for better contrast on obsidian
-                    lineHeight = 18.sp
-                )
+                if (parsedData.connectionType != ConnectionType.UNKNOWN) {
+                    Text(
+                        text = "[${parsedData.connectionType.name}]",
+                        color = Color.LightGray,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                }
             }
+
+            Text(
+                text = parsedData.message,
+                color = if (parsedData.containsFailed) Color(0xFFFF5555) else Color(0xFFE0E0E0),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp,
+                lineHeight = 16.sp
+            )
+            
+            // Separator line for that "scanline" feel
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .height(1.dp)
+                    .background(Color(0xFF151515))
+            )
         }
     }
 }
-

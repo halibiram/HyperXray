@@ -122,10 +122,15 @@ class MainViewModel(application: Application) :
     // Lock object for synchronous operations (used in init and onCleared)
     private val receiversLock = Any()
     
-    // Throughput calculation state
+    // Throughput calculation state (Xray-core)
     private var lastUplink: Long = 0L
     private var lastDownlink: Long = 0L
     private var lastStatsTime: Long = 0L
+    
+    // Native tunnel stats state (TProxy layer - more accurate)
+    private var lastNativeUplink: Long = 0L
+    private var lastNativeDownlink: Long = 0L
+    private var lastNativeStatsTime: Long = 0L
 
     private val fileManager: FileManager = FileManager(application, prefs)
     
@@ -273,10 +278,14 @@ class MainViewModel(application: Application) :
             
             _coreStatsState.value = CoreStatsState()
             _socks5Ready.value = false // Reset SOCKS5 ready state
-            // Reset throughput calculation state
+            // Reset throughput calculation state (Xray-core)
             lastUplink = 0L
             lastDownlink = 0L
             lastStatsTime = 0L
+            // Reset native tunnel stats state
+            lastNativeUplink = 0L
+            lastNativeDownlink = 0L
+            lastNativeStatsTime = 0L
             // Close client when service stops (non-blocking, uses helper function)
             viewModelScope.launch {
                 closeCoreStatsClient()
@@ -831,14 +840,22 @@ class MainViewModel(application: Application) :
             )
             
             // Wait for real connection data (uptime > 0 or throughput > 0)
-            // No timeout - wait until data arrives or service stops
+            // Use fast direct CoreStatsClient.getTraffic() check instead of slow updateCoreStats()
             elapsed = 0L
-            maxWait = 30000L // 30 seconds max wait for data
-            val progressCheckInterval = 1000L // Update progress every second
+            maxWait = 5000L // 5 seconds max wait for data (optimized for speed)
+            val verifyingCheckInterval = 200L // Check every 200ms (very fast polling)
+            val progressCheckInterval = 500L // Update progress every 500ms
+            
+            // First check immediately (no delay) - data might already be available
+            var firstCheck = true
             
             while (elapsed < maxWait) {
-                kotlinx.coroutines.delay(checkInterval)
-                elapsed += checkInterval
+                if (!firstCheck) {
+                    kotlinx.coroutines.delay(verifyingCheckInterval)
+                    elapsed += verifyingCheckInterval
+                } else {
+                    firstCheck = false
+                }
                 
                 // Check if already marked as connected
                 if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
@@ -851,9 +868,56 @@ class MainViewModel(application: Application) :
                     return@launch
                 }
                 
-                // Check for real connection data
+                // Fast direct CoreStatsClient check - much faster than updateCoreStats()
+                // This only checks traffic, not full stats, so it's very quick
+                var hasTrafficData = false
+                try {
+                    val quickClient = CoreStatsClient.create("127.0.0.1", prefs.apiPort)
+                    if (quickClient != null) {
+                        val traffic = withTimeoutOrNull(1000L) { // 1 second timeout for quick check
+                            quickClient.getTraffic()
+                        }
+                        if (traffic != null && (traffic.uplink > 0 || traffic.downlink > 0)) {
+                            // Traffic data found! Update state and mark as connected
+                            Log.d(TAG, "Fast traffic check found data: uplink=${traffic.uplink}, downlink=${traffic.downlink}")
+                            
+                            // Update state with traffic data
+                            val currentState = _coreStatsState.value
+                            val newStats = CoreStatsState(
+                                uplink = traffic.uplink,
+                                downlink = traffic.downlink,
+                                uplinkThroughput = currentState.uplinkThroughput,
+                                downlinkThroughput = currentState.downlinkThroughput,
+                                numGoroutine = currentState.numGoroutine,
+                                numGC = currentState.numGC,
+                                alloc = currentState.alloc,
+                                totalAlloc = currentState.totalAlloc,
+                                sys = currentState.sys,
+                                mallocs = currentState.mallocs,
+                                frees = currentState.frees,
+                                liveObjects = currentState.liveObjects,
+                                pauseTotalNs = currentState.pauseTotalNs,
+                                uptime = currentState.uptime
+                            )
+                            _coreStatsState.value = newStats
+                            hasTrafficData = true
+                        }
+                        // Close quick client after use
+                        try {
+                            quickClient.close()
+                        } catch (closeEx: Exception) {
+                            Log.w(TAG, "Error closing quick client: ${closeEx.message}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Quick check failed, continue with existing state check
+                    Log.d(TAG, "Quick traffic check failed: ${e.message}")
+                }
+                
+                // Also check existing state (might have been updated by updateCoreStats from DashboardScreen)
                 val stats = _coreStatsState.value
-                val hasRealConnection = stats.uptime > 0 || 
+                val hasRealConnection = hasTrafficData || 
+                                       stats.uptime > 0 || 
                                        stats.uplinkThroughput > 0 || 
                                        stats.downlinkThroughput > 0 ||
                                        stats.uplink > 0 || 
@@ -861,12 +925,13 @@ class MainViewModel(application: Application) :
                 
                 if (hasRealConnection) {
                     // Real data is flowing, connection is established
+                    Log.d(TAG, "Real connection data detected in VERIFYING stage (elapsed: ${elapsed}ms), updating to Connected")
                     _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connected
                     return@launch
                 }
                 
                 // Update progress periodically (slowly increase to 0.98)
-                if (elapsed % progressCheckInterval < checkInterval) {
+                if (elapsed % progressCheckInterval < verifyingCheckInterval || elapsed == 0L) {
                     val progress = 0.9f + (elapsed.toFloat() / maxWait.toFloat()) * 0.08f
                     _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connecting(
                         stage = com.hyperxray.an.feature.dashboard.ConnectionStage.VERIFYING,
@@ -875,7 +940,45 @@ class MainViewModel(application: Application) :
                 }
             }
             
-            // If still no data after timeout, check one more time
+            // If still no data after timeout, do one final fast check
+            try {
+                val finalClient = CoreStatsClient.create("127.0.0.1", prefs.apiPort)
+                if (finalClient != null) {
+                    val traffic = withTimeoutOrNull(1000L) {
+                        finalClient.getTraffic()
+                    }
+                    if (traffic != null && (traffic.uplink > 0 || traffic.downlink > 0)) {
+                        // Final check found data, update state immediately
+                        Log.d(TAG, "Final fast check found traffic data: uplink=${traffic.uplink}, downlink=${traffic.downlink}")
+                        val currentState = _coreStatsState.value
+                        val newStats = CoreStatsState(
+                            uplink = traffic.uplink,
+                            downlink = traffic.downlink,
+                            uplinkThroughput = currentState.uplinkThroughput,
+                            downlinkThroughput = currentState.downlinkThroughput,
+                            numGoroutine = currentState.numGoroutine,
+                            numGC = currentState.numGC,
+                            alloc = currentState.alloc,
+                            totalAlloc = currentState.totalAlloc,
+                            sys = currentState.sys,
+                            mallocs = currentState.mallocs,
+                            frees = currentState.frees,
+                            liveObjects = currentState.liveObjects,
+                            pauseTotalNs = currentState.pauseTotalNs,
+                            uptime = currentState.uptime
+                        )
+                        _coreStatsState.value = newStats
+                    }
+                    try {
+                        finalClient.close()
+                    } catch (closeEx: Exception) {
+                        Log.w(TAG, "Error closing final client: ${closeEx.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "Final fast check failed: ${e.message}")
+            }
+            
             val finalStats = _coreStatsState.value
             val hasFinalConnection = finalStats.uptime > 0 || 
                                      finalStats.uplinkThroughput > 0 || 
@@ -884,9 +987,13 @@ class MainViewModel(application: Application) :
                                      finalStats.downlink > 0
             
             if (hasFinalConnection && _isServiceEnabled.value) {
+                Log.d(TAG, "Final check: Real connection data detected, updating to Connected")
                 _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connected
+            } else {
+                // Timeout reached but no data - keep showing VERIFYING
+                // updateCoreStats will eventually update when data arrives
+                Log.w(TAG, "VERIFYING timeout reached (${maxWait}ms) but no connection data detected yet")
             }
-            // Otherwise keep showing VERIFYING - updateCoreStats will update when data arrives
         }
     }
 
@@ -998,10 +1105,29 @@ class MainViewModel(application: Application) :
             return
         }
         
+        // Get active instance ports first to determine which port to use for main client
+        val managerForClient = multiXrayCoreManager // Local copy to avoid smart cast issues
+        val activeInstancesForClient = if (managerForClient != null) {
+            managerForClient.getActiveInstances()
+        } else {
+            emptyMap()
+        }
+        
+        // Determine port for main client: prefer first active instance port, fallback to prefs.apiPort
+        val mainClientPort = if (activeInstancesForClient.isNotEmpty()) {
+            activeInstancesForClient.values.first()
+        } else {
+            prefs.apiPort
+        }
+        
         // Synchronize access to coreStatsClient to prevent race conditions
         val client = coreStatsClientMutex.withLock {
-            // Check if we can recreate client (cooldown and state checks)
-            if (coreStatsClient == null) {
+            // Check if we need to recreate client (null, wrong port, or bad state)
+            val existingClient = coreStatsClient // Local copy for smart cast
+            val needsRecreation = existingClient == null || 
+                                 (clientState == ClientState.FAILED && consecutiveFailures >= 3)
+            
+            if (needsRecreation) {
                 val now = System.currentTimeMillis()
                 val timeSinceClose = now - lastClientCloseTime
                 
@@ -1009,13 +1135,14 @@ class MainViewModel(application: Application) :
                 if (timeSinceClose < MIN_RECREATE_INTERVAL_MS) {
                     val remainingCooldown = MIN_RECREATE_INTERVAL_MS - timeSinceClose
                     Log.d(TAG, "Client recreation cooldown active, ${remainingCooldown}ms remaining")
-                    return@withLock null
+                    // Return existing client if available, even if in bad state
+                    return@withLock existingClient
                 }
                 
                 // Check state: only recreate if STOPPED or FAILED (not SHUTTING_DOWN or CREATING)
                 if (clientState != ClientState.STOPPED && clientState != ClientState.FAILED) {
                     Log.d(TAG, "Client in state ${clientState}, skipping recreation")
-                    return@withLock null
+                    return@withLock existingClient
                 }
                 
                 // Calculate exponential backoff based on consecutive failures
@@ -1027,8 +1154,18 @@ class MainViewModel(application: Application) :
                     if (timeSinceClose < backoffMs) {
                         val remainingBackoff = backoffMs - timeSinceClose
                         Log.d(TAG, "Exponential backoff active, ${remainingBackoff}ms remaining (failures: $consecutiveFailures)")
-                        return@withLock null
+                        return@withLock existingClient
                     }
+                }
+                
+                // Close existing client if it exists
+                if (existingClient != null) {
+                    try {
+                        existingClient.close()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error closing existing client before recreation: ${e.message}")
+                    }
+                    coreStatsClient = null
                 }
                 
                 // Set state to CREATING to prevent concurrent creation attempts
@@ -1036,19 +1173,20 @@ class MainViewModel(application: Application) :
                 
                 try {
                     // create() now returns nullable and handles retries internally
-                    coreStatsClient = CoreStatsClient.create("127.0.0.1", prefs.apiPort)
+                    Log.d(TAG, "Attempting to create CoreStatsClient on port $mainClientPort")
+                    coreStatsClient = CoreStatsClient.create("127.0.0.1", mainClientPort)
                     if (coreStatsClient != null) {
-                        Log.d(TAG, "Created new CoreStatsClient")
+                        Log.i(TAG, "Successfully created new CoreStatsClient on port $mainClientPort")
                         clientState = ClientState.READY
                         consecutiveFailures = 0 // Reset on success
                     } else {
-                        Log.w(TAG, "Failed to create CoreStatsClient after retries")
+                        Log.w(TAG, "Failed to create CoreStatsClient on port $mainClientPort after retries")
                         clientState = ClientState.FAILED
                         consecutiveFailures++
                         lastClientCloseTime = System.currentTimeMillis()
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Exception creating CoreStatsClient: ${e.message}", e)
+                    Log.e(TAG, "Exception creating CoreStatsClient on port $mainClientPort: ${e.message}", e)
                     clientState = ClientState.FAILED
                     consecutiveFailures++
                     lastClientCloseTime = System.currentTimeMillis()
@@ -1063,13 +1201,9 @@ class MainViewModel(application: Application) :
         // Validate client was created
         if (client == null) {
             Log.w(TAG, "CoreStatsClient is null, cannot update stats - will retry on next call")
-            // Don't return immediately - update state with safe fallback values
-            // This allows UI to show "connecting" or "unavailable" state
-            val currentState = _coreStatsState.value
-            _coreStatsState.value = currentState.copy(
-                // Preserve existing values, don't reset to zero
-                // UI can show these as "last known" or "unavailable"
-            )
+            // Preserve existing state - don't reset to zero
+            // This allows UI to show last known values while client is being created
+            // State is already preserved (no need to update with same values)
             return
         }
         
@@ -1098,12 +1232,15 @@ class MainViewModel(application: Application) :
         // Handle timeout, exception, or service disabled
         if (statsResult == null) {
             // Timeout, exception, or service disabled occurred
-            Log.w(TAG, "Stats query failed (timeout/exception/disabled)")
+            Log.w(TAG, "System stats query failed (timeout/exception/disabled)")
             // Only close client if service is disabled or we've had multiple failures
             // This prevents rapid recreate loops
             if (!_isServiceEnabled.value) {
+                Log.d(TAG, "Service disabled, closing client and preserving state")
                 closeCoreStatsClient()
                 consecutiveFailures = 0
+                // Preserve existing state when service is disabled
+                // State will be reset in stopReceiver
             } else {
                 // Service is enabled but query failed - increment failure count
                 // Only close client after multiple consecutive failures to prevent loops
@@ -1117,6 +1254,8 @@ class MainViewModel(application: Application) :
                 } else {
                     Log.d(TAG, "Stats query failed but keeping client (failures: $consecutiveFailures)")
                 }
+                // Preserve existing state on failure - don't reset to zero
+                // UI will show last known values
             }
             return
         }
@@ -1131,27 +1270,103 @@ class MainViewModel(application: Application) :
         
         // Check if service is still enabled after first gRPC call
         if (!_isServiceEnabled.value) {
-            Log.d(TAG, "Service disabled during stats update, skipping")
+            Log.d(TAG, "Service disabled during stats update after system stats query, preserving state and closing client")
             closeCoreStatsClient()
+            // Preserve existing state - don't reset to zero
             return
         }
         
-        val trafficResult = withTimeoutOrNull(5000L) {
-            try {
-                // Check if service is still enabled before making gRPC call
-                if (!_isServiceEnabled.value) {
-                    return@withTimeoutOrNull null
-                }
-                // Make gRPC call - may throw exception or timeout
-                client.getTraffic()
-            } catch (e: Exception) {
-                // Exception occurred during gRPC call - log it
-                // Note: This exception will be caught by withTimeoutOrNull and null will be returned
-                // but we catch it here to log it before that happens
-                Log.e(TAG, "Error getting traffic stats: ${e.message}", e)
-                // Return null to indicate failure (withTimeoutOrNull will return null)
-                null
+        // Get all active instance ports from MultiXrayCoreManager
+        // If multiple instances are running, we need to aggregate traffic from all of them
+        val managerForTraffic = multiXrayCoreManager // Local copy to avoid smart cast issues
+        val activeInstances = if (managerForTraffic != null) {
+            managerForTraffic.getActiveInstances()
+        } else {
+            // multiXrayCoreManager might not be initialized yet (created in init coroutine)
+            // Log this case and use fallback
+            Log.w(TAG, "multiXrayCoreManager is null, using fallback port ${prefs.apiPort}")
+            emptyMap()
+        }
+        
+        val portsToQuery = if (activeInstances.isNotEmpty()) {
+            activeInstances.values.toList()
+        } else {
+            // Fallback to prefs.apiPort if no active instances found
+            // This can happen if:
+            // 1. multiXrayCoreManager is null (not initialized yet)
+            // 2. No active instances are running
+            // 3. Single instance mode (instanceCount = 1)
+            Log.d(TAG, "No active instances found in multiXrayCoreManager, using fallback port ${prefs.apiPort}")
+            listOf(prefs.apiPort)
+        }
+        
+        Log.d(TAG, "Querying traffic from ${portsToQuery.size} instance(s): ${portsToQuery.joinToString(", ")}")
+        
+        // Aggregate traffic from all instances
+        var totalUplink = 0L
+        var totalDownlink = 0L
+        var successfulQueries = 0
+        
+        for (port in portsToQuery) {
+            val instanceClient = CoreStatsClient.create("127.0.0.1", port)
+            if (instanceClient == null) {
+                Log.w(TAG, "Failed to create CoreStatsClient for port $port (will try next port or fallback)")
+                continue
             }
+            
+            val instanceTraffic = withTimeoutOrNull(3000L) {
+                try {
+                    if (!_isServiceEnabled.value) {
+                        Log.d(TAG, "Service disabled during traffic query for port $port")
+                        return@withTimeoutOrNull null
+                    }
+                    instanceClient.getTraffic()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Exception getting traffic from port $port: ${e.message}", e)
+                    null
+                } finally {
+                    // Close instance client after use
+                    try {
+                        instanceClient.close()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error closing instance client for port $port: ${e.message}")
+                    }
+                }
+            }
+            
+            if (instanceTraffic != null) {
+                totalUplink += instanceTraffic.uplink
+                totalDownlink += instanceTraffic.downlink
+                successfulQueries++
+                Log.d(TAG, "Successfully queried port $port: uplink=${instanceTraffic.uplink}, downlink=${instanceTraffic.downlink}")
+            } else {
+                Log.w(TAG, "Failed to get traffic from port $port (timeout/exception/disabled)")
+            }
+        }
+        
+        val trafficResult = if (successfulQueries > 0) {
+            com.hyperxray.an.xray.runtime.stats.model.TrafficState(totalUplink, totalDownlink)
+        } else {
+            // Fallback: try using the main client if all instance queries failed
+            Log.w(TAG, "All ${portsToQuery.size} instance query(ies) failed, trying main client as fallback")
+            withTimeoutOrNull(3000L) {
+                try {
+                    if (!_isServiceEnabled.value) {
+                        Log.d(TAG, "Service disabled during main client fallback traffic query")
+                        return@withTimeoutOrNull null
+                    }
+                    client.getTraffic()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Exception getting traffic from main client fallback: ${e.message}", e)
+                    null
+                }
+            }
+        }
+        
+        if (successfulQueries > 1) {
+            Log.i(TAG, "Successfully aggregated traffic from $successfulQueries instances: totalUplink=$totalUplink, totalDownlink=$totalDownlink")
+        } else if (successfulQueries == 1 && portsToQuery.size > 1) {
+            Log.w(TAG, "Only 1 out of ${portsToQuery.size} instance queries succeeded")
         }
         
         // Handle timeout, exception, or service disabled
@@ -1161,22 +1376,27 @@ class MainViewModel(application: Application) :
             // Don't close client immediately - it might recover on next call
             // Only close if service is disabled
             if (!_isServiceEnabled.value) {
+                Log.d(TAG, "Service disabled during traffic query, closing client and preserving state")
                 closeCoreStatsClient()
                 consecutiveFailures = 0
+                // Preserve existing state when service is disabled
+                // State will be reset in stopReceiver
             } else {
                 // Increment failure count but don't close immediately
                 // Traffic failures are less critical than system stats failures
                 consecutiveFailures++
                 if (consecutiveFailures >= 5) {
-                    Log.w(TAG, "Multiple consecutive failures ($consecutiveFailures), closing client")
+                    Log.w(TAG, "Multiple consecutive traffic failures ($consecutiveFailures), closing client")
                     synchronized(coreStatsClientLock) {
                         clientState = ClientState.FAILED
                     }
                     closeCoreStatsClient()
+                } else {
+                    Log.d(TAG, "Traffic query failed but keeping client (failures: $consecutiveFailures)")
                 }
             }
-            // Preserve existing traffic values instead of returning
-            // This allows UI to show last known values
+            // Preserve existing state - don't update with failed query results
+            // This allows UI to show last known values while retrying
             // Note: We don't update state here since traffic failed - preserve all existing values
             return
         }
@@ -1191,49 +1411,68 @@ class MainViewModel(application: Application) :
         
         // Check if service is still enabled after both gRPC calls
         if (!_isServiceEnabled.value) {
-            Log.d(TAG, "Service disabled during stats update, skipping")
+            Log.d(TAG, "Service disabled during stats update after traffic query, preserving state and closing client")
             closeCoreStatsClient()
+            // Preserve existing state - don't reset to zero
             return
         }
         
         val stats = statsResult
         val traffic = trafficResult
 
-        // Validate that we got some data
-        if (stats == null && traffic == null) {
-            Log.w(TAG, "Both stats and traffic are null, closing client")
-            closeCoreStatsClient()
-            return
+        // At this point, traffic is guaranteed to be non-null (checked above)
+        // Validate that we got some data (though traffic is already validated)
+        if (stats == null) {
+            // Traffic is non-null, but stats might be null - that's okay, we can still update traffic
+            Log.d(TAG, "Stats is null but traffic is available, continuing with traffic update")
         }
-
-        // Preserve existing traffic values if new traffic data is null
-        val currentState = _coreStatsState.value
-        val newUplink = traffic?.uplink ?: currentState.uplink
-        val newDownlink = traffic?.downlink ?: currentState.downlink
-
-        // Calculate throughput (bytes per second)
-        val now = System.currentTimeMillis()
-        var uplinkThroughput = 0.0
-        var downlinkThroughput = 0.0
         
+        val currentState = _coreStatsState.value
+        val now = System.currentTimeMillis()
+        
+        // Preserve existing throughput values as default (will be updated if valid calculation is possible)
+        var uplinkThroughput = currentState.uplinkThroughput
+        var downlinkThroughput = currentState.downlinkThroughput
+        var newUplink = traffic.uplink
+        var newDownlink = traffic.downlink
+        
+        // Use Xray-core stats for throughput calculation
         if (lastStatsTime > 0 && now > lastStatsTime) {
             val timeDelta = (now - lastStatsTime) / 1000.0 // Convert to seconds
+            val MIN_TIME_DELTA = 0.1 // Minimum 100ms for valid calculation
             
-            if (timeDelta > 0) {
+            if (timeDelta >= MIN_TIME_DELTA) {
                 val uplinkDelta = newUplink - lastUplink
                 val downlinkDelta = newDownlink - lastDownlink
                 
-                uplinkThroughput = uplinkDelta / timeDelta
-                downlinkThroughput = downlinkDelta / timeDelta
+                // Handle negative deltas (e.g., xray restart resets counters)
+                if (uplinkDelta >= 0) {
+                    uplinkThroughput = uplinkDelta / timeDelta
+                } else {
+                    uplinkThroughput = 0.0
+                    Log.d(TAG, "Negative uplink delta detected (${uplinkDelta}), likely counter reset. Setting throughput to 0")
+                }
                 
-                Log.d(TAG, "Throughput calculated: uplink=${formatThroughput(uplinkThroughput)}, downlink=${formatThroughput(downlinkThroughput)}, timeDelta=${timeDelta}s")
+                if (downlinkDelta >= 0) {
+                    downlinkThroughput = downlinkDelta / timeDelta
+                } else {
+                    downlinkThroughput = 0.0
+                    Log.d(TAG, "Negative downlink delta detected (${downlinkDelta}), likely counter reset. Setting throughput to 0")
+                }
+                
+                Log.d(TAG, "Xray-core throughput calculated: uplink=${formatThroughput(uplinkThroughput)}, downlink=${formatThroughput(downlinkThroughput)}, timeDelta=${timeDelta}s, uplinkDelta=${uplinkDelta}, downlinkDelta=${downlinkDelta}")
+            } else {
+                // TimeDelta too small, preserve existing values
+                Log.d(TAG, "Xray-core timeDelta too small (${timeDelta}s), preserving existing throughput values")
             }
         } else if (lastStatsTime == 0L) {
-            // First measurement - initialize baseline
-            Log.d(TAG, "First throughput measurement - initializing baseline")
+            // First measurement - initialize baseline, keep throughput at 0
+            uplinkThroughput = 0.0
+            downlinkThroughput = 0.0
+            Log.d(TAG, "First Xray-core measurement - initializing baseline")
         }
         
-        // Update last values for next calculation
+        // Update last values for next calculation (always update when we have valid traffic)
         lastUplink = newUplink
         lastDownlink = newDownlink
         lastStatsTime = now
