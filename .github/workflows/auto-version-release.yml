@@ -267,10 +267,11 @@ jobs:
 
       - name: Get Release Notes
         id: release_notes
+        env:
+          XRAY_VERSION: ${{ needs.check-for-updates.outputs.new_xray_version }}
+          TAG_NAME: ${{ steps.version.outputs.tag_name }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
         run: |
-          XRAY_VERSION="${{ needs.check-for-updates.outputs.new_xray_version }}"
-          TAG_NAME="${{ steps.version.outputs.tag_name }}"
-          VERSION_NAME="${{ steps.version.outputs.version_name }}"
           BUILD_DATE=$(date -u +'%Y-%m-%d %H:%M:%S UTC')
           
           {
@@ -453,10 +454,11 @@ jobs:
 
       - name: Get Release Notes
         id: release_notes
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
+          XRAY_VERSION: ${{ env.XRAY_VERSION }}
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
-          VERSION_NAME="${{ steps.version.outputs.version_name }}"
-          XRAY_VERSION="${{ env.XRAY_VERSION }}"
           BUILD_DATE=$(date -u +'%Y-%m-%d %H:%M:%S UTC')
           
           {
