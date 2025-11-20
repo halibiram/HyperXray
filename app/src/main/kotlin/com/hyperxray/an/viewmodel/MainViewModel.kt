@@ -217,8 +217,7 @@ class MainViewModel(application: Application) :
     )
     val connectionState: StateFlow<com.hyperxray.an.feature.dashboard.ConnectionState> = _connectionState.asStateFlow()
 
-    // MultiXrayCoreManager for instance status tracking
-    private var multiXrayCoreManager: MultiXrayCoreManager? = null
+    // Instance status tracking (updated via broadcast from TProxyService)
     private val _instancesStatus = MutableStateFlow<Map<Int, XrayRuntimeStatus>>(emptyMap())
     val instancesStatus: StateFlow<Map<Int, XrayRuntimeStatus>> = _instancesStatus.asStateFlow()
 
@@ -320,38 +319,41 @@ class MainViewModel(application: Application) :
 
     private val instanceStatusUpdateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            // When TProxyService updates instance status, we get a signal
+            // When TProxyService updates instance status via broadcast
             val instanceCount = intent.getIntExtra("instance_count", 0)
             val hasRunning = intent.getBooleanExtra("has_running", false)
             
-            Log.d(TAG, "Instance status update: count=$instanceCount, hasRunning=$hasRunning")
+            Log.d(TAG, "Instance status update received: count=$instanceCount, hasRunning=$hasRunning")
             
-            viewModelScope.launch(Dispatchers.IO) {
-                if (instanceCount > 0 && isServiceEnabled.value) {
-                    // Create status map from broadcast data with PID and port info
-                    val syntheticStatus = mutableMapOf<Int, XrayRuntimeStatus>()
-                    for (i in 0 until instanceCount) {
-                        // Read PID and port info from broadcast
-                        val pid = intent.getLongExtra("instance_${i}_pid", 0L)
-                        val port = intent.getIntExtra("instance_${i}_port", 0)
-                        
-                        // Determine status based on PID and port
-                        if (pid > 0 && port > 0) {
-                            // Instance is running with valid PID and port
-                            syntheticStatus[i] = XrayRuntimeStatus.Running(processId = pid, apiPort = port)
-                        } else if (hasRunning) {
-                            // Has running instances but this one might not be ready yet
-                            syntheticStatus[i] = XrayRuntimeStatus.Starting
-                        } else {
-                            // No running instances yet
-                            syntheticStatus[i] = XrayRuntimeStatus.Starting
-                        }
-                    }
-                    if (syntheticStatus.isNotEmpty()) {
-                        _instancesStatus.value = syntheticStatus
-                        Log.d(TAG, "Updated instancesStatus with data: ${syntheticStatus.size} instances")
+            // Update status synchronously (no need for coroutine scope here)
+            if (instanceCount > 0) {
+                // Create status map from broadcast data with PID and port info
+                val statusMap = mutableMapOf<Int, XrayRuntimeStatus>()
+                for (i in 0 until instanceCount) {
+                    // Read PID and port info from broadcast
+                    val pid = intent.getLongExtra("instance_${i}_pid", 0L)
+                    val port = intent.getIntExtra("instance_${i}_port", 0)
+                    
+                    // Determine status based on PID and port
+                    if (pid > 0 && port > 0) {
+                        // Instance is running with valid PID and port
+                        statusMap[i] = XrayRuntimeStatus.Running(processId = pid, apiPort = port)
+                    } else if (hasRunning) {
+                        // Has running instances but this one might not be ready yet
+                        statusMap[i] = XrayRuntimeStatus.Starting
+                    } else {
+                        // No running instances yet
+                        statusMap[i] = XrayRuntimeStatus.Starting
                     }
                 }
+                if (statusMap.isNotEmpty()) {
+                    _instancesStatus.value = statusMap
+                    Log.d(TAG, "Updated instancesStatus with ${statusMap.size} instances")
+                }
+            } else {
+                // No instances, clear status
+                _instancesStatus.value = emptyMap()
+                Log.d(TAG, "Cleared instancesStatus (no instances)")
             }
         }
     }
@@ -361,32 +363,10 @@ class MainViewModel(application: Application) :
         // Register broadcast receivers in init to ensure they're always registered
         registerTProxyServiceReceivers()
         
-        // Observe instance status from TProxyService's MultiXrayCoreManager
-        // We create our own manager to observe status, but we need to sync with TProxyService's manager
-        // For now, we'll poll the status periodically when service is enabled
-        viewModelScope.launch(Dispatchers.IO) {
-            multiXrayCoreManager = MultiXrayCoreManager(application)
-            multiXrayCoreManager?.let { manager ->
-                manager.instancesStatus.collect { statusMap ->
-                    _instancesStatus.value = statusMap
-                }
-            }
-        }
-        
-        // Poll instance status from TProxyService when service is enabled
+        // Clear instance status when service stops
         viewModelScope.launch(Dispatchers.IO) {
             isServiceEnabled.collect { enabled ->
-                if (enabled) {
-                    // When service starts, periodically check for instance status updates
-                    // This is a workaround until we have proper synchronization
-                    while (isActive && isServiceEnabled.value) {
-                        // Adaptive polling: adjust interval based on traffic
-                        val interval = calculateAdaptivePollingInterval(_coreStatsState.value)
-                        delay(interval)
-                        // The status will be updated when TProxyService's manager updates
-                        // For now, we rely on our own manager's status
-                    }
-                } else {
+                if (!enabled) {
                     // Clear instance status when service stops
                     _instancesStatus.value = emptyMap()
                 }
@@ -417,11 +397,8 @@ class MainViewModel(application: Application) :
         super.onCleared()
         Log.d(TAG, "MainViewModel cleared, unregistering receivers.")
         unregisterTProxyServiceReceivers()
-        // Cleanup MultiXrayCoreManager
-        viewModelScope.launch(Dispatchers.IO) {
-            multiXrayCoreManager?.cleanup()
-            multiXrayCoreManager = null
-        }
+        // Note: MultiXrayCoreManager is a singleton managed by TProxyService
+        // We don't need to cleanup here as it's managed by the service lifecycle
     }
 
     private fun updateSettingsState() {
@@ -1106,7 +1083,13 @@ class MainViewModel(application: Application) :
         }
         
         // Get active instance ports first to determine which port to use for main client
-        val managerForClient = multiXrayCoreManager // Local copy to avoid smart cast issues
+        // Use singleton instance from TProxyService
+        val managerForClient = try {
+            MultiXrayCoreManager.getInstance(application)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get MultiXrayCoreManager instance: ${e.message}")
+            null
+        }
         val activeInstancesForClient = if (managerForClient != null) {
             managerForClient.getActiveInstances()
         } else {
@@ -1278,13 +1261,19 @@ class MainViewModel(application: Application) :
         
         // Get all active instance ports from MultiXrayCoreManager
         // If multiple instances are running, we need to aggregate traffic from all of them
-        val managerForTraffic = multiXrayCoreManager // Local copy to avoid smart cast issues
+        // Use singleton instance from TProxyService
+        val managerForTraffic = try {
+            MultiXrayCoreManager.getInstance(application)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get MultiXrayCoreManager instance: ${e.message}")
+            null
+        }
         val activeInstances = if (managerForTraffic != null) {
             managerForTraffic.getActiveInstances()
         } else {
-            // multiXrayCoreManager might not be initialized yet (created in init coroutine)
+            // MultiXrayCoreManager might not be initialized yet (service not started)
             // Log this case and use fallback
-            Log.w(TAG, "multiXrayCoreManager is null, using fallback port ${prefs.apiPort}")
+            Log.w(TAG, "MultiXrayCoreManager instance not available, using fallback port ${prefs.apiPort}")
             emptyMap()
         }
         

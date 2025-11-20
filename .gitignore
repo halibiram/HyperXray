@@ -40,3 +40,15 @@ analyze_v2ray_connection.sh
 decompile_libsocks2tun.py
 decompile_libsocks2tun_python.py
 libsocks2tun_decompiled/
+
+# Keystore files (sensitive - never commit!)
+store.jks
+store.p12
+store.properties
+keystore_base64.txt
+GITHUB_SECRETS.txt
+SECRETS_SETUP.md
+debug.keystore
+*.keystore
+*.jks
+*.p12

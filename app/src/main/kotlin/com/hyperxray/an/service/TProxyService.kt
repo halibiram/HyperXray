@@ -393,9 +393,12 @@ class TProxyService : VpnService() {
         tproxyAiOptimizer?.stopOptimization()
         tproxyAiOptimizer = null
         
-        // Cleanup MultiXrayCoreManager
+        // Cleanup MultiXrayCoreManager (singleton instance)
         multiXrayCoreManager?.cleanup()
         multiXrayCoreManager = null
+        // Reset singleton instance since service is being destroyed
+        // This ensures a fresh instance is created if service is restarted
+        MultiXrayCoreManager.resetInstance()
         
         // Release ONNX Runtime Manager
         OnnxRuntimeManager.release()
@@ -605,7 +608,7 @@ class TProxyService : VpnService() {
                     
                     // Initialize MultiXrayCoreManager if not already initialized
                     if (multiXrayCoreManager == null) {
-                        multiXrayCoreManager = MultiXrayCoreManager(applicationContext)
+                        multiXrayCoreManager = MultiXrayCoreManager.getInstance(applicationContext)
                         
                         // Set log callback to forward logs to logFileManager and broadcast
                         // Also intercept DNS queries and cache them (no root required)

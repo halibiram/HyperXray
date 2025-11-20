@@ -176,7 +176,26 @@ jobs:
       - name: Setup Keystore and Properties
         run: |
           echo "${{ secrets.SIGNING_KEYSTORE }}" | base64 -d > ./store.jks
-          echo "storeFile=store.jks" > ./store.properties
+          # Convert JKS to PKCS12 format to avoid "Tag number over 30" error
+          # This error occurs with older JKS formats that use unsupported tag numbers (>30)
+          # PKCS12 format is more compatible with modern Java versions
+          echo "Converting keystore from JKS to PKCS12 format..."
+          if keytool -importkeystore \
+            -srckeystore ./store.jks \
+            -srcstorepass "${{ secrets.SIGNING_STORE_PASSWORD }}" \
+            -srcstoretype JKS \
+            -destkeystore ./store.p12 \
+            -deststorepass "${{ secrets.SIGNING_STORE_PASSWORD }}" \
+            -deststoretype PKCS12 \
+            -destkeypass "${{ secrets.SIGNING_KEY_PASSWORD }}" \
+            -noprompt 2>&1; then
+            echo "✓ Keystore converted to PKCS12 successfully"
+            echo "storeFile=store.p12" > ./store.properties
+            rm -f ./store.jks
+          else
+            echo "⚠ Keystore conversion failed, using original JKS format"
+            echo "storeFile=store.jks" > ./store.properties
+          fi
           echo "storePassword=${{ secrets.SIGNING_STORE_PASSWORD }}" >> ./store.properties
           echo "keyAlias=${{ secrets.SIGNING_KEY_ALIAS }}" >> ./store.properties
           echo "keyPassword=${{ secrets.SIGNING_KEY_PASSWORD }}" >> ./store.properties
@@ -368,7 +387,26 @@ jobs:
       - name: Setup Keystore and Properties
         run: |
           echo "${{ secrets.SIGNING_KEYSTORE }}" | base64 -d > ./store.jks
-          echo "storeFile=store.jks" > ./store.properties
+          # Convert JKS to PKCS12 format to avoid "Tag number over 30" error
+          # This error occurs with older JKS formats that use unsupported tag numbers (>30)
+          # PKCS12 format is more compatible with modern Java versions
+          echo "Converting keystore from JKS to PKCS12 format..."
+          if keytool -importkeystore \
+            -srckeystore ./store.jks \
+            -srcstorepass "${{ secrets.SIGNING_STORE_PASSWORD }}" \
+            -srcstoretype JKS \
+            -destkeystore ./store.p12 \
+            -deststorepass "${{ secrets.SIGNING_STORE_PASSWORD }}" \
+            -deststoretype PKCS12 \
+            -destkeypass "${{ secrets.SIGNING_KEY_PASSWORD }}" \
+            -noprompt 2>&1; then
+            echo "✓ Keystore converted to PKCS12 successfully"
+            echo "storeFile=store.p12" > ./store.properties
+            rm -f ./store.jks
+          else
+            echo "⚠ Keystore conversion failed, using original JKS format"
+            echo "storeFile=store.jks" > ./store.properties
+          fi
           echo "storePassword=${{ secrets.SIGNING_STORE_PASSWORD }}" >> ./store.properties
           echo "keyAlias=${{ secrets.SIGNING_KEY_ALIAS }}" >> ./store.properties
           echo "keyPassword=${{ secrets.SIGNING_KEY_PASSWORD }}" >> ./store.properties

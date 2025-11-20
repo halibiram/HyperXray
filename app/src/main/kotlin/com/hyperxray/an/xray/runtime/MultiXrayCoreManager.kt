@@ -61,6 +61,32 @@ class MultiXrayCoreManager(private val context: Context) {
         private const val MIN_PORT = 10000
         private const val MAX_PORT = 65535
         private const val INSTANCE_STARTUP_TIMEOUT_MS = 5000L // 5 seconds timeout for instance to reach Running state
+        
+        @Volatile
+        private var INSTANCE: MultiXrayCoreManager? = null
+        
+        /**
+         * Get singleton instance of MultiXrayCoreManager.
+         * Thread-safe lazy initialization using double-checked locking pattern.
+         * 
+         * @param context Application context (will use applicationContext to prevent memory leaks)
+         * @return Singleton instance of MultiXrayCoreManager
+         */
+        fun getInstance(context: Context): MultiXrayCoreManager {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: MultiXrayCoreManager(context.applicationContext).also { INSTANCE = it }
+            }
+        }
+        
+        /**
+         * Reset singleton instance (mainly for testing purposes).
+         * Use with caution - only call when you're sure no other code is using the instance.
+         */
+        @Synchronized
+        fun resetInstance() {
+            INSTANCE?.cleanup()
+            INSTANCE = null
+        }
     }
     
     /**

@@ -670,6 +670,8 @@ android {
                 storePassword = props['storePassword']
                 keyAlias = props['keyAlias']
                 keyPassword = props['keyPassword']
+                // Note: Gradle automatically detects keystore format from file extension
+                // .p12 = PKCS12, .jks = JKS
             }
         }
     }

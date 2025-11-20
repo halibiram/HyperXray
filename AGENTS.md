@@ -30,8 +30,11 @@ Notes: Ensure Android SDK/NDK and JDK are configured (see `gradle.properties`).
 - Aim for coverage on changed code; add tests for new features and bug fixes.
 
 ## Commit & Pull Request Guidelines
+- **Language**: All commit messages must be in **English**.
 - Conventional Commits: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`
   - Example: `fix: handle null telemetry in TelemetryStore`
+  - Example: `feat: add DNS cache optimization for better performance`
+  - Example: `refactor: simplify TProxyService connection handling`
 - PRs must include:
   - Clear description, scope, and rationale
   - Linked issues (e.g., `Closes #123`)
