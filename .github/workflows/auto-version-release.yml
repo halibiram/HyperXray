@@ -13,7 +13,7 @@ jobs:
     permissions:
       contents: write
     
-    if: github.ref == 'refs/heads/main' && github.event_name != 'push'
+    if: github.event_name != 'push'
 
     steps:
       - name: Checkout code
@@ -183,8 +183,20 @@ jobs:
 
       - name: Build Xray-core from Source
         run: |
+          # Read NDK version from version.properties
+          NDK_VERSION=$(grep '^NDK_VERSION=' version.properties | cut -d '=' -f 2 | tr -d ' ')
+          NDK_MAJOR=$(echo "$NDK_VERSION" | cut -d '.' -f 1)
+          
+          # Determine NDK download URL (r28c format for version 28.x)
+          if [ "$NDK_MAJOR" = "28" ]; then
+            NDK_ZIP="android-ndk-r28c-linux.zip"
+          else
+            # Fallback to r28c if version format doesn't match
+            NDK_ZIP="android-ndk-r28c-linux.zip"
+          fi
+          
           # Set up NDK
-          wget -qO android-ndk.zip https://dl.google.com/android/repository/android-ndk-r28c-linux.zip
+          wget -qO android-ndk.zip https://dl.google.com/android/repository/$NDK_ZIP
           unzip -q android-ndk.zip
           rm android-ndk.zip
           NDK_HOME=$(realpath android-ndk-*)
@@ -348,8 +360,20 @@ jobs:
 
       - name: Build Xray-core from Source
         run: |
+          # Read NDK version from version.properties
+          NDK_VERSION=$(grep '^NDK_VERSION=' version.properties | cut -d '=' -f 2 | tr -d ' ')
+          NDK_MAJOR=$(echo "$NDK_VERSION" | cut -d '.' -f 1)
+          
+          # Determine NDK download URL (r28c format for version 28.x)
+          if [ "$NDK_MAJOR" = "28" ]; then
+            NDK_ZIP="android-ndk-r28c-linux.zip"
+          else
+            # Fallback to r28c if version format doesn't match
+            NDK_ZIP="android-ndk-r28c-linux.zip"
+          fi
+          
           # Set up NDK
-          wget -qO android-ndk.zip https://dl.google.com/android/repository/android-ndk-r28c-linux.zip
+          wget -qO android-ndk.zip https://dl.google.com/android/repository/$NDK_ZIP
           unzip -q android-ndk.zip
           rm android-ndk.zip
           NDK_HOME=$(realpath android-ndk-*)
