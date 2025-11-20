@@ -4,6 +4,13 @@ import android.content.Context
 import kotlinx.coroutines.flow.StateFlow
 
 /**
+ * Callback interface for log lines from Xray process.
+ */
+fun interface LogLineCallback {
+    fun onLogLine(line: String)
+}
+
+/**
  * Public API for Xray Runtime Service.
  * 
  * This interface provides a safe, controlled API for managing the Xray-core
@@ -78,6 +85,13 @@ interface XrayRuntimeServiceApi {
      * Cleanup resources. Call this when the service is no longer needed.
      */
     fun cleanup()
+    
+    /**
+     * Set callback for log lines from Xray process.
+     * 
+     * @param callback Callback to receive log lines, or null to disable
+     */
+    fun setLogLineCallback(callback: LogLineCallback?)
 }
 
 /**

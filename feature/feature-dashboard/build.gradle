@@ -32,6 +32,7 @@ dependencies {
     // Core modules
     implementation project(':core:core-designsystem')
     implementation project(':core:core-telemetry')
+    implementation project(':xray:xray-runtime-service')
     
     // Compose BOM for version management
     implementation platform('androidx.compose:compose-bom:2025.08.00')

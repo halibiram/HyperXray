@@ -137,4 +137,7 @@
     <string name="theme_dark">Dark</string>
     <string name="auto">Auto</string>
     <string name="vpn_disconnected">VPN Disconnected</string>
+    <string name="xray_core_instances_title">Xray Core Instances</string>
+    <string name="xray_core_instances_summary">Eş zamanlı çalışacak xray-core instance sayısı</string>
+    <string name="xray_core_instances_warning">Daha fazla instance daha fazla CPU ve RAM kullanır</string>
 </resources>

@@ -20,6 +20,8 @@ import androidx.lifecycle.viewModelScope
 import com.hyperxray.an.BuildConfig
 import com.hyperxray.an.R
 import com.hyperxray.an.xray.runtime.stats.CoreStatsClient
+import com.hyperxray.an.xray.runtime.MultiXrayCoreManager
+import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
 import com.hyperxray.an.common.ROUTE_AI_INSIGHTS
 import com.hyperxray.an.common.ROUTE_APP_LIST
 import com.hyperxray.an.common.formatBytes
@@ -37,7 +39,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -185,7 +189,8 @@ class MainViewModel(application: Application) :
                 )
             ),
             bypassDomains = prefs.bypassDomains,
-            bypassIps = prefs.bypassIps
+            bypassIps = prefs.bypassIps,
+            xrayCoreInstanceCount = prefs.xrayCoreInstanceCount
         )
     )
     val settingsState: StateFlow<SettingsState> = _settingsState.asStateFlow()
@@ -206,6 +211,11 @@ class MainViewModel(application: Application) :
         com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
     )
     val connectionState: StateFlow<com.hyperxray.an.feature.dashboard.ConnectionState> = _connectionState.asStateFlow()
+
+    // MultiXrayCoreManager for instance status tracking
+    private var multiXrayCoreManager: MultiXrayCoreManager? = null
+    private val _instancesStatus = MutableStateFlow<Map<Int, XrayRuntimeStatus>>(emptyMap())
+    val instancesStatus: StateFlow<Map<Int, XrayRuntimeStatus>> = _instancesStatus.asStateFlow()
 
     private val _uiEvent = Channel<MainViewUiEvent>(Channel.BUFFERED)
     val uiEvent = _uiEvent.receiveAsFlow()
@@ -238,6 +248,14 @@ class MainViewModel(application: Application) :
             // Don't change connection state here - let startConnectionProcess handle it
             // This prevents race conditions where startReceiver fires before startConnectionProcess
             // or while startConnectionProcess is still in INITIALIZING stage
+            
+            // When service starts, try to sync instance status
+            // Note: This is a workaround - ideally we'd share the same MultiXrayCoreManager instance
+            viewModelScope.launch(Dispatchers.IO) {
+                delay(1000) // Wait a bit for instances to start
+                // For now, we'll rely on our own manager's status
+                // In the future, we should share the same manager instance
+            }
         }
     }
 
@@ -291,10 +309,81 @@ class MainViewModel(application: Application) :
         }
     }
 
+    private val instanceStatusUpdateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            // When TProxyService updates instance status, we get a signal
+            val instanceCount = intent.getIntExtra("instance_count", 0)
+            val hasRunning = intent.getBooleanExtra("has_running", false)
+            
+            Log.d(TAG, "Instance status update: count=$instanceCount, hasRunning=$hasRunning")
+            
+            viewModelScope.launch(Dispatchers.IO) {
+                if (instanceCount > 0 && isServiceEnabled.value) {
+                    // Create status map from broadcast data with PID and port info
+                    val syntheticStatus = mutableMapOf<Int, XrayRuntimeStatus>()
+                    for (i in 0 until instanceCount) {
+                        // Read PID and port info from broadcast
+                        val pid = intent.getLongExtra("instance_${i}_pid", 0L)
+                        val port = intent.getIntExtra("instance_${i}_port", 0)
+                        
+                        // Determine status based on PID and port
+                        if (pid > 0 && port > 0) {
+                            // Instance is running with valid PID and port
+                            syntheticStatus[i] = XrayRuntimeStatus.Running(processId = pid, apiPort = port)
+                        } else if (hasRunning) {
+                            // Has running instances but this one might not be ready yet
+                            syntheticStatus[i] = XrayRuntimeStatus.Starting
+                        } else {
+                            // No running instances yet
+                            syntheticStatus[i] = XrayRuntimeStatus.Starting
+                        }
+                    }
+                    if (syntheticStatus.isNotEmpty()) {
+                        _instancesStatus.value = syntheticStatus
+                        Log.d(TAG, "Updated instancesStatus with data: ${syntheticStatus.size} instances")
+                    }
+                }
+            }
+        }
+    }
+
     init {
         Log.d(TAG, "MainViewModel initialized.")
         // Register broadcast receivers in init to ensure they're always registered
         registerTProxyServiceReceivers()
+        
+        // Observe instance status from TProxyService's MultiXrayCoreManager
+        // We create our own manager to observe status, but we need to sync with TProxyService's manager
+        // For now, we'll poll the status periodically when service is enabled
+        viewModelScope.launch(Dispatchers.IO) {
+            multiXrayCoreManager = MultiXrayCoreManager(application)
+            multiXrayCoreManager?.let { manager ->
+                manager.instancesStatus.collect { statusMap ->
+                    _instancesStatus.value = statusMap
+                }
+            }
+        }
+        
+        // Poll instance status from TProxyService when service is enabled
+        viewModelScope.launch(Dispatchers.IO) {
+            isServiceEnabled.collect { enabled ->
+                if (enabled) {
+                    // When service starts, periodically check for instance status updates
+                    // This is a workaround until we have proper synchronization
+                    while (isActive && isServiceEnabled.value) {
+                        // Adaptive polling: adjust interval based on traffic
+                        val interval = calculateAdaptivePollingInterval(_coreStatsState.value)
+                        delay(interval)
+                        // The status will be updated when TProxyService's manager updates
+                        // For now, we rely on our own manager's status
+                    }
+                } else {
+                    // Clear instance status when service stops
+                    _instancesStatus.value = emptyMap()
+                }
+            }
+        }
+        
         viewModelScope.launch(Dispatchers.IO) {
             val isRunning = isServiceRunning(application, TProxyService::class.java)
             _isServiceEnabled.value = isRunning
@@ -319,6 +408,11 @@ class MainViewModel(application: Application) :
         super.onCleared()
         Log.d(TAG, "MainViewModel cleared, unregistering receivers.")
         unregisterTProxyServiceReceivers()
+        // Cleanup MultiXrayCoreManager
+        viewModelScope.launch(Dispatchers.IO) {
+            multiXrayCoreManager?.cleanup()
+            multiXrayCoreManager = null
+        }
     }
 
     private fun updateSettingsState() {
@@ -373,7 +467,8 @@ class MainViewModel(application: Application) :
                 )
             ),
             bypassDomains = prefs.bypassDomains,
-            bypassIps = prefs.bypassIps
+            bypassIps = prefs.bypassIps,
+            xrayCoreInstanceCount = prefs.xrayCoreInstanceCount
         )
     }
 
@@ -454,6 +549,28 @@ class MainViewModel(application: Application) :
         }
     }
 
+    /**
+     * Calculates adaptive polling interval based on traffic state.
+     * No traffic: 60 seconds
+     * Low traffic: 30 seconds
+     * High traffic: 10-15 seconds
+     */
+    private fun calculateAdaptivePollingInterval(stats: CoreStatsState?): Long {
+        if (stats == null) {
+            return 2000L // Default 2 seconds when no stats available
+        }
+        
+        val totalThroughput = stats.uplinkThroughput + stats.downlinkThroughput
+        val highTrafficThreshold = 100_000.0 // 100 KB/s
+        val lowTrafficThreshold = 10_000.0 // 10 KB/s
+        
+        return when {
+            totalThroughput > highTrafficThreshold -> 10000L // 10 seconds for high traffic
+            totalThroughput > lowTrafficThreshold -> 2000L // 2 seconds for low traffic (status polling needs to be frequent)
+            else -> 5000L // 5 seconds for no/low traffic
+        }
+    }
+    
     fun setControlMenuClickable(isClickable: Boolean) {
         _controlMenuClickable.value = isClickable
     }
@@ -1723,6 +1840,19 @@ class MainViewModel(application: Application) :
         )
     }
 
+    fun setXrayCoreInstanceCount(count: Int) {
+        // Clamp value between 1 and 4
+        val clampedCount = when {
+            count < 1 -> 1
+            count > 4 -> 4
+            else -> count
+        }
+        prefs.xrayCoreInstanceCount = clampedCount
+        _settingsState.value = _settingsState.value.copy(
+            xrayCoreInstanceCount = clampedCount
+        )
+    }
+
     fun importRuleFile(uri: Uri, fileName: String) {
         viewModelScope.launch(Dispatchers.IO) {
             val success = fileManager.importRuleFile(uri, fileName)
@@ -2090,6 +2220,18 @@ class MainViewModel(application: Application) :
                     @Suppress("UnspecifiedRegisterReceiverFlag")
                     application.registerReceiver(socks5ReadyReceiver, socks5ReadyFilter)
                 }
+
+                val instanceStatusFilter = IntentFilter(TProxyService.ACTION_INSTANCE_STATUS_UPDATE)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    application.registerReceiver(
+                        instanceStatusUpdateReceiver,
+                        instanceStatusFilter,
+                        Context.RECEIVER_NOT_EXPORTED
+                    )
+                } else {
+                    @Suppress("UnspecifiedRegisterReceiverFlag")
+                    application.registerReceiver(instanceStatusUpdateReceiver, instanceStatusFilter)
+                }
                 
                 receiversRegistered = true
                 Log.d(TAG, "TProxyService receivers registered.")
@@ -2144,6 +2286,12 @@ class MainViewModel(application: Application) :
                     application.unregisterReceiver(errorReceiver)
                 } catch (e: IllegalArgumentException) {
                     Log.w(TAG, "errorReceiver not registered: ${e.message}")
+                }
+                
+                try {
+                    application.unregisterReceiver(instanceStatusUpdateReceiver)
+                } catch (e: IllegalArgumentException) {
+                    Log.w(TAG, "instanceStatusUpdateReceiver not registered: ${e.message}")
                 }
                 
                 receiversRegistered = false

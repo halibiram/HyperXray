@@ -1,5 +1,6 @@
 package com.hyperxray.an.feature.dashboard
 
+import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -62,6 +63,7 @@ interface DashboardViewModel {
     val isServiceEnabled: StateFlow<Boolean>
     val controlMenuClickable: StateFlow<Boolean>
     val connectionState: StateFlow<ConnectionState>
+    val instancesStatus: StateFlow<Map<Int, XrayRuntimeStatus>>
     
     fun updateCoreStats()
     fun updateTelemetryStats()

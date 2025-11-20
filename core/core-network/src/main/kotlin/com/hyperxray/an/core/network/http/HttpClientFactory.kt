@@ -15,6 +15,12 @@ import java.net.Socket
 import java.security.Security
 import java.util.concurrent.TimeUnit
 import javax.net.SocketFactory
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.selects.select
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
@@ -299,50 +305,94 @@ object HttpClientFactory {
             // Parallel DNS resolver: tries multiple DNS servers simultaneously
             fastDns = object : Dns {
                 override fun lookup(hostname: String): List<InetAddress> {
-                    val results = mutableListOf<InetAddress>()
-                    val exceptions = mutableListOf<Exception>()
-                    
-                    // Try system DNS first (fastest, cached)
-                    try {
-                        results.addAll(InetAddress.getAllByName(hostname).toList())
-                        if (results.isNotEmpty()) {
-                            Log.d(TAG, "DNS resolved via system: $hostname -> ${results.map { it.hostAddress }}")
-                            return results
+                    // Run parallel DNS queries using coroutines
+                    return runBlocking {
+                        val timeoutMs = 2000L // 2 seconds timeout per query
+                        val results = mutableListOf<InetAddress>()
+                        val exceptions = mutableListOf<Exception>()
+                        
+                        // Launch all DNS queries in parallel
+                        val systemDnsDeferred = async(Dispatchers.IO) {
+                            withTimeoutOrNull(timeoutMs) {
+                                try {
+                                    InetAddress.getAllByName(hostname).toList()
+                                } catch (e: Exception) {
+                                    exceptions.add(e)
+                                    null
+                                }
+                            }
                         }
-                    } catch (e: Exception) {
-                        exceptions.add(e)
-                    }
-                    
-                    // Try DNS over HTTPS (Cloudflare) in parallel
-                    try {
-                        val cloudflareResults = cloudflareDoh.lookup(hostname)
-                        if (cloudflareResults.isNotEmpty()) {
-                            results.addAll(cloudflareResults)
-                            Log.d(TAG, "DNS resolved via DoH (Cloudflare): $hostname -> ${cloudflareResults.map { it.hostAddress }}")
-                            return results
+                        
+                        val cloudflareDnsDeferred = async(Dispatchers.IO) {
+                            withTimeoutOrNull(timeoutMs) {
+                                try {
+                                    cloudflareDoh.lookup(hostname)
+                                } catch (e: Exception) {
+                                    exceptions.add(e)
+                                    null
+                                }
+                            }
                         }
-                    } catch (e: Exception) {
-                        exceptions.add(e)
-                    }
-                    
-                    // Fallback to Google DoH
-                    try {
-                        val googleResults = googleDoh.lookup(hostname)
-                        if (googleResults.isNotEmpty()) {
-                            results.addAll(googleResults)
-                            Log.d(TAG, "DNS resolved via DoH (Google): $hostname -> ${googleResults.map { it.hostAddress }}")
-                            return results
+                        
+                        val googleDnsDeferred = async(Dispatchers.IO) {
+                            withTimeoutOrNull(timeoutMs) {
+                                try {
+                                    googleDoh.lookup(hostname)
+                                } catch (e: Exception) {
+                                    exceptions.add(e)
+                                    null
+                                }
+                            }
                         }
-                    } catch (e: Exception) {
-                        exceptions.add(e)
+                        
+                        // Use select to get first successful result
+                        select<List<InetAddress>?> {
+                            systemDnsDeferred.onAwait { result ->
+                                if (result != null && result.isNotEmpty()) {
+                                    Log.d(TAG, "DNS resolved via system: $hostname -> ${result.map { it.hostAddress }}")
+                                    result
+                                } else null
+                            }
+                            cloudflareDnsDeferred.onAwait { result ->
+                                if (result != null && result.isNotEmpty()) {
+                                    Log.d(TAG, "DNS resolved via DoH (Cloudflare): $hostname -> ${result.map { it.hostAddress }}")
+                                    result
+                                } else null
+                            }
+                            googleDnsDeferred.onAwait { result ->
+                                if (result != null && result.isNotEmpty()) {
+                                    Log.d(TAG, "DNS resolved via DoH (Google): $hostname -> ${result.map { it.hostAddress }}")
+                                    result
+                                } else null
+                            }
+                        } ?: run {
+                            // If select returns null, wait for all and use first successful
+                            val systemResult = systemDnsDeferred.await()
+                            if (systemResult != null && systemResult.isNotEmpty()) {
+                                Log.d(TAG, "DNS resolved via system (fallback): $hostname -> ${systemResult.map { it.hostAddress }}")
+                                return@runBlocking systemResult
+                            }
+                            
+                            val cloudflareResult = cloudflareDnsDeferred.await()
+                            if (cloudflareResult != null && cloudflareResult.isNotEmpty()) {
+                                Log.d(TAG, "DNS resolved via DoH (Cloudflare, fallback): $hostname -> ${cloudflareResult.map { it.hostAddress }}")
+                                return@runBlocking cloudflareResult
+                            }
+                            
+                            val googleResult = googleDnsDeferred.await()
+                            if (googleResult != null && googleResult.isNotEmpty()) {
+                                Log.d(TAG, "DNS resolved via DoH (Google, fallback): $hostname -> ${googleResult.map { it.hostAddress }}")
+                                return@runBlocking googleResult
+                            }
+                            
+                            // If all fail, throw the first exception
+                            if (exceptions.isNotEmpty()) {
+                                throw exceptions.first()
+                            }
+                            
+                            emptyList()
+                        }
                     }
-                    
-                    // If all fail, throw the first exception
-                    if (exceptions.isNotEmpty()) {
-                        throw exceptions.first()
-                    }
-                    
-                    return results
                 }
             }
             

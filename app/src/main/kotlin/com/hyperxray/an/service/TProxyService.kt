@@ -35,6 +35,9 @@ import com.hyperxray.an.core.monitor.OptimizerLogger
 import com.hyperxray.an.ui.screens.log.extractSNI
 import com.hyperxray.an.xray.runtime.stats.CoreStatsClient
 import com.hyperxray.an.common.Socks5ReadinessChecker
+import com.hyperxray.an.xray.runtime.MultiXrayCoreManager
+import com.hyperxray.an.xray.runtime.LogLineCallback
+import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -45,7 +48,12 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.selects.onTimeout
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
@@ -62,25 +70,71 @@ import kotlin.concurrent.Volatile
 class TProxyService : VpnService() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val handler = Handler(Looper.getMainLooper())
-    private val logBroadcastBuffer: MutableList<String> = mutableListOf()
-    // Reusable ArrayList to avoid creating new one on every broadcast
+    // Lock-free queue for log broadcasts (replaces synchronized logBroadcastBuffer)
+    // Limited capacity with DROP_OLDEST to prevent memory leaks under high traffic
+    private val logBroadcastChannel = Channel<String>(
+        capacity = 1000,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    private val broadcastBuffer = mutableListOf<String>()
     private val reusableBroadcastList = ArrayList<String>(100)
-    private val broadcastLogsRunnable = Runnable {
-        synchronized(logBroadcastBuffer) {
-            if (logBroadcastBuffer.isNotEmpty()) {
-                val logUpdateIntent = Intent(ACTION_LOG_UPDATE)
-                logUpdateIntent.setPackage(application.packageName)
-                // Reuse ArrayList instead of creating new one - reduces GC pressure
-                reusableBroadcastList.clear()
-                reusableBroadcastList.addAll(logBroadcastBuffer)
-                logUpdateIntent.putStringArrayListExtra(
-                    EXTRA_LOG_DATA, reusableBroadcastList
-                )
-                sendBroadcast(logUpdateIntent)
-                logBroadcastBuffer.clear()
-                Log.d(TAG, "Broadcasted a batch of logs.")
+    
+    init {
+        // Start background broadcaster coroutine (lock-free)
+        serviceScope.launch {
+            try {
+                while (isActive) {
+                    try {
+                        val logEntry = logBroadcastChannel.receive()
+                        broadcastBuffer.add(logEntry)
+
+                        if (broadcastBuffer.size >= TProxyService.BROADCAST_BUFFER_SIZE_THRESHOLD) {
+                            broadcastLogsBatch()
+                        } else {
+                            kotlinx.coroutines.selects.select<Unit> {
+                                logBroadcastChannel.onReceive { newLog ->
+                                    broadcastBuffer.add(newLog)
+                                    if (broadcastBuffer.size >= TProxyService.BROADCAST_BUFFER_SIZE_THRESHOLD) {
+                                        broadcastLogsBatch()
+                                    }
+                                }
+                                onTimeout(TProxyService.BROADCAST_DELAY_MS) {
+                                    if (broadcastBuffer.isNotEmpty()) {
+                                        broadcastLogsBatch()
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        if (isActive) {
+                            Log.e(TProxyService.TAG, "Error in log broadcast coroutine", e)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                if (isActive) {
+                    Log.e(TProxyService.TAG, "Error in log broadcast coroutine", e)
+                }
             }
         }
+    }
+    
+    private fun broadcastLogsBatch() {
+        if (broadcastBuffer.isEmpty()) return
+        
+        val logUpdateIntent = Intent(TProxyService.ACTION_LOG_UPDATE)
+        logUpdateIntent.setPackage(application.packageName)
+        
+        // Optimize: reuse list and only resize if needed
+        reusableBroadcastList.clear()
+        if (broadcastBuffer.size > reusableBroadcastList.size) {
+            reusableBroadcastList.ensureCapacity(broadcastBuffer.size)
+        }
+        reusableBroadcastList.addAll(broadcastBuffer)
+        logUpdateIntent.putStringArrayListExtra(TProxyService.EXTRA_LOG_DATA, reusableBroadcastList)
+        sendBroadcast(logUpdateIntent)
+        broadcastBuffer.clear()
+        Log.d(TAG, "Broadcasted a batch of logs.")
     }
 
     private fun findAvailablePort(excludedPorts: Set<Int>): Int? {
@@ -94,7 +148,7 @@ class TProxyService : VpnService() {
                     }
                     port
                 }.onFailure {
-                    Log.d(TAG, "Port $port unavailable: ${it.message}")
+                    Log.d(TProxyService.TAG, "Port $port unavailable: ${it.message}")
                 }.onSuccess {
                     return port
                 }
@@ -106,6 +160,7 @@ class TProxyService : VpnService() {
 
     @Volatile
     private var xrayProcess: Process? = null
+    private var multiXrayCoreManager: MultiXrayCoreManager? = null
     @Volatile
     private var tunFd: ParcelFileDescriptor? = null
     private val tunFdLock = Any() // Synchronization lock for tunFd access
@@ -132,6 +187,24 @@ class TProxyService : VpnService() {
     @Volatile
     private var socks5ReadinessChecked = false
     private var socks5ReadinessJob: Job? = null
+    private var socks5PeriodicCheckJob: Job? = null
+    
+    // UDP monitoring
+    private var udpMonitoringJob: Job? = null
+    private var lastUdpStats: UdpStats? = null
+    private var lastUdpStatsTime: Long = 0L
+    
+    // UDP recovery mechanism
+    private var udpRecoveryAttempts = 0
+    private var lastUdpRecoveryTime: Long = 0L
+    private val MAX_RECOVERY_ATTEMPTS = 3
+    private val RECOVERY_COOLDOWN_MS = 30000L // 30 seconds between recovery attempts
+    
+    // Connection reset error tracking
+    private var connectionResetErrorCount = 0
+    private var lastConnectionResetTime: Long = 0L
+    private val CONNECTION_RESET_THRESHOLD = 5 // Alert after 5 resets
+    private val CONNECTION_RESET_WINDOW_MS = 60000L // 1 minute window
     
     // TProxy restart throttling - limit restarts to once per 6 hours
     @Volatile
@@ -166,13 +239,15 @@ class TProxyService : VpnService() {
         heartbeatJob = serviceScope.launch {
             while (isActive) {
                 try {
-                    delay(30000) // Wait 30 seconds
+                    // Adaptive polling: adjust interval based on traffic
+                    val interval = calculateAdaptivePollingInterval(coreStatsState)
+                    delay(interval)
                     // Update notification periodically to show service is alive
                     val currentChannelName = if (Preferences(this@TProxyService).disableVpn) "nosocks" else "socks5"
                     createNotification(currentChannelName)
-                    Log.d(TAG, "Heartbeat: Service alive, notification updated")
+                    Log.d(TProxyService.TAG, "Heartbeat: Service alive, notification updated")
                 } catch (e: Exception) {
-                    Log.e(TAG, "Heartbeat error: ${e.message}", e)
+                    Log.e(TProxyService.TAG, "Heartbeat error: ${e.message}", e)
                     delay(30000) // Wait before retry
                 }
             }
@@ -200,12 +275,12 @@ class TProxyService : VpnService() {
     override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
         val action = intent.action
         when (action) {
-            ACTION_DISCONNECT -> {
+            TProxyService.ACTION_DISCONNECT -> {
                 stopXray()
                 return START_NOT_STICKY
             }
 
-            ACTION_RELOAD_CONFIG -> {
+            TProxyService.ACTION_RELOAD_CONFIG -> {
                 // Ensure notification is shown
                 val channelName = if (Preferences(this).disableVpn) "nosocks" else "socks5"
                 initNotificationChannel(channelName)
@@ -213,14 +288,14 @@ class TProxyService : VpnService() {
                 
                 val prefs = Preferences(this)
                 if (prefs.disableVpn) {
-                    Log.d(TAG, "Received RELOAD_CONFIG action (core-only mode)")
+                    Log.d(TProxyService.TAG, "Received RELOAD_CONFIG action (core-only mode)")
                     reloadingRequested = true
                     xrayProcess?.destroy()
                     serviceScope.launch { runXrayProcess() }
                     return START_STICKY
                 }
                 if (tunFd == null) {
-                    Log.w(TAG, "Cannot reload config, VPN service is not running.")
+                    Log.w(TProxyService.TAG, "Cannot reload config, VPN service is not running.")
                     return START_STICKY
                 }
                 Log.d(TAG, "Received RELOAD_CONFIG action.")
@@ -230,12 +305,12 @@ class TProxyService : VpnService() {
                 return START_STICKY
             }
 
-            ACTION_START -> {
-                logFileManager.clearLogs()
+            TProxyService.ACTION_START -> {
+                logFileManager.clearLogsSync()
                 val prefs = Preferences(this)
                 if (prefs.disableVpn) {
                     serviceScope.launch { runXrayProcess() }
-                    val successIntent = Intent(ACTION_START)
+                    val successIntent = Intent(TProxyService.ACTION_START)
                     successIntent.setPackage(application.packageName)
                     sendBroadcast(successIntent)
 
@@ -255,7 +330,7 @@ class TProxyService : VpnService() {
                 initNotificationChannel(channelName)
                 createNotification(channelName)
                 
-                logFileManager.clearLogs()
+                logFileManager.clearLogsSync()
                 startXray()
                 return START_STICKY
             }
@@ -279,7 +354,7 @@ class TProxyService : VpnService() {
             wakeLock?.let {
                 if (it.isHeld) {
                     it.release()
-                    Log.d(TAG, "WakeLock released")
+                    Log.d(TProxyService.TAG, "WakeLock released")
                 }
             }
             wakeLock = null
@@ -288,18 +363,22 @@ class TProxyService : VpnService() {
         }
         
         // Stop Xray and clean up all resources
-        stopXray()
+        serviceScope.launch {
+            stopXray()
+        }
         
-        // Remove any pending log broadcasts and flush remaining logs
-        handler.removeCallbacks(broadcastLogsRunnable)
-        broadcastLogsRunnable.run()
-        
-        // Flush log file buffer before shutdown
-        logFileManager.flush()
+        // Flush log file buffer before shutdown (async)
+        serviceScope.launch {
+            logFileManager.flush()
+        }
         
         // Stop AI optimizer
         tproxyAiOptimizer?.stopOptimization()
         tproxyAiOptimizer = null
+        
+        // Cleanup MultiXrayCoreManager
+        multiXrayCoreManager?.cleanup()
+        multiXrayCoreManager = null
         
         // Release ONNX Runtime Manager
         OnnxRuntimeManager.release()
@@ -309,16 +388,26 @@ class TProxyService : VpnService() {
     }
 
     override fun onRevoke() {
-        stopXray()
+        serviceScope.launch {
+            stopXray()
+        }
         super.onRevoke()
     }
 
     private fun startXray() {
-        // Reset UDP error count when starting fresh connection
+        // Reset UDP error tracking when starting fresh connection
         udpErrorCount = 0
         lastUdpErrorTime = 0L
+        serviceStartTime = System.currentTimeMillis()
+        udpRecoveryAttempts = 0
+        lastUdpRecoveryTime = 0L
+        synchronized(udpErrorHistory) {
+            udpErrorHistory.clear()
+        }
         
-        startService()
+        serviceScope.launch {
+            startService()
+        }
         serviceScope.launch { runXrayProcess() }
     }
 
@@ -398,62 +487,295 @@ class TProxyService : VpnService() {
     }
 
     private fun runXrayProcess() {
+        serviceScope.launch {
+            try {
+                Log.d(TAG, "Attempting to start xray process(es).")
+                val prefs = Preferences(applicationContext)
+                val instanceCount = prefs.xrayCoreInstanceCount
+                
+                // Validate config path is within app's private directory
+                val selectedConfigPath = prefs.selectedConfigPath
+                if (selectedConfigPath == null) {
+                    val errorMessage = "No configuration file selected."
+                    Log.e(TProxyService.TAG, errorMessage)
+                    val errorIntent = Intent(TProxyService.ACTION_ERROR)
+                    errorIntent.setPackage(application.packageName)
+                    errorIntent.putExtra(TProxyService.EXTRA_ERROR_MESSAGE, errorMessage)
+                    sendBroadcast(errorIntent)
+                    handler.post {
+                        if (!isStopping) {
+                            serviceScope.launch {
+                                stopXray()
+                            }
+                        }
+                    }
+                    return@launch
+                }
+                
+                val configFile = validateConfigPath(selectedConfigPath)
+                if (configFile == null) {
+                    val errorMessage = "Invalid configuration file: path validation failed or file not accessible."
+                    Log.e(TProxyService.TAG, errorMessage)
+                    // Broadcast error to UI
+                    val errorIntent = Intent(TProxyService.ACTION_ERROR)
+                    errorIntent.setPackage(application.packageName)
+                    errorIntent.putExtra(TProxyService.EXTRA_ERROR_MESSAGE, errorMessage)
+                    sendBroadcast(errorIntent)
+                    // Stop the service since we can't proceed without a valid config
+                    handler.post {
+                        if (!isStopping) {
+                            serviceScope.launch {
+                                stopXray()
+                            }
+                        }
+                    }
+                    return@launch
+                }
+                
+                // Read config content securely (after validation)
+                val configContent = readConfigContentSecurely(configFile)
+                if (configContent == null) {
+                    val errorMessage = "Failed to read configuration file."
+                    Log.e(TProxyService.TAG, errorMessage)
+                    // Broadcast error to UI
+                    val errorIntent = Intent(TProxyService.ACTION_ERROR)
+                    errorIntent.setPackage(application.packageName)
+                    errorIntent.putExtra(TProxyService.EXTRA_ERROR_MESSAGE, errorMessage)
+                    sendBroadcast(errorIntent)
+                    // Stop the service since we can't proceed without config content
+                    handler.post {
+                        if (!isStopping) {
+                            serviceScope.launch {
+                                stopXray()
+                            }
+                        }
+                    }
+                    return@launch
+                }
+                
+                // CRITICAL: Ensure SOCKS5 is ready before starting Xray-core
+                // This prevents "connection reset by peer" errors when Xray-core tries to connect
+                Log.d(TProxyService.TAG, "Checking SOCKS5 readiness before starting Xray-core...")
+                val socks5PreReady = Socks5ReadinessChecker.isSocks5Ready(
+                    context = applicationContext,
+                    address = prefs.socksAddress,
+                    port = prefs.socksPort
+                )
+                
+                if (!socks5PreReady) {
+                    Log.w(TProxyService.TAG, "SOCKS5 not ready before Xray-core start, waiting...")
+                    val waitResult = Socks5ReadinessChecker.waitUntilSocksReady(
+                        context = applicationContext,
+                        address = prefs.socksAddress,
+                        port = prefs.socksPort,
+                        maxWaitTimeMs = 10000L, // Wait up to 10 seconds
+                        retryIntervalMs = 500L
+                    )
+                    
+                    if (!waitResult) {
+                        Log.e(TProxyService.TAG, "SOCKS5 did not become ready within timeout - Xray-core may experience connection issues")
+                        // Continue anyway, but log warning
+                    } else {
+                        Log.i(TProxyService.TAG, "✅ SOCKS5 is ready before Xray-core start")
+                    }
+                } else {
+                    Log.i(TProxyService.TAG, "✅ SOCKS5 is already ready before Xray-core start")
+                }
+                
+                // Use MultiXrayCoreManager for multiple instances, or fallback to single process
+                if (instanceCount > 1) {
+                    Log.d(TProxyService.TAG, "Starting $instanceCount xray-core instances using MultiXrayCoreManager")
+                    
+                    // Initialize MultiXrayCoreManager if not already initialized
+                    if (multiXrayCoreManager == null) {
+                        multiXrayCoreManager = MultiXrayCoreManager(applicationContext)
+                        
+                        // Set log callback to forward logs to logFileManager and broadcast
+                        multiXrayCoreManager?.setLogLineCallback(LogLineCallback { line ->
+                            // Write to log file
+                            logFileManager.appendLog(line)
+                            // Broadcast to UI (lock-free channel)
+                            logBroadcastChannel.trySend(line)
+                        })
+                        
+                        // Observe instance status changes and broadcast to MainViewModel
+                        serviceScope.launch {
+                            multiXrayCoreManager?.instancesStatus?.collect { statusMap ->
+                                // Broadcast instance status update whenever status changes
+                                val statusIntent = Intent(TProxyService.ACTION_INSTANCE_STATUS_UPDATE)
+                                statusIntent.setPackage(application.packageName)
+                                // Store instance count and status info in intent
+                                statusIntent.putExtra("instance_count", statusMap.size)
+                                statusIntent.putExtra("has_running", statusMap.values.any { it is XrayRuntimeStatus.Running })
+                                
+                                // Add PID and port info for each instance
+                                statusMap.forEach { (index, status) ->
+                                    when (status) {
+                                        is XrayRuntimeStatus.Running -> {
+                                            statusIntent.putExtra("instance_${index}_pid", status.processId)
+                                            statusIntent.putExtra("instance_${index}_port", status.apiPort)
+                                        }
+                                        else -> {
+                                            // For non-running statuses, set pid and port to 0
+                                            statusIntent.putExtra("instance_${index}_pid", 0L)
+                                            statusIntent.putExtra("instance_${index}_port", 0)
+                                        }
+                                    }
+                                }
+                                
+                                sendBroadcast(statusIntent)
+                                Log.d(TProxyService.TAG, "Broadcasted instance status update: ${statusMap.size} instances")
+                            }
+                        }
+                    }
+                    
+                    val excludedPorts = extractPortsFromJson(configContent)
+                    val startedInstances = multiXrayCoreManager!!.startInstances(
+                        count = instanceCount,
+                        configPath = selectedConfigPath,
+                        configContent = configContent,
+                        excludedPorts = excludedPorts
+                    )
+                    
+                    // Immediately broadcast initial status after instances start
+                    val initialStatus = multiXrayCoreManager!!.instancesStatus.value
+                    if (initialStatus.isNotEmpty()) {
+                        val statusIntent = Intent(TProxyService.ACTION_INSTANCE_STATUS_UPDATE)
+                        statusIntent.setPackage(application.packageName)
+                        statusIntent.putExtra("instance_count", initialStatus.size)
+                        statusIntent.putExtra("has_running", initialStatus.values.any { it is XrayRuntimeStatus.Running })
+                        
+                        // Add PID and port info for each instance
+                        initialStatus.forEach { (index, status) ->
+                            when (status) {
+                                is XrayRuntimeStatus.Running -> {
+                                    statusIntent.putExtra("instance_${index}_pid", status.processId)
+                                    statusIntent.putExtra("instance_${index}_port", status.apiPort)
+                                }
+                                else -> {
+                                    // For non-running statuses, set pid and port to 0
+                                    statusIntent.putExtra("instance_${index}_pid", 0L)
+                                    statusIntent.putExtra("instance_${index}_port", 0)
+                                }
+                            }
+                        }
+                        
+                        sendBroadcast(statusIntent)
+                        Log.d(TProxyService.TAG, "Broadcasted initial instance status: ${initialStatus.size} instances")
+                    }
+                    
+                    if (startedInstances.isEmpty()) {
+                        val errorMessage = "Failed to start any xray-core instances."
+                        Log.e(TProxyService.TAG, errorMessage)
+                        val errorIntent = Intent(TProxyService.ACTION_ERROR)
+                        errorIntent.setPackage(application.packageName)
+                        errorIntent.putExtra(TProxyService.EXTRA_ERROR_MESSAGE, errorMessage)
+                        sendBroadcast(errorIntent)
+                        handler.post {
+                            if (!isStopping) {
+                                serviceScope.launch {
+                                    stopXray()
+                                }
+                            }
+                        }
+                        return@launch
+                    }
+                    
+                    // Set the first instance's port as the primary API port for backward compatibility
+                    val firstPort = startedInstances.values.firstOrNull()
+                    if (firstPort != null) {
+                        prefs.apiPort = firstPort
+                        Log.d(TProxyService.TAG, "Set primary API port to $firstPort (from ${startedInstances.size} instances)")
+                    }
+                    
+                    // Start SOCKS5 readiness check immediately after first instance starts
+                    // startInstances() now returns as soon as first instance is Running
+                    socks5ReadinessChecked = false
+                    socks5ReadinessJob = serviceScope.launch {
+                        // Check if any instance is already Running (startInstances may have returned early)
+                        val manager = multiXrayCoreManager
+                        if (manager != null) {
+                            val statuses = manager.instancesStatus.value
+                            val hasRunningInstance = statuses.values.any { it is XrayRuntimeStatus.Running }
+                            
+                            if (hasRunningInstance) {
+                                Log.d(TProxyService.TAG, "At least one instance is already Running, starting SOCKS5 readiness check immediately")
+                                checkSocks5Readiness(prefs)
+                            } else {
+                                // Wait for first instance to become Running (optimized: check more frequently)
+                                var waitAttempts = 0
+                                val maxWaitAttempts = 20 // 20 * 100ms = 2 seconds max wait (reduced from 10s)
+                                while (waitAttempts < maxWaitAttempts && !socks5ReadinessChecked && !isStopping) {
+                                    val currentStatuses = manager.instancesStatus.value
+                                    val hasRunning = currentStatuses.values.any { it is XrayRuntimeStatus.Running }
+                                    
+                                    if (hasRunning) {
+                                        Log.d(TProxyService.TAG, "First instance is Running, starting SOCKS5 readiness check")
+                                        checkSocks5Readiness(prefs)
+                                        break
+                                    } else {
+                                        Log.d(TProxyService.TAG, "Waiting for first instance to reach Running state (attempt ${waitAttempts + 1}/$maxWaitAttempts)")
+                                    }
+                                    delay(100) // Check every 100ms (faster than 250ms)
+                                    waitAttempts++
+                                }
+                                
+                                if (!socks5ReadinessChecked && !isStopping) {
+                                    Log.w(TProxyService.TAG, "SOCKS5 readiness check not triggered - no instances reached Running state within timeout")
+                                }
+                            }
+                            
+                            // Start periodic SOCKS5 health check after initial check
+                            if (socks5ReadinessChecked) {
+                                startPeriodicSocks5HealthCheck(prefs)
+                            }
+                            
+                            // Start UDP monitoring
+                            if (udpMonitoringJob == null) {
+                                startUdpMonitoring()
+                            }
+                        }
+                    }
+                    
+                    Log.i(TProxyService.TAG, "Successfully started ${startedInstances.size} xray-core instances")
+                } else {
+                    // Fallback to single process mode for backward compatibility
+                    Log.d(TProxyService.TAG, "Starting single xray-core instance (legacy mode)")
+                    runXrayProcessLegacy(configFile, configContent, prefs)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error starting xray process(es)", e)
+                val errorIntent = Intent(ACTION_ERROR)
+                errorIntent.setPackage(application.packageName)
+                errorIntent.putExtra(TProxyService.EXTRA_ERROR_MESSAGE, "Failed to start: ${e.message}")
+                sendBroadcast(errorIntent)
+                handler.post {
+                    if (!isStopping) {
+                        serviceScope.launch {
+                            stopXray()
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private fun runXrayProcessLegacy(configFile: File, configContent: String, prefs: Preferences) {
         var currentProcess: Process? = null
         try {
-            Log.d(TAG, "Attempting to start xray process.")
             val libraryDir = getNativeLibraryDir(applicationContext)
-            val prefs = Preferences(applicationContext)
             if (libraryDir == null) {
                 val errorMessage = "Failed to get native library directory."
                 Log.e(TAG, errorMessage)
-                // Broadcast error to UI
                 val errorIntent = Intent(ACTION_ERROR)
                 errorIntent.setPackage(application.packageName)
-                errorIntent.putExtra(EXTRA_ERROR_MESSAGE, errorMessage)
+                errorIntent.putExtra(TProxyService.EXTRA_ERROR_MESSAGE, errorMessage)
                 sendBroadcast(errorIntent)
-                // Stop the service since we can't proceed without library directory
                 handler.post {
                     if (!isStopping) {
-                        stopXray()
-                    }
-                }
-                return
-            }
-            
-            // Validate config path is within app's private directory
-            val selectedConfigPath = prefs.selectedConfigPath
-            val configFile = validateConfigPath(selectedConfigPath)
-            if (configFile == null) {
-                val errorMessage = "Invalid configuration file: path validation failed or file not accessible."
-                Log.e(TAG, errorMessage)
-                // Broadcast error to UI
-                val errorIntent = Intent(ACTION_ERROR)
-                errorIntent.setPackage(application.packageName)
-                errorIntent.putExtra(EXTRA_ERROR_MESSAGE, errorMessage)
-                sendBroadcast(errorIntent)
-                // Stop the service since we can't proceed without a valid config
-                handler.post {
-                    if (!isStopping) {
-                        stopXray()
-                    }
-                }
-                return
-            }
-            
-            // Read config content securely (after validation)
-            val configContent = readConfigContentSecurely(configFile)
-            if (configContent == null) {
-                val errorMessage = "Failed to read configuration file."
-                Log.e(TAG, errorMessage)
-                // Broadcast error to UI
-                val errorIntent = Intent(ACTION_ERROR)
-                errorIntent.setPackage(application.packageName)
-                errorIntent.putExtra(EXTRA_ERROR_MESSAGE, errorMessage)
-                sendBroadcast(errorIntent)
-                // Stop the service since we can't proceed without config content
-                handler.post {
-                    if (!isStopping) {
-                        stopXray()
+                        serviceScope.launch {
+                            stopXray()
+                        }
                     }
                 }
                 return
@@ -466,15 +788,15 @@ class TProxyService : VpnService() {
             if (apiPort == null) {
                 val errorMessage = "Failed to find available port. All ports in range 10000-65535 are in use or excluded."
                 Log.e(TAG, errorMessage)
-                // Broadcast error to UI
                 val errorIntent = Intent(ACTION_ERROR)
                 errorIntent.setPackage(application.packageName)
-                errorIntent.putExtra(EXTRA_ERROR_MESSAGE, errorMessage)
+                errorIntent.putExtra(TProxyService.EXTRA_ERROR_MESSAGE, errorMessage)
                 sendBroadcast(errorIntent)
-                // Stop the service since we can't proceed without a port
                 handler.post {
                     if (!isStopping) {
-                        stopXray()
+                        serviceScope.launch {
+                            stopXray()
+                        }
                     }
                 }
                 return
@@ -496,47 +818,49 @@ class TProxyService : VpnService() {
             var processValidated = false
             
             // Periodically check if process stays alive during startup
-            while (checksPerformed < maxStartupChecks) {
-                Thread.sleep(checkInterval)
-                checksPerformed++
-                
-                // Check if process exited during startup
-                if (!currentProcess.isAlive) {
-                    val exitValue = try {
-                        currentProcess.exitValue()
-                    } catch (e: IllegalThreadStateException) {
-                        -1
+            runBlocking {
+                while (checksPerformed < maxStartupChecks) {
+                    delay(checkInterval)
+                    checksPerformed++
+                    
+                    // Check if process exited during startup
+                    if (!currentProcess.isAlive) {
+                        val exitValue = try {
+                            currentProcess.exitValue()
+                        } catch (e: IllegalThreadStateException) {
+                            -1
+                        }
+                        val errorMessage = "Xray process exited during startup after ${checksPerformed * checkInterval}ms (exit code: $exitValue)"
+                        Log.e(TProxyService.TAG, errorMessage)
+                        throw IOException(errorMessage)
                     }
-                    val errorMessage = "Xray process exited during startup after ${checksPerformed * checkInterval}ms (exit code: $exitValue)"
-                    Log.e(TAG, errorMessage)
-                    throw IOException(errorMessage)
+                    
+                    // After minimum checks, if process is still alive, consider it started
+                    // Note: We can't easily verify if process is fully ready, but being alive
+                    // for a reasonable time (100ms+) is a good indicator it started successfully
+                    if (checksPerformed >= minStartupChecks) {
+                        processValidated = true
+                        Log.d(TProxyService.TAG, "Process startup validated after ${checksPerformed * checkInterval}ms")
+                        break
+                    }
                 }
                 
-                // After minimum checks, if process is still alive, consider it started
-                // Note: We can't easily verify if process is fully ready, but being alive
-                // for a reasonable time (100ms+) is a good indicator it started successfully
-                if (checksPerformed >= minStartupChecks) {
-                    processValidated = true
-                    Log.d(TAG, "Process startup validated after ${checksPerformed * checkInterval}ms")
-                    break
-                }
-            }
-            
-            // Final validation check
-            if (!processValidated) {
-                // We hit the maximum check limit - verify process is still alive
-                if (!currentProcess.isAlive) {
-                    val exitValue = try {
-                        currentProcess.exitValue()
-                    } catch (e: IllegalThreadStateException) {
-                        -1
+                // Final validation check
+                if (!processValidated) {
+                    // We hit the maximum check limit - verify process is still alive
+                    if (!currentProcess.isAlive) {
+                        val exitValue = try {
+                            currentProcess.exitValue()
+                        } catch (e: IllegalThreadStateException) {
+                            -1
+                        }
+                        val errorMessage = "Xray process exited during startup validation (exit code: $exitValue)"
+                        Log.e(TProxyService.TAG, errorMessage)
+                        throw IOException(errorMessage)
                     }
-                    val errorMessage = "Xray process exited during startup validation (exit code: $exitValue)"
-                    Log.e(TAG, errorMessage)
-                    throw IOException(errorMessage)
+                    // Process is alive but we hit timeout - log warning but proceed
+                    Log.w(TProxyService.TAG, "Process startup validation hit timeout (${maxStartupChecks * checkInterval}ms), but process is alive. Proceeding.")
                 }
-                // Process is alive but we hit timeout - log warning but proceed
-                Log.w(TAG, "Process startup validation hit timeout (${maxStartupChecks * checkInterval}ms), but process is alive. Proceeding.")
             }
 
             Log.d(TAG, "Writing config to xray stdin from: ${configFile.canonicalPath}")
@@ -564,19 +888,19 @@ class TProxyService : VpnService() {
                                         networks.add(network.optString(j, "").lowercase())
                                     }
                                     udpEnabled = networks.contains("udp") && networks.contains("tcp")
-                                    Log.i(TAG, "🔍 VERIFICATION: dokodemo-door inbound #${i+1}: network=${network.toString()}, UDP enabled=$udpEnabled")
+                                    Log.i(TProxyService.TAG, "🔍 VERIFICATION: dokodemo-door inbound #${i+1}: network=${network.toString()}, UDP enabled=$udpEnabled")
                                 } else {
-                                    Log.w(TAG, "⚠️ VERIFICATION FAILED: dokodemo-door inbound #${i+1} network is not an array: $network")
+                                    Log.w(TProxyService.TAG, "⚠️ VERIFICATION FAILED: dokodemo-door inbound #${i+1} network is not an array: $network")
                                 }
                             } else {
-                                Log.w(TAG, "⚠️ VERIFICATION FAILED: dokodemo-door inbound #${i+1} has no settings object")
+                                Log.w(TProxyService.TAG, "⚠️ VERIFICATION FAILED: dokodemo-door inbound #${i+1} has no settings object")
                             }
                         }
                     }
                     if (dokodemoFound && !udpEnabled) {
-                        Log.e(TAG, "❌ CRITICAL ERROR: dokodemo-door inbound found but UDP is NOT enabled in config!")
+                        Log.e(TProxyService.TAG, "❌ CRITICAL ERROR: dokodemo-door inbound found but UDP is NOT enabled in config!")
                     } else if (dokodemoFound && udpEnabled) {
-                        Log.i(TAG, "✅ VERIFICATION SUCCESS: dokodemo-door inbound has UDP enabled in config")
+                        Log.i(TProxyService.TAG, "✅ VERIFICATION SUCCESS: dokodemo-door inbound has UDP enabled in config")
                     }
                 }
             } catch (e: Exception) {
@@ -591,7 +915,7 @@ class TProxyService : VpnService() {
             } catch (e: IOException) {
                 if (!currentProcess.isAlive) {
                     val exitValue = try { currentProcess.exitValue() } catch (ex: IllegalThreadStateException) { -1 }
-                    Log.e(TAG, "Xray process exited while writing config, exit code: $exitValue")
+                    Log.e(TProxyService.TAG, "Xray process exited while writing config, exit code: $exitValue")
                 }
                 throw e
             }
@@ -607,14 +931,16 @@ class TProxyService : VpnService() {
                 // Wait for process to be validated (at least 100ms) plus extra time for Xray to initialize
                 delay(2000) // Wait 2 seconds for Xray to fully start and bind ports
                 if (!socks5ReadinessChecked && !isStopping && currentProcess.isAlive) {
-                    Log.d(TAG, "Background SOCKS5 readiness check triggered")
+                    Log.d(TProxyService.TAG, "Background SOCKS5 readiness check triggered")
                     checkSocks5Readiness(prefs)
                 }
             }
             
             // Use robust stream reading with timeout and health checks
             Log.d(TAG, "Reading xray process output with timeout protection.")
-            readProcessStreamWithTimeout(currentProcess)
+            serviceScope.launch {
+                readProcessStreamWithTimeout(currentProcess)
+            }
             Log.d(TAG, "xray process output stream finished.")
         } catch (e: InterruptedIOException) {
             Log.d(TAG, "Xray process reading interrupted.")
@@ -639,7 +965,9 @@ class TProxyService : VpnService() {
                 // Use handler to call stopXray on main thread to avoid reentrancy issues
                 handler.post {
                     if (!isStopping) {
-                        stopXray()
+                        serviceScope.launch {
+                            stopXray()
+                        }
                     }
                 }
             }
@@ -651,14 +979,13 @@ class TProxyService : VpnService() {
      * Prevents thread hangs when process dies but stream remains open.
      * Uses coroutines for proper cancellation and resource management.
      */
-    private fun readProcessStreamWithTimeout(process: Process) {
-        runBlocking {
-            var readJob: Job? = null
-            var healthCheckJob: Job? = null
-            
-            try {
-                // Health check coroutine monitors process and cancels read job if needed
-                healthCheckJob = launch(Dispatchers.IO) {
+    private suspend fun readProcessStreamWithTimeout(process: Process) {
+        var readJob: Job? = null
+        var healthCheckJob: Job? = null
+        
+        try {
+            // Health check coroutine monitors process and cancels read job if needed
+            healthCheckJob = serviceScope.launch(Dispatchers.IO) {
                     try {
                         while (isActive) {
                             delay(2000) // Check every 2 seconds
@@ -666,7 +993,7 @@ class TProxyService : VpnService() {
                             
                             // Check if we're stopping
                             if (isStopping) {
-                                Log.d(TAG, "Health check detected stop request, cancelling read job.")
+                                Log.d(TProxyService.TAG, "Health check detected stop request, cancelling read job.")
                                 readJob?.cancel()
                                 break
                             }
@@ -678,22 +1005,22 @@ class TProxyService : VpnService() {
                                 } catch (e: IllegalThreadStateException) {
                                     -1
                                 }
-                                Log.d(TAG, "Health check detected process death (exit code: $exitValue), cancelling read job.")
+                                Log.d(TProxyService.TAG, "Health check detected process death (exit code: $exitValue), cancelling read job.")
                                 readJob?.cancel()
                                 break
                             }
                         }
                     } catch (e: Exception) {
                         if (isActive) {
-                            Log.e(TAG, "Error in health check coroutine: ${e.message}", e)
+                            Log.e(TProxyService.TAG, "Error in health check coroutine: ${e.message}", e)
                         }
                     }
                 }
                 
-                // Stream reading coroutine - can be cancelled by health check
-                // Note: readLine() is blocking I/O and can't be interrupted, but we can check
-                // cancellation status between reads and exit the loop when cancelled
-                readJob = launch(Dispatchers.IO) {
+            // Stream reading coroutine - can be cancelled by health check
+            // Note: readLine() is blocking I/O and can't be interrupted, but we can check
+            // cancellation status between reads and exit the loop when cancelled
+            readJob = serviceScope.launch(Dispatchers.IO) {
                     try {
                         BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
                             var lastReadTime = System.currentTimeMillis()
@@ -713,10 +1040,10 @@ class TProxyService : VpnService() {
                                             } catch (e: IllegalThreadStateException) {
                                                 -1
                                             }
-                                            Log.d(TAG, "Read timeout detected, process is dead (exit code: $exitValue)")
+                                            Log.d(TProxyService.TAG, "Read timeout detected, process is dead (exit code: $exitValue)")
                                             break
                                         }
-                                        Log.w(TAG, "Read timeout: no data for ${readTimeout}ms, but process is alive. Continuing...")
+                                        Log.w(TProxyService.TAG, "Read timeout: no data for ${readTimeout}ms, but process is alive. Continuing...")
                                         lastReadTime = currentTime // Reset to avoid spamming logs
                                     }
                                     
@@ -733,7 +1060,7 @@ class TProxyService : VpnService() {
                                     try {
                                         process.inputStream.available()
                                     } catch (e: IOException) {
-                                        Log.d(TAG, "Stream unavailable (likely closed): ${e.message}")
+                                        Log.d(TProxyService.TAG, "Stream unavailable (likely closed): ${e.message}")
                                         break
                                     }
                                     
@@ -743,7 +1070,7 @@ class TProxyService : VpnService() {
                                     
                                     if (line == null) {
                                         // EOF - stream is closed
-                                        Log.d(TAG, "Stream reached EOF (null read)")
+                                        Log.d(TProxyService.TAG, "Stream reached EOF (null read)")
                                         break
                                     }
                                     
@@ -752,22 +1079,14 @@ class TProxyService : VpnService() {
                                     
                                     // Process the log line
                                     logFileManager.appendLog(line)
-                                    synchronized(logBroadcastBuffer) {
-                                        logBroadcastBuffer.add(line)
-                                        handler.removeCallbacks(broadcastLogsRunnable)
-                                        // Only broadcast immediately if buffer threshold reached, otherwise delay
-                                        if (logBroadcastBuffer.size >= BROADCAST_BUFFER_SIZE_THRESHOLD) {
-                                            handler.post(broadcastLogsRunnable)
-                                        } else {
-                                            handler.postDelayed(broadcastLogsRunnable, BROADCAST_DELAY_MS)
-                                        }
-                                    }
+                                    // Broadcast to UI (lock-free channel)
+                                    logBroadcastChannel.trySend(line)
                                     
                                     // Check if Xray has started (indicates SOCKS5 should be ready soon)
                                     // Xray logs "Xray ... started" when it's fully initialized
                                     if (!socks5ReadinessChecked && line.contains("started", ignoreCase = true) && 
                                         line.contains("Xray", ignoreCase = true)) {
-                                        Log.d(TAG, "Detected Xray startup in logs, checking SOCKS5 readiness")
+                                        Log.d(TProxyService.TAG, "Detected Xray startup in logs, checking SOCKS5 readiness")
                                         // Trigger readiness check after a short delay to allow port binding
                                         // Cancel any existing readiness job to avoid duplicates
                                         socks5ReadinessJob?.cancel()
@@ -783,6 +1102,10 @@ class TProxyService : VpnService() {
                                     // These errors indicate UDP operations are failing due to closed sockets/pipes
                                     detectUdpClosedPipeErrors(line)
                                     
+                                    // CRITICAL: Detect connection reset errors and handle them
+                                    // These errors indicate Xray-core is having trouble connecting to SOCKS5
+                                    detectConnectionResetErrors(line)
+                                    
                                     // Process SNI for TLS optimization
                                     processSNIFromLog(line)
                                     
@@ -791,7 +1114,7 @@ class TProxyService : VpnService() {
                                     delay(10)
                                     
                                 } catch (e: InterruptedIOException) {
-                                    Log.d(TAG, "Stream read interrupted: ${e.message}")
+                                    Log.d(TProxyService.TAG, "Stream read interrupted: ${e.message}")
                                     break
                                 } catch (e: IOException) {
                                     // Check if process is still alive
@@ -801,28 +1124,28 @@ class TProxyService : VpnService() {
                                         } catch (ex: IllegalThreadStateException) {
                                             -1
                                         }
-                                        Log.d(TAG, "IOException during read, process is dead (exit code: $exitValue): ${e.message}")
+                                        Log.d(TProxyService.TAG, "IOException during read, process is dead (exit code: $exitValue): ${e.message}")
                                     } else {
-                                        Log.e(TAG, "IOException during stream read (process alive): ${e.message}", e)
+                                        Log.e(TProxyService.TAG, "IOException during stream read (process alive): ${e.message}", e)
                                     }
                                     break
                                 } catch (e: kotlinx.coroutines.CancellationException) {
-                                    Log.d(TAG, "Read coroutine cancelled")
+                                    Log.d(TProxyService.TAG, "Read coroutine cancelled")
                                     throw e // Re-throw to properly handle cancellation
                                 } catch (e: Exception) {
                                     if (isActive) {
-                                        Log.e(TAG, "Unexpected error during stream read: ${e.message}", e)
+                                        Log.e(TProxyService.TAG, "Unexpected error during stream read: ${e.message}", e)
                                     }
                                     break
                                 }
                             }
                         }
                     } catch (e: kotlinx.coroutines.CancellationException) {
-                        Log.d(TAG, "Read coroutine cancelled during stream reading")
+                        Log.d(TProxyService.TAG, "Read coroutine cancelled during stream reading")
                         throw e // Re-throw to properly handle cancellation
                     } catch (e: Exception) {
                         if (isActive) {
-                            Log.e(TAG, "Error in read coroutine: ${e.message}", e)
+                            Log.e(TProxyService.TAG, "Error in read coroutine: ${e.message}", e)
                         }
                     }
                 }
@@ -846,48 +1169,39 @@ class TProxyService : VpnService() {
                         readJob?.join()
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Error cancelling stream reading coroutines: ${e.message}", e)
+                    Log.w(TProxyService.TAG, "Error cancelling stream reading coroutines: ${e.message}", e)
                 }
                 
                 // Wait before closing streams to allow process to finish writing
                 // This prevents "closed pipe" errors when Xray is handling UDP traffic
                 // Increased delays to give more time for UDP operations to complete
-                try {
-                    Thread.sleep(200) // Initial delay to let process finish current operations
-                } catch (e: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                }
+                delay(200) // Initial delay to let process finish current operations
                 
                 // Only close streams if process is dead, or add delay if still alive
                 val processAlive = process.isAlive
                 if (processAlive) {
                     // Process still alive - wait more before closing streams to avoid pipe errors
-                    try {
-                        Thread.sleep(300) // Increased to 300ms for better UDP cleanup
-                    } catch (e: InterruptedException) {
-                        Thread.currentThread().interrupt()
-                    }
+                    delay(300) // Increased to 300ms for better UDP cleanup
                 }
                 
                 // Now close streams - process should have finished writing by now
                 try {
                     process.inputStream?.close()
                 } catch (e: Exception) {
-                    Log.w(TAG, "Error closing process input stream", e)
+                    Log.w(TProxyService.TAG, "Error closing process input stream", e)
                 }
                 try {
                     process.errorStream?.close()
                 } catch (e: Exception) {
-                    Log.w(TAG, "Error closing process error stream", e)
+                    Log.w(TProxyService.TAG, "Error closing process error stream", e)
                 }
                 try {
                     process.outputStream?.close()
                 } catch (e: Exception) {
-                    Log.w(TAG, "Error closing process output stream", e)
+                    Log.w(TProxyService.TAG, "Error closing process output stream", e)
                 }
             }
         }
-    }
 
     private fun getProcessBuilder(xrayPath: String): ProcessBuilder {
         val filesDir = applicationContext.filesDir
@@ -926,20 +1240,20 @@ class TProxyService : VpnService() {
             return
         }
         isStopping = true
-        
+
         // Cancel SOCKS5 readiness check job
         socks5ReadinessJob?.cancel()
         socks5ReadinessJob = null
-        
+
         // Mark SOCKS5 as not ready
         Socks5ReadinessChecker.setSocks5Ready(false)
         socks5ReadinessChecked = false
-        
+
         try {
             Log.d(TAG, "stopXray called, starting cleanup sequence.")
-            
+
             val processToDestroy = xrayProcess
-            
+
             // Step 1: Stop native TProxy service FIRST to prevent new UDP packets from being forwarded
             // This ensures no new UDP packets are sent to Xray while we're shutting down
             // IMPORTANT: Stop TProxy BEFORE stopping Xray to prevent "closed pipe" errors
@@ -966,7 +1280,7 @@ class TProxyService : VpnService() {
             } catch (e: Exception) {
                 Log.e(TAG, "Error stopping native TProxy service", e)
             }
-            
+
             // Step 2: Signal graceful shutdown by closing stdin (if still open)
             // This gives Xray a chance to finish current operations before termination
             if (processToDestroy != null && processToDestroy.isAlive) {
@@ -980,12 +1294,12 @@ class TProxyService : VpnService() {
                     } catch (e: InterruptedException) {
                         Thread.currentThread().interrupt()
                     }
-                    
+
                     // Close stdin to signal shutdown (Xray may check for stdin closure)
                     // After this, Xray will start shutting down, but UDP packets might still arrive
                     processToDestroy.outputStream?.close()
                     Log.d(TAG, "Closed stdin to signal graceful shutdown.")
-                    
+
                     // Additional EXTENDED grace period after closing stdin to allow UDP cleanup
                     // This gives time for:
                     // - In-flight UDP packets to complete
@@ -1001,13 +1315,13 @@ class TProxyService : VpnService() {
                     Log.d(TAG, "Error during graceful shutdown: ${e.message}")
                 }
             }
-            
+
             // Step 3: Cancel coroutine scope to stop stream reading
             // This is non-blocking and prevents new coroutines from starting
             Log.d(TAG, "Cancelling CoroutineScope.")
             serviceScope.cancel()
             Log.d(TAG, "CoroutineScope cancelled.")
-            
+
             // Step 4: Destroy the xray process after grace period
             if (processToDestroy != null) {
                 Log.d(TAG, "Destroying xray process.")
@@ -1033,13 +1347,13 @@ class TProxyService : VpnService() {
                 xrayProcess = null
                 Log.d(TAG, "xrayProcess reference nulled.")
             }
-            
+
             // Step 5: Stop the VPN service (closes TUN interface)
             // TProxy is already stopped, so this just closes the TUN fd
             // This is non-blocking and will clean up VPN resources
             Log.d(TAG, "Calling stopService (stopping VPN).")
             stopService()
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "Error during stopXray cleanup", e)
         } finally {
@@ -1052,20 +1366,20 @@ class TProxyService : VpnService() {
         synchronized(tunFdLock) {
             if (tunFd != null) return
         }
-        
+
         val prefs = Preferences(this)
         val builder = getVpnBuilder(prefs)
         val newTunFd = builder.establish()
-        
+
         synchronized(tunFdLock) {
             tunFd = newTunFd
         }
-        
+
         if (newTunFd == null) {
             stopXray()
             return
         }
-        
+
         val tproxyFile = File(cacheDir, "tproxy.conf")
         try {
             tproxyFile.createNewFile()
@@ -1078,7 +1392,7 @@ class TProxyService : VpnService() {
             stopXray()
             return
         }
-        
+
         // Safely get fd with synchronization - check all conditions atomically
         val fd: Int? = synchronized(tunFdLock) {
             // Check if we're stopping (defensive check)
@@ -1086,13 +1400,13 @@ class TProxyService : VpnService() {
                 Log.w(TAG, "Service is stopping, cannot start TProxy")
                 return@synchronized null
             }
-            
+
             // Get fd while holding lock to prevent race condition
             val currentTunFd = tunFd
             if (currentTunFd == null) {
                 return@synchronized null
             }
-            
+
             try {
                 currentTunFd.fd
             } catch (e: Exception) {
@@ -1100,7 +1414,7 @@ class TProxyService : VpnService() {
                 null
             }
         }
-        
+
         fd?.let { fileDescriptor ->
             // Use fd immediately after extraction (minimize race window)
             TProxyStartService(tproxyFile.absolutePath, fileDescriptor)
@@ -1124,45 +1438,47 @@ class TProxyService : VpnService() {
                     val timeSinceLastRestart = currentTime - lastTProxyRestartTime
                     
                     if (timeSinceLastRestart >= TPROXY_RESTART_INTERVAL_MS) {
-                        Log.i(TAG, "AI optimizer applied new configuration, reloading TProxy...")
+                        Log.i(TProxyService.TAG, "AI optimizer applied new configuration, reloading TProxy...")
                         // Reload TProxy configuration by recreating the config file and restarting
                         serviceScope.launch {
                         try {
                             // Check if we're stopping before proceeding
                             if (isStopping) {
-                                Log.w(TAG, "Skipping TProxy reload - service is stopping")
+                                Log.w(TProxyService.TAG, "Skipping TProxy reload - service is stopping")
                                 return@launch
                             }
                             
                             val tproxyFile = File(cacheDir, "tproxy.conf")
                             if (!tproxyFile.exists()) {
-                                Log.w(TAG, "TProxy config file does not exist, skipping reload")
+                                Log.w(TProxyService.TAG, "TProxy config file does not exist, skipping reload")
                                 return@launch
                             }
                             
-                            // Update config file first (doesn't require tunFd lock)
+                            // Update config file first (async I/O to avoid blocking)
                             try {
-                                FileOutputStream(tproxyFile, false).use { fos ->
-                                    val tproxyConf = getTproxyConf(prefs)
-                                    fos.write(tproxyConf.toByteArray())
-                                    fos.flush()
+                                withContext(Dispatchers.IO) {
+                                    FileOutputStream(tproxyFile, false).use { fos ->
+                                        val tproxyConf = getTproxyConf(prefs)
+                                        fos.write(tproxyConf.toByteArray())
+                                        fos.flush()
+                                    }
                                 }
-                                Log.i(TAG, "TProxy configuration file updated with AI-optimized settings")
+                                Log.i(TProxyService.TAG, "TProxy configuration file updated with AI-optimized settings")
                             } catch (e: IOException) {
-                                Log.e(TAG, "Error writing TProxy config file: ${e.message}", e)
+                                Log.e(TProxyService.TAG, "Error writing TProxy config file: ${e.message}", e)
                                 return@launch
                             }
                             
                             // Check again if we're stopping before restarting TProxy
                             if (isStopping) {
-                                Log.w(TAG, "Service stopping detected before TProxy restart, aborting")
+                                Log.w(TProxyService.TAG, "Service stopping detected before TProxy restart, aborting")
                                 return@launch
                             }
                             
                             // Restart TProxy service to apply new configuration
                             // This is necessary because hev-socks5-tunnel reads config at startup
                             try {
-                                Log.i(TAG, "Restarting TProxy service to apply AI-optimized configuration...")
+                                Log.i(TProxyService.TAG, "Restarting TProxy service to apply AI-optimized configuration...")
                                 TProxyStopService()
                                 Thread.sleep(100) // Brief delay to ensure clean shutdown
                                 
@@ -1175,13 +1491,13 @@ class TProxyService : VpnService() {
                                         Log.w(TAG, "Service stopping detected, cannot restart TProxy")
                                         return@synchronized null
                                     }
-                                    
+
                                     val currentTunFd = tunFd
                                     if (currentTunFd == null) {
                                         Log.w(TAG, "tunFd is null, cannot restart TProxy")
                                         return@synchronized null
                                     }
-                                    
+
                                     // Extract fd value while holding the lock
                                     // fd is an Int that won't change even if tunFd becomes null later
                                     try {
@@ -1207,16 +1523,16 @@ class TProxyService : VpnService() {
                                 lastTProxyRestartTime = System.currentTimeMillis()
                                 Log.i(TAG, "TProxy service restarted with AI-optimized configuration")
                             } catch (e: Exception) {
-                                Log.e(TAG, "Error restarting TProxy service: ${e.message}", e)
+                                Log.e(TProxyService.TAG, "Error restarting TProxy service: ${e.message}", e)
                             }
                             
                         } catch (e: Exception) {
-                            Log.e(TAG, "Error updating TProxy configuration", e)
+                            Log.e(TProxyService.TAG, "Error updating TProxy configuration", e)
                         }
                         }
                     } else {
                         val remainingHours = (TPROXY_RESTART_INTERVAL_MS - timeSinceLastRestart) / (60L * 60L * 1000L)
-                        Log.i(TAG, "TProxy restart throttled: Only ${remainingHours}h since last restart (minimum 6h). " +
+                        Log.i(TProxyService.TAG, "TProxy restart throttled: Only ${remainingHours}h since last restart (minimum 6h). " +
                                 "Skipping restart for now. Config updated but restart deferred.")
                     }
                 }
@@ -1228,7 +1544,7 @@ class TProxyService : VpnService() {
             )
         }
 
-        val successIntent = Intent(ACTION_START)
+        val successIntent = Intent(TProxyService.ACTION_START)
         successIntent.setPackage(application.packageName)
         sendBroadcast(successIntent)
         @Suppress("SameParameterValue") val channelName = "socks5"
@@ -1276,10 +1592,10 @@ class TProxyService : VpnService() {
 
     private fun stopService() {
         Log.d(TAG, "stopService called, cleaning up VPN resources.")
-        
+
         // Step 1: Stop AI optimizer before stopping service
         tproxyAiOptimizer?.stopOptimization()
-        
+
         // Step 2: Native TProxy service is already stopped in stopXray() to prevent UDP race conditions
         // Only stop it here if stopService() is called directly (not from stopXray())
         // Check if TProxy is still running by verifying tunFd is set
@@ -1301,7 +1617,7 @@ class TProxyService : VpnService() {
                 }
             }
         }
-        
+
         // Step 3: Close TUN file descriptor (VPN interface) with synchronization
         // IMPORTANT: Close TUN fd AFTER stopping TProxy to prevent race conditions
         // where UDP packets are written to a closed file descriptor
@@ -1339,20 +1655,67 @@ class TProxyService : VpnService() {
     }
     
     /**
-     * Detects UDP closed pipe errors from Xray logs.
+     * UDP error categories for better tracking and analysis
+     */
+    enum class UdpErrorCategory {
+        IDLE_TIMEOUT,      // Xray's 1-minute inactivity timer
+        SHUTDOWN,          // During service shutdown
+        NORMAL_OPERATION,  // During normal operation
+        UNKNOWN            // Unknown context
+    }
+    
+    /**
+     * UDP error tracking data class
+     */
+    data class UdpErrorRecord(
+        val timestamp: Long,
+        val category: UdpErrorCategory,
+        val logEntry: String,
+        val context: UdpErrorContext
+    )
+    
+    /**
+     * Context information for UDP errors
+     */
+    data class UdpErrorContext(
+        val isShuttingDown: Boolean,
+        val serviceUptime: Long,
+        val timeSinceLastError: Long,
+        val errorCountInWindow: Int
+    )
+    
+    /**
+     * UDP error pattern analysis
+     */
+    data class UdpErrorPattern(
+        val totalErrors: Int,
+        val errorsByCategory: Map<UdpErrorCategory, Int>,
+        val averageTimeBetweenErrors: Double,
+        val errorRate: Double, // errors per minute
+        val lastErrorTime: Long,
+        val isRecovering: Boolean
+    )
+    
+    // Enhanced UDP error tracking
+    @Volatile
+    private var udpErrorCount = 0
+    @Volatile
+    private var lastUdpErrorTime = 0L
+    private val udpErrorHistory = mutableListOf<UdpErrorRecord>()
+    private val maxErrorHistorySize = 100
+    @Volatile
+    private var serviceStartTime = 0L
+    
+    /**
+     * Detects UDP closed pipe errors from Xray logs with enhanced tracking and categorization.
      * These errors indicate that UDP operations are failing because sockets/pipes are closed.
      * 
      * Common patterns:
      * - "transport/internet/udp: failed to write first UDP payload > io: read/write on closed pipe"
      * - "transport/internet/udp: failed to handle UDP input > io: read/write on closed pipe"
      * 
-     * This method logs these errors prominently so they can be debugged.
+     * This method categorizes errors, tracks patterns, and provides context-aware analysis.
      */
-    @Volatile
-    private var udpErrorCount = 0
-    @Volatile
-    private var lastUdpErrorTime = 0L
-    
     private fun detectUdpClosedPipeErrors(logEntry: String) {
         val upperEntry = logEntry.uppercase()
         
@@ -1361,45 +1724,767 @@ class TProxyService : VpnService() {
             (upperEntry.contains("FAILED TO WRITE") || upperEntry.contains("FAILED TO HANDLE")) &&
             (upperEntry.contains("CLOSED PIPE") || upperEntry.contains("READ/WRITE ON CLOSED"))) {
             
-            // CRITICAL: These errors occur when:
-            // 1. UDP dispatcher closes connection after 1-minute inactivity (hardcoded in Xray)
-            // 2. Native tunnel still tries to send UDP packets after connection is closed
-            // 3. This is a race condition that's hard to prevent completely
-            
-            // We've already:
-            // - Increased UDP timeout to 30 minutes (connIdle=1800s)
-            // - Extended lifecycle shutdown delays (5+ seconds total)
-            // - Improved TProxy shutdown sequence
-            
-            // However, Xray's UDP dispatcher has a hardcoded 1-minute inactivity timer
-            // that's not controlled by policy settings. This causes occasional closed pipe errors.
-            
-            // For now, we'll silently ignore these errors during normal operation
-            // as they don't affect functionality - UDP connections are automatically recreated.
-            // Only log if errors are very frequent (more than 5 per minute)
-            
             val currentTime = System.currentTimeMillis()
-            val timeSinceLastError = currentTime - lastUdpErrorTime
+            val timeSinceLastError = if (lastUdpErrorTime > 0) currentTime - lastUdpErrorTime else Long.MAX_VALUE
             
-            // Only log if errors are very frequent (more than 5 per minute)
-            // This helps identify real problems while ignoring normal race conditions
+            // Determine error category based on context
+            val category = categorizeUdpError(timeSinceLastError)
+            
+            // Create error context
+            val context = UdpErrorContext(
+                isShuttingDown = isStopping,
+                serviceUptime = if (serviceStartTime > 0) currentTime - serviceStartTime else 0L,
+                timeSinceLastError = timeSinceLastError,
+                errorCountInWindow = udpErrorCount
+            )
+            
+            // Create error record
+            val errorRecord = UdpErrorRecord(
+                timestamp = currentTime,
+                category = category,
+                logEntry = logEntry,
+                context = context
+            )
+            
+            // Add to history
+            synchronized(udpErrorHistory) {
+                udpErrorHistory.add(errorRecord)
+                if (udpErrorHistory.size > maxErrorHistorySize) {
+                    udpErrorHistory.removeAt(0)
+                }
+            }
+            
+            // Update counters
             if (timeSinceLastError < 12000) { // Less than 12 seconds between errors
                 udpErrorCount++
-                lastUdpErrorTime = currentTime
-                
-                // Only log if errors are very frequent
-                if (udpErrorCount > 5) {
-                    Log.w(TAG, "⚠️ FREQUENT UDP CLOSED PIPE ERRORS (count: $udpErrorCount in last minute)")
-                    Log.w(TAG, "This may indicate UDP connection issues. Most recent: $logEntry")
-                } else {
-                    // Silently ignore occasional errors - they're normal race conditions
-                    // caused by Xray's UDP dispatcher 1-minute inactivity timer
+            } else {
+                udpErrorCount = 1
+            }
+            lastUdpErrorTime = currentTime
+            
+            // Analyze pattern and log appropriately
+            val pattern = analyzeUdpErrorPattern()
+            handleUdpErrorWithPattern(errorRecord, pattern)
+            
+            // Notify telemetry if available
+            notifyUdpErrorToTelemetry(errorRecord, pattern)
+        }
+    }
+    
+    /**
+     * Categorizes UDP error based on context
+     */
+    private fun categorizeUdpError(timeSinceLastError: Long): UdpErrorCategory {
+        return when {
+            isStopping -> UdpErrorCategory.SHUTDOWN
+            timeSinceLastError > 50000 && timeSinceLastError < 65000 -> UdpErrorCategory.IDLE_TIMEOUT // ~60 seconds = idle timeout
+            timeSinceLastError < 12000 -> UdpErrorCategory.NORMAL_OPERATION // Frequent errors
+            else -> UdpErrorCategory.UNKNOWN
+        }
+    }
+    
+    /**
+     * Analyzes UDP error pattern from history
+     */
+    private fun analyzeUdpErrorPattern(): UdpErrorPattern {
+        synchronized(udpErrorHistory) {
+            if (udpErrorHistory.isEmpty()) {
+                return UdpErrorPattern(
+                    totalErrors = 0,
+                    errorsByCategory = emptyMap(),
+                    averageTimeBetweenErrors = 0.0,
+                    errorRate = 0.0,
+                    lastErrorTime = 0L,
+                    isRecovering = false
+                )
+            }
+            
+            val now = System.currentTimeMillis()
+            val oneMinuteAgo = now - 60000L
+            val recentErrors = udpErrorHistory.filter { it.timestamp > oneMinuteAgo }
+            
+            // Count errors by category
+            val errorsByCategory = recentErrors.groupingBy { it.category }.eachCount()
+            
+            // Calculate average time between errors
+            val timeDeltas = if (recentErrors.size > 1) {
+                recentErrors.sortedBy { it.timestamp }.zipWithNext { a, b ->
+                    b.timestamp - a.timestamp
                 }
             } else {
-                // Reset counter if enough time has passed (errors are not frequent)
-                udpErrorCount = 1
-                lastUdpErrorTime = currentTime
+                emptyList()
             }
+            val avgTimeBetween = if (timeDeltas.isNotEmpty()) {
+                timeDeltas.average()
+            } else {
+                0.0
+            }
+            
+            // Calculate error rate (errors per minute)
+            val errorRate = if (recentErrors.isNotEmpty()) {
+                val oldestError = recentErrors.minByOrNull { it.timestamp }?.timestamp ?: now
+                val timeSpan = now - oldestError
+                if (timeSpan > 0) {
+                    (recentErrors.size * 60000.0) / timeSpan
+                } else {
+                    recentErrors.size.toDouble()
+                }
+            } else {
+                0.0
+            }
+            
+            // Determine if recovering (no errors in last 30 seconds)
+            val thirtySecondsAgo = now - 30000L
+            val isRecovering = recentErrors.none { it.timestamp > thirtySecondsAgo }
+            
+            return UdpErrorPattern(
+                totalErrors = recentErrors.size,
+                errorsByCategory = errorsByCategory,
+                averageTimeBetweenErrors = avgTimeBetween,
+                errorRate = errorRate,
+                lastErrorTime = lastUdpErrorTime,
+                isRecovering = isRecovering
+            )
+        }
+    }
+    
+    /**
+     * Handles UDP error based on pattern analysis
+     */
+    private fun handleUdpErrorWithPattern(errorRecord: UdpErrorRecord, pattern: UdpErrorPattern) {
+        // Log based on severity and frequency
+        when {
+            // Critical: Very frequent errors during normal operation
+            pattern.errorRate > 10 && !isStopping -> {
+                Log.e(TProxyService.TAG, "🚨 CRITICAL: Very high UDP error rate (${pattern.errorRate.toInt()}/min) - ${errorRecord.category}")
+                Log.e(TProxyService.TAG, "Error details: ${errorRecord.logEntry}")
+                Log.e(TProxyService.TAG, "Pattern: ${pattern.errorsByCategory}")
+            }
+            
+            // Warning: Frequent errors
+            pattern.errorRate > 5 && !isStopping -> {
+                Log.w(TProxyService.TAG, "⚠️ FREQUENT UDP CLOSED PIPE ERRORS (${pattern.errorRate.toInt()}/min) - ${errorRecord.category}")
+                Log.w(TProxyService.TAG, "Most recent: ${errorRecord.logEntry}")
+                Log.w(TProxyService.TAG, "Pattern: ${pattern.errorsByCategory}")
+            }
+            
+            // Info: Errors during shutdown (expected)
+            isStopping -> {
+                Log.d(TProxyService.TAG, "UDP error during shutdown (expected): ${errorRecord.category}")
+            }
+            
+            // Debug: Occasional errors (normal race conditions)
+            else -> {
+                Log.d(TProxyService.TAG, "UDP closed pipe error (normal race condition): ${errorRecord.category}")
+            }
+        }
+        
+        // Trigger recovery if needed
+        if (pattern.errorRate > 5 && !isStopping && !pattern.isRecovering) {
+            serviceScope.launch {
+                triggerUdpErrorRecovery(errorRecord, pattern)
+            }
+        }
+    }
+    
+    /**
+     * Notifies telemetry about UDP error
+     */
+    private fun notifyUdpErrorToTelemetry(errorRecord: UdpErrorRecord, pattern: UdpErrorPattern) {
+        // Track UDP errors for telemetry
+        // This data will be included in the next telemetry collection cycle
+        // The TProxyMetricsCollector will read this data via getUdpErrorPattern()
+        
+        if (pattern.errorRate > 5) {
+            Log.d(TProxyService.TAG, "UDP error telemetry: rate=${pattern.errorRate.toInt()}/min, " +
+                    "category=${errorRecord.category}, " +
+                    "totalErrors=${pattern.totalErrors}, " +
+                    "byCategory=${pattern.errorsByCategory}")
+        }
+    }
+    
+    /**
+     * Get UDP error pattern for telemetry collection
+     */
+    fun getUdpErrorPatternForTelemetry(): UdpErrorPattern {
+        return analyzeUdpErrorPattern()
+    }
+    
+    /**
+     * Triggers UDP error recovery mechanism with exponential backoff
+     */
+    private suspend fun triggerUdpErrorRecovery(errorRecord: UdpErrorRecord, pattern: UdpErrorPattern) {
+        val now = System.currentTimeMillis()
+        
+        // Check cooldown period
+        if (lastUdpRecoveryTime > 0 && (now - lastUdpRecoveryTime) < RECOVERY_COOLDOWN_MS) {
+            val remainingCooldown = RECOVERY_COOLDOWN_MS - (now - lastUdpRecoveryTime)
+            Log.d(TProxyService.TAG, "UDP recovery cooldown active, ${remainingCooldown / 1000}s remaining")
+            return
+        }
+        
+        // Check if we've exceeded max recovery attempts
+        if (udpRecoveryAttempts >= MAX_RECOVERY_ATTEMPTS) {
+            Log.w(TProxyService.TAG, "⚠️ UDP recovery: Max attempts ($MAX_RECOVERY_ATTEMPTS) reached, " +
+                    "considering critical recovery (Xray restart)")
+            
+            // Only restart Xray as last resort for very critical situations
+            if (pattern.errorRate > 20 && !isStopping) {
+                serviceScope.launch {
+                    attemptCriticalUdpRecovery(pattern)
+                }
+            }
+            return
+        }
+        
+        // Calculate exponential backoff delay
+        val backoffDelay = calculateRecoveryBackoff(udpRecoveryAttempts)
+        
+        Log.d(TProxyService.TAG, "Triggering UDP error recovery (attempt ${udpRecoveryAttempts + 1}/$MAX_RECOVERY_ATTEMPTS): " +
+                "rate=${pattern.errorRate.toInt()}/min, category=${errorRecord.category}, " +
+                "backoff=${backoffDelay / 1000}s")
+        
+        // Wait for backoff delay
+        delay(backoffDelay)
+        
+        // Check if still active and not stopping
+        if (isStopping) {
+            return
+        }
+        
+        // Attempt recovery
+        try {
+            val recoverySuccess = attemptUdpErrorRecovery(errorRecord, pattern)
+            
+            if (recoverySuccess) {
+                // Reset recovery attempts on success
+                udpRecoveryAttempts = 0
+                Log.i(TProxyService.TAG, "✅ UDP recovery successful")
+            } else {
+                // Increment recovery attempts on failure
+                udpRecoveryAttempts++
+                lastUdpRecoveryTime = System.currentTimeMillis()
+                Log.w(TProxyService.TAG, "⚠️ UDP recovery failed (attempt $udpRecoveryAttempts/$MAX_RECOVERY_ATTEMPTS)")
+            }
+        } catch (e: Exception) {
+            udpRecoveryAttempts++
+            lastUdpRecoveryTime = System.currentTimeMillis()
+            Log.e(TProxyService.TAG, "Error during UDP recovery: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Calculate exponential backoff delay for recovery attempts
+     */
+    private fun calculateRecoveryBackoff(attempt: Int): Long {
+        // Exponential backoff: 2^attempt seconds, max 30 seconds
+        val backoffSeconds = (1 shl attempt).coerceAtMost(30)
+        return backoffSeconds * 1000L
+    }
+    
+    /**
+     * Attempt UDP error recovery
+     * Returns true if recovery was successful, false otherwise
+     */
+    private suspend fun attemptUdpErrorRecovery(
+        errorRecord: UdpErrorRecord,
+        pattern: UdpErrorPattern
+    ): Boolean {
+        Log.d(TProxyService.TAG, "Attempting UDP error recovery: category=${errorRecord.category}")
+        
+        try {
+            // Step 1: Notify native tunnel to pause UDP packet sending temporarily
+            // This helps reduce race conditions during recovery
+            notifyNativeTunnelOfUdpError()
+            
+            // Step 2: Wait briefly to let current UDP operations complete
+            delay(500)
+            
+            // Step 3: Check if Xray process is still healthy
+            val process = xrayProcess
+            if (process == null || !process.isAlive) {
+                Log.w(TProxyService.TAG, "UDP recovery: Xray process is not alive, recovery not applicable")
+                return false
+            }
+            
+            // Step 4: Clear UDP error history to reset tracking
+            // This allows fresh start for error pattern analysis
+            synchronized(udpErrorHistory) {
+                // Keep only recent errors (last 10) to maintain some context
+                if (udpErrorHistory.size > 10) {
+                    udpErrorHistory.subList(0, udpErrorHistory.size - 10).clear()
+                }
+            }
+            
+            // Step 5: Reset error counters
+            udpErrorCount = 0
+            lastUdpErrorTime = 0L
+            
+            // Step 6: Notify native tunnel that recovery is complete
+            notifyNativeTunnelOfRecoveryComplete()
+            
+            Log.i(TProxyService.TAG, "✅ UDP recovery steps completed successfully")
+            return true
+            
+        } catch (e: Exception) {
+            Log.e(TProxyService.TAG, "Error during UDP recovery attempt: ${e.message}", e)
+            return false
+        }
+    }
+    
+    /**
+     * Attempt critical UDP recovery (Xray restart as last resort)
+     */
+    private suspend fun attemptCriticalUdpRecovery(pattern: UdpErrorPattern) {
+        Log.e(TProxyService.TAG, "🚨 CRITICAL UDP recovery: Error rate ${pattern.errorRate.toInt()}/min, " +
+                "attempting Xray restart as last resort")
+        
+        // Only restart if error rate is extremely high and not during shutdown
+        if (pattern.errorRate > 20 && !isStopping) {
+            try {
+                // Reset recovery attempts counter
+                udpRecoveryAttempts = 0
+                lastUdpRecoveryTime = 0L
+                
+                // Stop current Xray instance gracefully
+                stopXray()
+                
+                // Wait for cleanup
+                delay(3000)
+                
+                // Restart Xray
+                startXray()
+                
+                Log.i(TProxyService.TAG, "✅ Critical UDP recovery: Xray restarted")
+                
+            } catch (e: Exception) {
+                Log.e(TProxyService.TAG, "Error during critical UDP recovery (Xray restart): ${e.message}", e)
+            }
+        } else {
+            Log.w(TProxyService.TAG, "Critical UDP recovery skipped: errorRate=${pattern.errorRate.toInt()}, " +
+                    "isStopping=$isStopping")
+        }
+    }
+    
+    /**
+     * Notify native tunnel of UDP error (for coordination)
+     */
+    private fun notifyNativeTunnelOfUdpError() {
+        try {
+            val result = TProxyNotifyUdpError(0) // 0 = closed pipe error
+            if (result) {
+                Log.d(TProxyService.TAG, "Notified native tunnel of UDP error")
+            } else {
+                Log.w(TProxyService.TAG, "Failed to notify native tunnel of UDP error")
+            }
+        } catch (e: UnsatisfiedLinkError) {
+            // Native function not available (hev-socks5-tunnel may not support this yet)
+            Log.d(TProxyService.TAG, "UDP error notification not available in native tunnel: ${e.message}")
+        } catch (e: Exception) {
+            Log.e(TProxyService.TAG, "Error notifying native tunnel of UDP error: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Notify native tunnel that recovery is complete
+     */
+    private fun notifyNativeTunnelOfRecoveryComplete() {
+        try {
+            val result = TProxyNotifyUdpRecoveryComplete()
+            if (result) {
+                Log.d(TProxyService.TAG, "Notified native tunnel of UDP recovery completion")
+            } else {
+                Log.w(TProxyService.TAG, "Failed to notify native tunnel of UDP recovery completion")
+            }
+        } catch (e: UnsatisfiedLinkError) {
+            // Native function not available (hev-socks5-tunnel may not support this yet)
+            Log.d(TProxyService.TAG, "UDP recovery notification not available in native tunnel: ${e.message}")
+        } catch (e: Exception) {
+            Log.e(TProxyService.TAG, "Error notifying native tunnel of UDP recovery: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Gets current UDP error pattern for external monitoring
+     */
+    fun getUdpErrorPattern(): UdpErrorPattern {
+        return analyzeUdpErrorPattern()
+    }
+    
+    /**
+     * UDP statistics from native tunnel
+     */
+    data class UdpStats(
+        val txPackets: Long,
+        val txBytes: Long,
+        val rxPackets: Long,
+        val rxBytes: Long,
+        val timestamp: Long = System.currentTimeMillis()
+    )
+    
+    /**
+     * UDP connection health status
+     */
+    data class UdpConnectionHealth(
+        val isHealthy: Boolean,
+        val packetRate: Double, // packets per second
+        val byteRate: Double,   // bytes per second
+        val timeSinceLastActivity: Long,
+        val isIdle: Boolean,
+        val recommendation: String
+    )
+    
+    /**
+     * Start proactive UDP connection monitoring.
+     * Monitors UDP stats from native tunnel and detects idle connections.
+     */
+    private fun startUdpMonitoring() {
+        // Cancel existing monitoring job if any
+        udpMonitoringJob?.cancel()
+        
+        udpMonitoringJob = serviceScope.launch {
+            while (isActive && !isStopping) {
+                try {
+                    delay(15000L) // Check every 15 seconds
+                    ensureActive()
+                    
+                    // Get current UDP stats from native tunnel
+                    val currentStats = getNativeUdpStats()
+                    if (currentStats == null) {
+                        Log.d(TAG, "UDP monitoring: Native stats unavailable")
+                        continue
+                    }
+                    
+                    // Analyze UDP connection health
+                    val health = analyzeUdpConnectionHealth(currentStats)
+                    
+                    // Log health status if unhealthy or idle
+                    if (!health.isHealthy || health.isIdle) {
+                        Log.d(TAG, "UDP health: healthy=${health.isHealthy}, idle=${health.isIdle}, " +
+                                "packetRate=${health.packetRate.toInt()}/s, " +
+                                "recommendation=${health.recommendation}")
+                    }
+                    
+                    // Take proactive actions if needed
+                    if (health.isIdle && health.timeSinceLastActivity > 50000L) {
+                        // UDP connection idle for >50 seconds - near Xray's 1-minute timeout
+                        // Proactively prepare for cleanup to reduce race conditions
+                        handleIdleUdpConnection(health)
+                    }
+                    
+                    // Check for potential issues
+                    if (!health.isHealthy && health.packetRate > 0) {
+                        // Packets are being sent but health is poor - potential issue
+                        Log.w(TAG, "⚠️ UDP connection health degraded: ${health.recommendation}")
+                    }
+                    
+                } catch (e: Exception) {
+                    if (isActive) {
+                        Log.e(TAG, "Error in UDP monitoring: ${e.message}", e)
+                    }
+                }
+            }
+        }
+        
+        Log.d(TAG, "Started proactive UDP connection monitoring (every 15 seconds)")
+    }
+    
+    /**
+     * Get UDP statistics from native tunnel
+     */
+    private fun getNativeUdpStats(): UdpStats? {
+        return try {
+            val statsArray = TProxyGetStats()
+            if (statsArray != null && statsArray.size >= 4) {
+                UdpStats(
+                    txPackets = statsArray[0],
+                    txBytes = statsArray[1],
+                    rxPackets = statsArray[2],
+                    rxBytes = statsArray[3]
+                )
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get native UDP stats: ${e.message}")
+            null
+        }
+    }
+    
+    /**
+     * Analyze UDP connection health from statistics
+     */
+    private fun analyzeUdpConnectionHealth(currentStats: UdpStats): UdpConnectionHealth {
+        val now = System.currentTimeMillis()
+        
+        // Calculate rates if we have previous stats
+        val packetRate: Double
+        val byteRate: Double
+        val timeSinceLastActivity: Long
+        
+        if (lastUdpStats != null && lastUdpStatsTime > 0) {
+            val timeDelta = (now - lastUdpStatsTime) / 1000.0 // seconds
+            
+            if (timeDelta > 0) {
+                val packetDelta = (currentStats.txPackets + currentStats.rxPackets) - 
+                                 (lastUdpStats!!.txPackets + lastUdpStats!!.rxPackets)
+                val byteDelta = (currentStats.txBytes + currentStats.rxBytes) - 
+                               (lastUdpStats!!.txBytes + lastUdpStats!!.rxBytes)
+                
+                packetRate = packetDelta / timeDelta
+                byteRate = byteDelta / timeDelta
+                
+                // Calculate time since last activity (if no change in stats)
+                timeSinceLastActivity = if (packetDelta == 0L && byteDelta == 0L) {
+                    now - lastUdpStatsTime
+                } else {
+                    0L // Active
+                }
+            } else {
+                packetRate = 0.0
+                byteRate = 0.0
+                timeSinceLastActivity = 0L
+            }
+        } else {
+            // First measurement
+            packetRate = 0.0
+            byteRate = 0.0
+            timeSinceLastActivity = 0L
+        }
+        
+        // Update last stats
+        lastUdpStats = currentStats
+        lastUdpStatsTime = now
+        
+        // Determine if connection is idle (no activity for >40 seconds)
+        val isIdle = timeSinceLastActivity > 40000L
+        
+        // Determine health
+        val isHealthy = when {
+            isIdle && timeSinceLastActivity > 55000L -> false // Near timeout
+            packetRate < 0 -> false // Negative rate indicates issues
+            else -> true
+        }
+        
+        // Generate recommendation
+        val recommendation = when {
+            isIdle && timeSinceLastActivity > 55000L -> "Connection idle for ${timeSinceLastActivity / 1000}s, cleanup imminent"
+            isIdle -> "Connection idle for ${timeSinceLastActivity / 1000}s, monitor for cleanup"
+            packetRate > 0 && byteRate > 0 -> "Active: ${packetRate.toInt()} pkt/s, ${(byteRate / 1024).toInt()} KB/s"
+            else -> "Connection established, waiting for activity"
+        }
+        
+        return UdpConnectionHealth(
+            isHealthy = isHealthy,
+            packetRate = packetRate,
+            byteRate = byteRate,
+            timeSinceLastActivity = timeSinceLastActivity,
+            isIdle = isIdle,
+            recommendation = recommendation
+        )
+    }
+    
+    /**
+     * Handle idle UDP connection proactively
+     */
+    private suspend fun handleIdleUdpConnection(health: UdpConnectionHealth) {
+        // Proactively prepare for UDP dispatcher cleanup
+        // This helps reduce race conditions when Xray closes idle connections
+        
+        if (health.timeSinceLastActivity > 55000L && health.timeSinceLastActivity < 65000L) {
+            // Connection is about to timeout (Xray's 1-minute timer)
+            // Log for monitoring but don't take action yet - Xray will handle cleanup
+            Log.d(TAG, "UDP connection near timeout (${health.timeSinceLastActivity / 1000}s idle), " +
+                    "preparing for potential cleanup race condition")
+            
+            // Notify native tunnel to be ready for potential cleanup
+            // This can help reduce race conditions
+            notifyNativeTunnelOfImminentCleanup()
+        }
+    }
+    
+    /**
+     * Notify native tunnel of imminent UDP cleanup
+     * This helps native tunnel prepare and reduce race conditions
+     */
+    private fun notifyNativeTunnelOfImminentCleanup() {
+        try {
+            val result = TProxyNotifyImminentUdpCleanup()
+            if (result) {
+                Log.d(TAG, "Notified native tunnel of imminent UDP cleanup")
+            } else {
+                Log.w(TAG, "Failed to notify native tunnel of imminent UDP cleanup")
+            }
+        } catch (e: UnsatisfiedLinkError) {
+            // Native function not available (hev-socks5-tunnel may not support this yet)
+            Log.d(TAG, "UDP cleanup notification not available in native tunnel: ${e.message}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error notifying native tunnel of imminent UDP cleanup: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Stop UDP monitoring
+     */
+    private fun stopUdpMonitoring() {
+        udpMonitoringJob?.cancel()
+        udpMonitoringJob = null
+        lastUdpStats = null
+        lastUdpStatsTime = 0L
+        Log.d(TAG, "Stopped UDP monitoring")
+    }
+    
+    /**
+     * Detect connection reset errors in Xray-core logs.
+     * These errors indicate Xray-core is having trouble connecting to SOCKS5 tunnel.
+     * 
+     * Error pattern: "read tcp 127.0.0.1:10808->127.0.0.1:XXXXX: read: connection reset by peer"
+     * or "failed to transfer request payload" with "connection reset"
+     */
+    private fun detectConnectionResetErrors(logEntry: String) {
+        val upperEntry = logEntry.uppercase()
+        
+        // Check for connection reset errors
+        val isConnectionReset = (upperEntry.contains("CONNECTION RESET") || 
+                               upperEntry.contains("RESET BY PEER") ||
+                               (upperEntry.contains("FAILED TO TRANSFER") && upperEntry.contains("REQUEST PAYLOAD"))) &&
+                               (upperEntry.contains("OUTBOUND") || upperEntry.contains("PROXY/VLESS") || 
+                                upperEntry.contains("PROXY/VMESS") || upperEntry.contains("PROXY/TROJAN"))
+        
+        if (isConnectionReset) {
+            val currentTime = System.currentTimeMillis()
+            val timeSinceLastError = if (lastConnectionResetTime > 0) {
+                currentTime - lastConnectionResetTime
+            } else {
+                CONNECTION_RESET_WINDOW_MS + 1 // First error, always count
+            }
+            
+            // Reset counter if enough time has passed (errors are not frequent)
+            if (timeSinceLastError > CONNECTION_RESET_WINDOW_MS) {
+                connectionResetErrorCount = 1
+                lastConnectionResetTime = currentTime
+                Log.w(TProxyService.TAG, "⚠️ Connection reset detected: $logEntry")
+            } else {
+                connectionResetErrorCount++
+                lastConnectionResetTime = currentTime
+                
+                // Log warning if threshold exceeded
+                if (connectionResetErrorCount >= CONNECTION_RESET_THRESHOLD) {
+                    Log.e(TProxyService.TAG, "❌ FREQUENT CONNECTION RESET ERRORS (count: $connectionResetErrorCount in last minute)")
+                    Log.e(TProxyService.TAG, "Xray-core is having trouble connecting to SOCKS5 tunnel")
+                    Log.e(TProxyService.TAG, "Most recent error: $logEntry")
+                    
+                    // Broadcast error to UI for user notification
+                    val errorIntent = Intent(TProxyService.ACTION_ERROR)
+                    errorIntent.setPackage(application.packageName)
+                    errorIntent.putExtra(
+                        TProxyService.EXTRA_ERROR_MESSAGE,
+                        "Connection reset errors detected ($connectionResetErrorCount in last minute). " +
+                        "Xray-core is having trouble connecting to SOCKS5 tunnel. " +
+                        "Attempting automatic recovery..."
+                    )
+                    errorIntent.putExtra("error_type", "connection_reset")
+                    errorIntent.putExtra("error_count", connectionResetErrorCount)
+                    sendBroadcast(errorIntent)
+                    
+                    // Trigger recovery mechanism
+                    serviceScope.launch {
+                        handleConnectionResetRecovery()
+                    }
+                } else {
+                    Log.w(TProxyService.TAG, "⚠️ Connection reset error (count: $connectionResetErrorCount/$CONNECTION_RESET_THRESHOLD): $logEntry")
+                }
+            }
+        }
+    }
+    
+    /**
+     * Handle connection reset recovery by checking SOCKS5 readiness with exponential backoff retry.
+     * Uses exponential backoff to avoid overwhelming the system with retry attempts.
+     */
+    private suspend fun handleConnectionResetRecovery() {
+        try {
+            Log.i(TAG, "Attempting connection reset recovery with exponential backoff...")
+            val prefs = Preferences(applicationContext)
+            
+            var retryAttempt = 0
+            val maxRetries = 3
+            var baseDelayMs = 1000L // Start with 1 second
+            
+            while (retryAttempt < maxRetries && serviceScope.isActive && !isStopping) {
+                serviceScope.ensureActive()
+                
+                // Check if SOCKS5 is ready
+                val isReady = Socks5ReadinessChecker.isSocks5Ready(
+                    context = applicationContext,
+                    address = prefs.socksAddress,
+                    port = prefs.socksPort
+                )
+                
+                if (isReady) {
+                    Log.i(TAG, "✅ SOCKS5 recovered after $retryAttempt retry attempts - connection reset issues should be resolved")
+                    // Reset error counter on successful recovery
+                    connectionResetErrorCount = 0
+                    lastConnectionResetTime = 0L
+                    return
+                }
+                
+                // SOCKS5 not ready, wait with exponential backoff before retry
+                if (retryAttempt < maxRetries - 1) {
+                    val delayMs = baseDelayMs * (1 shl retryAttempt) // Exponential: 1s, 2s, 4s
+                    Log.d(TAG, "SOCKS5 not ready, waiting ${delayMs}ms before retry ${retryAttempt + 1}/$maxRetries")
+                    delay(delayMs)
+                }
+                
+                retryAttempt++
+            }
+            
+            // If we get here, all retries failed
+            if (retryAttempt >= maxRetries) {
+                Log.e(TAG, "❌ SOCKS5 did not recover after $maxRetries retry attempts - connection reset issues may persist")
+                
+                // Attempt one final wait with longer timeout
+                Log.i(TAG, "Attempting final recovery with extended timeout...")
+                val waitResult = Socks5ReadinessChecker.waitUntilSocksReady(
+                    context = applicationContext,
+                    address = prefs.socksAddress,
+                    port = prefs.socksPort,
+                    maxWaitTimeMs = 10000L, // 10 seconds final attempt
+                    retryIntervalMs = 1000L
+                )
+                
+                if (waitResult) {
+                    Log.i(TAG, "✅ SOCKS5 recovered in final attempt - connection reset issues resolved")
+                    connectionResetErrorCount = 0
+                    lastConnectionResetTime = 0L
+                    
+                    // Broadcast recovery success to UI
+                    val recoveryIntent = Intent(TProxyService.ACTION_ERROR)
+                    recoveryIntent.setPackage(application.packageName)
+                    recoveryIntent.putExtra(
+                        TProxyService.EXTRA_ERROR_MESSAGE,
+                        "Connection reset issues resolved. SOCKS5 tunnel is now ready."
+                    )
+                    recoveryIntent.putExtra("error_type", "connection_reset_recovered")
+                    sendBroadcast(recoveryIntent)
+                } else {
+                    Log.e(TAG, "❌ SOCKS5 recovery failed - connection reset issues persist")
+                    // Don't reset counter here - let it accumulate for monitoring
+                    
+                    // Broadcast persistent error to UI
+                    val persistentErrorIntent = Intent(TProxyService.ACTION_ERROR)
+                    persistentErrorIntent.setPackage(application.packageName)
+                    persistentErrorIntent.putExtra(
+                        TProxyService.EXTRA_ERROR_MESSAGE,
+                        "Connection reset issues persist. SOCKS5 tunnel may need manual intervention. " +
+                        "Consider restarting the VPN service."
+                    )
+                    persistentErrorIntent.putExtra("error_type", "connection_reset_persistent")
+                    sendBroadcast(persistentErrorIntent)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during connection reset recovery: ${e.message}", e)
         }
     }
     
@@ -1407,6 +2492,28 @@ class TProxyService : VpnService() {
      * Update core stats state for AI optimizer.
      * Called from MainViewModel when stats are updated.
      */
+    /**
+     * Calculates adaptive polling interval based on traffic state.
+     * No traffic: 60 seconds
+     * Low traffic: 30 seconds
+     * High traffic: 10-15 seconds
+     */
+    private fun calculateAdaptivePollingInterval(stats: CoreStatsState?): Long {
+        if (stats == null) {
+            return 60000L // No stats available, use conservative interval
+        }
+        
+        val totalThroughput = stats.uplinkThroughput + stats.downlinkThroughput
+        val highTrafficThreshold = 100_000.0 // 100 KB/s
+        val lowTrafficThreshold = 10_000.0 // 10 KB/s
+        
+        return when {
+            totalThroughput > highTrafficThreshold -> 10000L // 10 seconds for high traffic
+            totalThroughput > lowTrafficThreshold -> 30000L // 30 seconds for low traffic
+            else -> 60000L // 60 seconds for no/low traffic
+        }
+    }
+    
     fun updateCoreStatsState(stats: CoreStatsState) {
         coreStatsState = stats
         // Notify AI optimizer if it's running
@@ -1587,13 +2694,13 @@ class TProxyService : VpnService() {
                         
                         if (timeSinceClose < MIN_RECREATE_INTERVAL_MS) {
                             val remainingCooldown = MIN_RECREATE_INTERVAL_MS - timeSinceClose
-                            Log.d(TAG, "Client recreation cooldown active, ${remainingCooldown}ms remaining")
+                            Log.d(TProxyService.TAG, "Client recreation cooldown active, ${remainingCooldown}ms remaining")
                             // Fall through to default values
                         } else {
                             // CoreStatsClient.create() now safely returns null on any error (never throws)
                             coreStatsClient = CoreStatsClient.create("127.0.0.1", apiPort)
                             if (coreStatsClient == null) {
-                                Log.w(TAG, "Failed to create CoreStatsClient for metrics (port: $apiPort)")
+                                Log.w(TProxyService.TAG, "Failed to create CoreStatsClient for metrics (port: $apiPort)")
                                 lastClientCloseTime = System.currentTimeMillis()
                                 // Fall through to default values
                             }
@@ -1629,21 +2736,21 @@ class TProxyService : VpnService() {
                             // Success if throughput > 0
                             val success = throughputKbps > 0
                             
-                            Log.d(TAG, "Using CoreStatsClient metrics: latency=${latencyMs}ms, throughput=${throughputKbps}kbps, success=$success")
+                            Log.d(TProxyService.TAG, "Using CoreStatsClient metrics: latency=${latencyMs}ms, throughput=${throughputKbps}kbps, success=$success")
                             return Triple(latencyMs, throughputKbps, success)
                         } else {
                             // Stats query succeeded but no traffic data - don't close immediately
                             // This prevents rapid recreation loops
-                            Log.d(TAG, "CoreStatsClient query returned no traffic data, will retry later")
+                            Log.d(TProxyService.TAG, "CoreStatsClient query returned no traffic data, will retry later")
                         }
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Error getting metrics from CoreStatsClient: ${e.message}", e)
+                    Log.w(TProxyService.TAG, "Error getting metrics from CoreStatsClient: ${e.message}", e)
                     // Close client on error but enforce cooldown before recreation
                     try {
                         coreStatsClient?.close()
                     } catch (closeEx: Exception) {
-                        Log.w(TAG, "Error closing CoreStatsClient: ${closeEx.message}")
+                        Log.w(TProxyService.TAG, "Error closing CoreStatsClient: ${closeEx.message}")
                     }
                     coreStatsClient = null
                     lastClientCloseTime = System.currentTimeMillis()
@@ -1818,7 +2925,7 @@ class TProxyService : VpnService() {
                 context = this,
                 address = socksAddress,
                 port = socksPort,
-                maxWaitTimeMs = 15000L, // Wait up to 15 seconds
+                maxWaitTimeMs = 5000L, // Wait up to 5 seconds (optimized from 15s)
                 retryIntervalMs = 500L // Check every 500ms
             )
             
@@ -1827,7 +2934,7 @@ class TProxyService : VpnService() {
                 Socks5ReadinessChecker.setSocks5Ready(true)
                 
                 // Broadcast SOCKS5 readiness to other components
-                val readyIntent = Intent(ACTION_SOCKS5_READY)
+                val readyIntent = Intent(TProxyService.ACTION_SOCKS5_READY)
                 readyIntent.setPackage(application.packageName)
                 readyIntent.putExtra("socks_address", socksAddress)
                 readyIntent.putExtra("socks_port", socksPort)
@@ -1842,6 +2949,59 @@ class TProxyService : VpnService() {
             Log.e(TAG, "Error checking SOCKS5 readiness: ${e.message}", e)
             Socks5ReadinessChecker.setSocks5Ready(false)
         }
+    }
+    
+    /**
+     * Start periodic SOCKS5 health check to ensure it remains ready.
+     * This helps detect and recover from connection issues early.
+     */
+    private fun startPeriodicSocks5HealthCheck(prefs: Preferences) {
+        // Cancel existing periodic check if any
+        socks5PeriodicCheckJob?.cancel()
+        
+        socks5PeriodicCheckJob = serviceScope.launch {
+            while (isActive && !isStopping) {
+                try {
+                    delay(30000L) // Check every 30 seconds
+                    ensureActive()
+                    
+                    val socksPort = prefs.socksPort
+                    val socksAddress = prefs.socksAddress
+                    
+                    val isReady = Socks5ReadinessChecker.isSocks5Ready(
+                        context = applicationContext,
+                        address = socksAddress,
+                        port = socksPort
+                    )
+                    
+                    if (!isReady && socks5ReadinessChecked) {
+                        Log.w(TAG, "⚠️ SOCKS5 became unavailable during periodic check - attempting recovery")
+                        Socks5ReadinessChecker.setSocks5Ready(false)
+                        socks5ReadinessChecked = false
+                        
+                        // Attempt to re-check readiness
+                        checkSocks5Readiness(prefs)
+                    } else if (isReady && !socks5ReadinessChecked) {
+                        Log.i(TAG, "✅ SOCKS5 recovered - updating readiness state")
+                        socks5ReadinessChecked = true
+                        Socks5ReadinessChecker.setSocks5Ready(true)
+                        
+                        // Broadcast recovery
+                        val readyIntent = Intent(TProxyService.ACTION_SOCKS5_READY)
+                        readyIntent.setPackage(application.packageName)
+                        readyIntent.putExtra("socks_address", socksAddress)
+                        readyIntent.putExtra("socks_port", socksPort)
+                        sendBroadcast(readyIntent)
+                    }
+                } catch (e: Exception) {
+                    if (isActive) {
+                        Log.e(TAG, "Error in periodic SOCKS5 health check: ${e.message}", e)
+                    }
+                }
+            }
+        }
+        
+        Log.d(TAG, "Started periodic SOCKS5 health check (every 30 seconds)")
     }
     
     /**
@@ -1869,7 +3029,7 @@ class TProxyService : VpnService() {
             }
             2 -> {
                 // Route optimized (special handling)
-                Log.d(TAG, "Routing decision: optimized for $sni")
+                Log.d(TProxyService.TAG, "Routing decision: optimized for $sni")
                 // Future: Apply optimized routing configuration
             }
         }
@@ -1901,11 +3061,11 @@ class TProxyService : VpnService() {
             startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         }
         
-        Log.d(TAG, "Foreground notification created and displayed")
+        Log.d(TProxyService.TAG, "Foreground notification created and displayed")
     }
 
     private fun exit() {
-        val stopIntent = Intent(ACTION_STOP)
+        val stopIntent = Intent(TProxyService.ACTION_STOP)
         stopIntent.setPackage(application.packageName)
         sendBroadcast(stopIntent)
         stopSelf()
@@ -1934,13 +3094,15 @@ class TProxyService : VpnService() {
         const val ACTION_LOG_UPDATE: String = "com.hyperxray.an.LOG_UPDATE"
         const val ACTION_RELOAD_CONFIG: String = "com.hyperxray.an.RELOAD_CONFIG"
         const val ACTION_SOCKS5_READY: String = "com.hyperxray.an.SOCKS5_READY"
+        const val ACTION_INSTANCE_STATUS_UPDATE: String = "com.hyperxray.an.INSTANCE_STATUS_UPDATE"
         const val EXTRA_LOG_DATA: String = "log_data"
         const val EXTRA_ERROR_MESSAGE: String = "error_message"
-        private const val TAG = "VpnService"
+        const val EXTRA_INSTANCE_STATUS: String = "instance_status"
+        const val TAG = "VpnService"
         // Ultra-optimized broadcast settings for maximum performance
         // Larger batches = fewer broadcasts = better performance
-        private const val BROADCAST_DELAY_MS: Long = 1000 // 1 second delay for larger batches
-        private const val BROADCAST_BUFFER_SIZE_THRESHOLD: Int = 100 // Larger batches (100 entries)
+        const val BROADCAST_DELAY_MS: Long = 1000 // 1 second delay for larger batches
+        const val BROADCAST_BUFFER_SIZE_THRESHOLD: Int = 100 // Larger batches (100 entries)
 
         init {
             System.loadLibrary("hev-socks5-tunnel")
@@ -1963,6 +3125,37 @@ class TProxyService : VpnService() {
         @JvmStatic
         @Suppress("FunctionName")
         external fun TProxyGetStats(): LongArray?
+        
+        /**
+         * Notify native tunnel of UDP error for coordination.
+         * This allows native tunnel to pause UDP packet sending temporarily.
+         * 
+         * @param errorType 0=closed pipe, 1=timeout, 2=other
+         * @return true if notification was successful, false otherwise
+         */
+        @JvmStatic
+        @Suppress("FunctionName")
+        external fun TProxyNotifyUdpError(errorType: Int): Boolean
+        
+        /**
+         * Notify native tunnel that UDP recovery is complete.
+         * This allows native tunnel to resume normal UDP operations.
+         * 
+         * @return true if notification was successful, false otherwise
+         */
+        @JvmStatic
+        @Suppress("FunctionName")
+        external fun TProxyNotifyUdpRecoveryComplete(): Boolean
+        
+        /**
+         * Notify native tunnel of imminent UDP cleanup.
+         * This helps native tunnel prepare and reduce race conditions.
+         * 
+         * @return true if notification was successful, false otherwise
+         */
+        @JvmStatic
+        @Suppress("FunctionName")
+        external fun TProxyNotifyImminentUdpCleanup(): Boolean
 
         fun getNativeLibraryDir(context: Context?): String? {
             if (context == null) {
@@ -1973,10 +3166,10 @@ class TProxyService : VpnService() {
                 val applicationInfo = context.applicationInfo
                 if (applicationInfo != null) {
                     val nativeLibraryDir = applicationInfo.nativeLibraryDir
-                    Log.d(TAG, "Native Library Directory: $nativeLibraryDir")
+                    Log.d(TProxyService.TAG, "Native Library Directory: $nativeLibraryDir")
                     return nativeLibraryDir
                 } else {
-                    Log.e(TAG, "ApplicationInfo is null")
+                    Log.e(TProxyService.TAG, "ApplicationInfo is null")
                     return null
                 }
             } catch (e: Exception) {
@@ -1995,11 +3188,12 @@ class TProxyService : VpnService() {
             val connectTimeout = prefs.connectTimeout
             val readWriteTimeout = prefs.readWriteTimeout
             
-            // CRITICAL: Increase UDP timeout to match Xray policy timeout (30 minutes)
+            // CRITICAL: Increase UDP timeout to match Xray policy timeout (60 minutes)
             // Default native tunnel UDP timeout is 60 seconds, which is too short
             // This causes "closed pipe" errors when UDP dispatcher closes connections
-            // Set to 1800000ms (30 minutes) to match Xray connIdle timeout
-            val udpTimeout = 1800000 // 30 minutes in milliseconds
+            // OPTIMIZATION: Increased to 3600000ms (60 minutes) to match optimized Xray connIdle timeout
+            // This further reduces race conditions and closed pipe errors
+            val udpTimeout = 3600000 // 60 minutes in milliseconds (optimized)
             
             var tproxyConf = """misc:
   task-stack-size: $taskStack

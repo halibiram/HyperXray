@@ -52,6 +52,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.hyperxray.an.feature.dashboard.components.AnimatedStatCard
 import com.hyperxray.an.feature.dashboard.components.ConnectionQualityCard
 import com.hyperxray.an.feature.dashboard.components.ConnectionStatusCard
+import com.hyperxray.an.feature.dashboard.components.InstanceStatusCard
 import com.hyperxray.an.feature.dashboard.components.ModernStatCard
 import com.hyperxray.an.feature.dashboard.components.PerformanceIndicator
 import com.hyperxray.an.feature.dashboard.components.QuickStatsCard
@@ -81,6 +82,7 @@ fun DashboardScreen(
     val isServiceEnabled by viewModel.isServiceEnabled.collectAsState()
     val controlMenuClickable by viewModel.controlMenuClickable.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
+    val instancesStatus by viewModel.instancesStatus.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     LaunchedEffect(Unit) {
@@ -338,6 +340,19 @@ fun DashboardScreen(
                 uplinkThroughput = coreStats.uplinkThroughput,
                 downlinkThroughput = coreStats.downlinkThroughput
             )
+        }
+
+        // Instance Status Card - Show Xray-core instance statuses
+        item(key = "instance_status") {
+            AnimatedVisibility(
+                visible = instancesStatus.isNotEmpty(),
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                InstanceStatusCard(
+                    instancesStatus = instancesStatus
+                )
+            }
         }
 
         // Quick Stats Summary - Enhanced with better spacing

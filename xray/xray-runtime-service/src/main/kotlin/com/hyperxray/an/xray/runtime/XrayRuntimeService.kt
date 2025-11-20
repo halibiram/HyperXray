@@ -43,6 +43,9 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
     @Volatile
     private var isStarting = false
     
+    @Volatile
+    private var logLineCallback: LogLineCallback? = null
+    
     private val _status = MutableStateFlow<XrayRuntimeStatus>(XrayRuntimeStatus.Stopped)
     
     /**
@@ -330,6 +333,13 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
         serviceScope.cancel()
     }
     
+    /**
+     * Set callback for log lines from Xray process.
+     */
+    override fun setLogLineCallback(callback: LogLineCallback?) {
+        logLineCallback = callback
+    }
+    
     // Private helper methods
     
     private fun validateConfigPath(configPath: String?): File? {
@@ -534,14 +544,14 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
     }
     
     private suspend fun readProcessStream(process: Process) {
-        // Basic stream reading - can be enhanced for log forwarding
-        // Note: This is a simplified version - full implementation would
-        // forward logs to a callback or Flow
+        // Read process output and forward to callback if set
         try {
             BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
                 while (true) {
                     val line = reader.readLine() ?: break
-                    // Process log line if needed
+                    // Forward to callback if set
+                    logLineCallback?.onLogLine(line)
+                    // Also log to Android Log for debugging
                     Log.d(TAG, "Xray: $line")
                 }
             }

@@ -50,6 +50,17 @@ data class TelemetryMetrics(
     val loss: Double = 0.0,
     
     /**
+     * UDP error rate (errors per minute)
+     */
+    val udpErrorRate: Double = 0.0,
+    
+    /**
+     * UDP error category distribution (counts per category)
+     * 0=IDLE_TIMEOUT, 1=SHUTDOWN, 2=NORMAL_OPERATION, 3=UNKNOWN
+     */
+    val udpErrorCategoryCounts: List<Int> = listOf(0, 0, 0, 0),
+    
+    /**
      * Timestamp of the measurement
      */
     @Serializable(with = InstantSerializer::class)
@@ -80,6 +91,11 @@ data class AggregatedTelemetry(
      * Average packet loss rate (0.0 to 1.0)
      */
     val avgLoss: Double,
+    
+    /**
+     * Average UDP error rate (errors per minute)
+     */
+    val avgUdpErrorRate: Double = 0.0,
     
     /**
      * Number of samples aggregated

@@ -70,5 +70,6 @@ data class SettingsState(
     val connectivityTestTimeout: InputFieldState,
     val performance: PerformanceSettings,
     val bypassDomains: List<String> = emptyList(),
-    val bypassIps: List<String> = emptyList()
+    val bypassIps: List<String> = emptyList(),
+    val xrayCoreInstanceCount: Int = 1
 ) 

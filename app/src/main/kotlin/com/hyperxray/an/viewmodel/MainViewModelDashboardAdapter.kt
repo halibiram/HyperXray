@@ -4,6 +4,7 @@ import com.hyperxray.an.feature.dashboard.DashboardViewModel
 import com.hyperxray.an.feature.dashboard.CoreStatsState as FeatureCoreStatsState
 import com.hyperxray.an.feature.dashboard.AggregatedTelemetry as FeatureAggregatedTelemetry
 import com.hyperxray.an.telemetry.AggregatedTelemetry
+import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -80,6 +81,9 @@ val MainViewModel.dashboardViewModel: DashboardViewModel
             
             override val connectionState: StateFlow<com.hyperxray.an.feature.dashboard.ConnectionState> =
                 mainViewModel.connectionState
+            
+            override val instancesStatus: StateFlow<Map<Int, XrayRuntimeStatus>> =
+                mainViewModel.instancesStatus
             
             override fun updateCoreStats() {
                 mainViewModel.viewModelScope.launch {

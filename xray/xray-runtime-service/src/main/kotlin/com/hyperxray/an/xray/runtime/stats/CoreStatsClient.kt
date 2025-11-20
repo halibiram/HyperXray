@@ -13,9 +13,14 @@ import io.grpc.Status
 import io.grpc.StatusException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import java.io.Closeable
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * gRPC client for querying Xray-core statistics API.
@@ -24,25 +29,58 @@ import java.util.concurrent.TimeUnit
  * Moved from app module to xray-runtime-service to separate protocol/xray calls.
  */
 class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
-    private val baseStub: StatsServiceGrpc.StatsServiceBlockingStub =
-        StatsServiceGrpc.newBlockingStub(channel)
+    private val baseAsyncStub: StatsServiceGrpc.StatsServiceStub =
+        StatsServiceGrpc.newStub(channel)
+    
+    // Cached channel state to avoid repeated polling (200ms overhead per call)
+    private data class CachedState(
+        val state: ConnectivityState,
+        val isUsable: Boolean,
+        val timestamp: Long
+    )
+    
+    private val cachedState = AtomicReference<CachedState?>(null)
+    private val cacheTtlMs = 500L // Cache validity: 500ms
+    
+    // Adaptive deadline: longer for first call, shorter for subsequent calls
+    private val callCount = AtomicInteger(0)
+    private val firstCallDeadlineSeconds = 5L // Longer deadline for first call
+    private val subsequentCallDeadlineSeconds = 2L // Shorter deadline for subsequent calls
     
     /**
-     * Creates a stub with a fresh deadline for each call.
+     * Creates a stub with an adaptive deadline for each call.
+     * First call uses longer deadline (5s) to allow connection establishment.
+     * Subsequent calls use shorter deadline (2s) for faster timeout.
      * This prevents negative deadlines when the stub is reused after delays.
      */
-    private fun getStubWithDeadline(): StatsServiceGrpc.StatsServiceBlockingStub {
-        return baseStub.withDeadlineAfter(10, TimeUnit.SECONDS)
+    private fun getStubWithDeadline(): StatsServiceGrpc.StatsServiceStub {
+        val currentCallCount = callCount.getAndIncrement()
+        val deadlineSeconds = if (currentCallCount == 0) {
+            firstCallDeadlineSeconds
+        } else {
+            subsequentCallDeadlineSeconds
+        }
+        return baseAsyncStub.withDeadlineAfter(deadlineSeconds, TimeUnit.SECONDS)
     }
 
     /**
      * Checks if the channel is in a usable state for RPC calls.
      * Returns true if channel is READY or IDLE (can transition to READY).
      * Returns false if channel is SHUTDOWN, TRANSIENT_FAILURE, or CONNECTING.
+     * Uses cached state to avoid repeated polling (optimization).
      */
     private fun isChannelUsable(): Boolean {
+        val cached = cachedState.get()
+        val now = System.currentTimeMillis()
+        
+        // Use cached state if still valid
+        if (cached != null && (now - cached.timestamp) < cacheTtlMs) {
+            return cached.isUsable
+        }
+        
+        // Cache expired or not available, check actual state
         val state = channel.getState(false) // false = don't try to connect
-        return when (state) {
+        val isUsable = when (state) {
             ConnectivityState.READY -> true
             ConnectivityState.IDLE -> {
                 // IDLE can transition to READY, so it's potentially usable
@@ -55,13 +93,26 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
             ConnectivityState.SHUTDOWN -> false
             else -> false
         }
+        
+        // Update cache
+        cachedState.set(CachedState(state, isUsable, now))
+        return isUsable
+    }
+    
+    /**
+     * Invalidates cached channel state (call when channel state might have changed).
+     */
+    private fun invalidateCache() {
+        cachedState.set(null)
     }
 
     /**
      * Ensures channel is ready before making RPC call.
      * Returns true if channel is usable, false otherwise.
+     * Optimized with cached state to avoid 200ms polling overhead.
      */
     private suspend fun ensureChannelReady(): Boolean = withContext(Dispatchers.IO) {
+        // Fast path: check cached state first
         if (isChannelUsable()) {
             return@withContext true
         }
@@ -69,27 +120,34 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
         // Channel is not usable, try to wait for it to become ready
         val state = channel.getState(true) // true = try to connect
         if (state == ConnectivityState.READY || state == ConnectivityState.CONNECTING) {
-            // Wait up to 1 second for connection (reduced from 2s to leave time for RPC call)
+            // Wait up to 200ms for connection (optimized from 1s for faster response)
             var waited = 0L
-            val maxWait = 1000L
-            val checkInterval = 100L
+            val maxWait = 200L
+            val checkInterval = 50L
             
             while (waited < maxWait) {
                 delay(checkInterval)
                 waited += checkInterval
                 val currentState = channel.getState(false)
                 if (currentState == ConnectivityState.READY) {
+                    // Update cache with new state
+                    invalidateCache()
+                    cachedState.set(CachedState(currentState, true, System.currentTimeMillis()))
                     return@withContext true
                 }
                 if (currentState == ConnectivityState.SHUTDOWN || 
                     currentState == ConnectivityState.TRANSIENT_FAILURE) {
+                    // Update cache with failure state
+                    invalidateCache()
+                    cachedState.set(CachedState(currentState, false, System.currentTimeMillis()))
                     return@withContext false
                 }
             }
         }
         
-        // Final check
-        isChannelUsable()
+        // Final check and update cache
+        val finalUsable = isChannelUsable()
+        return@withContext finalUsable
     }
 
     suspend fun getSystemStats(): SysStatsResponse? = withContext(Dispatchers.IO) {
@@ -100,23 +158,37 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
         
         runCatching {
             val request = SysStatsRequest.newBuilder().build()
-            getStubWithDeadline().getSysStats(request)
-        }.onFailure { e ->
-            val status = when (e) {
-                is StatusException -> e.status
-                else -> Status.fromThrowable(e)
-            }
-            Log.e("CoreStatsClient", "getSystemStats failed: ${status.code} - ${status.description}", e)
-            
-            // If channel is in bad state, mark it for recreation
-            if (status.code == Status.Code.UNAVAILABLE || 
-                status.code == Status.Code.DEADLINE_EXCEEDED ||
-                status.code == Status.Code.CANCELLED) {
-                val channelState = channel.getState(false)
-                if (channelState == ConnectivityState.SHUTDOWN || 
-                    channelState == ConnectivityState.TRANSIENT_FAILURE) {
-                    Log.w("CoreStatsClient", "Channel in bad state (${channelState}), will need recreation")
-                }
+            suspendCancellableCoroutine<SysStatsResponse?> { continuation ->
+                getStubWithDeadline().getSysStats(request, object : io.grpc.stub.StreamObserver<SysStatsResponse> {
+                    override fun onNext(value: SysStatsResponse) {
+                        continuation.resume(value)
+                    }
+                    
+                    override fun onError(t: Throwable) {
+                        val status = when (t) {
+                            is StatusException -> t.status
+                            else -> Status.fromThrowable(t)
+                        }
+                        Log.e("CoreStatsClient", "getSystemStats failed: ${status.code} - ${status.description}", t)
+                        
+                        // If channel is in bad state, mark it for recreation and invalidate cache
+                        if (status.code == Status.Code.UNAVAILABLE || 
+                            status.code == Status.Code.DEADLINE_EXCEEDED ||
+                            status.code == Status.Code.CANCELLED) {
+                            val channelState = channel.getState(false)
+                            if (channelState == ConnectivityState.SHUTDOWN || 
+                                channelState == ConnectivityState.TRANSIENT_FAILURE) {
+                                Log.w("CoreStatsClient", "Channel in bad state (${channelState}), will need recreation")
+                                invalidateCache()
+                            }
+                        }
+                        continuation.resume(null)
+                    }
+                    
+                    override fun onCompleted() {
+                        // Already handled in onNext or onError
+                    }
+                })
             }
         }.getOrNull()
     }
@@ -135,7 +207,28 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
                 .setReset(false)
                 .build()
             
-            val response = getStubWithDeadline().queryStats(request)
+            // Async call using suspendCancellableCoroutine
+            val response = suspendCancellableCoroutine<com.xray.app.stats.command.QueryStatsResponse?> { continuation ->
+                getStubWithDeadline().queryStats(request, object : io.grpc.stub.StreamObserver<com.xray.app.stats.command.QueryStatsResponse> {
+                    override fun onNext(value: com.xray.app.stats.command.QueryStatsResponse) {
+                        continuation.resume(value)
+                    }
+                    
+                    override fun onError(t: Throwable) {
+                        val status = when (t) {
+                            is StatusException -> t.status
+                            else -> Status.fromThrowable(t)
+                        }
+                        Log.e("CoreStatsClient", "queryStats failed: ${status.code} - ${status.description}", t)
+                        continuation.resume(null)
+                    }
+                    
+                    override fun onCompleted() {
+                        // Already handled in onNext or onError
+                    }
+                })
+            }
+            
             val statCount = response?.statList?.size ?: 0
             Log.d("CoreStatsClient", "Query stats returned $statCount stats")
             
@@ -218,7 +311,21 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
                 .setReset(false)
                 .build()
             
-            val response = getStubWithDeadline().queryStats(request)
+            val response = suspendCancellableCoroutine<com.xray.app.stats.command.QueryStatsResponse?> { continuation ->
+                getStubWithDeadline().queryStats(request, object : io.grpc.stub.StreamObserver<com.xray.app.stats.command.QueryStatsResponse> {
+                    override fun onNext(value: com.xray.app.stats.command.QueryStatsResponse) {
+                        continuation.resume(value)
+                    }
+                    
+                    override fun onError(t: Throwable) {
+                        continuation.resume(null)
+                    }
+                    
+                    override fun onCompleted() {
+                        // Already handled in onNext or onError
+                    }
+                })
+            }
             val statCount = response?.statList?.size ?: 0
             Log.d("CoreStatsClient", "Pattern '$pattern' returned $statCount stats")
             

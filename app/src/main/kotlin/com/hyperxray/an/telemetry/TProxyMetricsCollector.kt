@@ -5,6 +5,7 @@ import android.util.Log
 import com.hyperxray.an.xray.runtime.stats.CoreStatsClient
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.service.TProxyService
+import com.hyperxray.an.service.TProxyService.UdpErrorCategory
 import com.hyperxray.an.viewmodel.CoreStatsState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -28,6 +29,43 @@ class TProxyMetricsCollector(
     private val prefs: Preferences
 ) {
     private val TAG = "TProxyMetricsCollector"
+    
+    // Reference to TProxyService for UDP error pattern access
+    private var tproxyService: TProxyService? = null
+    
+    /**
+     * Set TProxyService reference for UDP error pattern access
+     */
+    fun setTProxyService(service: TProxyService?) {
+        tproxyService = service
+    }
+    
+    /**
+     * Get UDP error pattern from TProxyService
+     */
+    private fun getUdpErrorPattern(): com.hyperxray.an.service.TProxyService.UdpErrorPattern {
+        return try {
+            tproxyService?.getUdpErrorPatternForTelemetry()
+                ?: com.hyperxray.an.service.TProxyService.UdpErrorPattern(
+                    totalErrors = 0,
+                    errorsByCategory = emptyMap(),
+                    averageTimeBetweenErrors = 0.0,
+                    errorRate = 0.0,
+                    lastErrorTime = 0L,
+                    isRecovering = false
+                )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get UDP error pattern: ${e.message}")
+            com.hyperxray.an.service.TProxyService.UdpErrorPattern(
+                totalErrors = 0,
+                errorsByCategory = emptyMap(),
+                averageTimeBetweenErrors = 0.0,
+                errorRate = 0.0,
+                lastErrorTime = 0L,
+                isRecovering = false
+            )
+        }
+    }
     
     private var coreStatsClient: CoreStatsClient? = null
     @Volatile
@@ -109,12 +147,22 @@ class TProxyMetricsCollector(
             // Estimate handshake time (placeholder - can be enhanced with actual measurements)
             val handshakeTime = estimateHandshakeTime(coreStatsState)
             
-            // Create metrics
+            // Get UDP error pattern from TProxyService
+            val udpErrorPattern = getUdpErrorPattern()
+            
+            // Create metrics with UDP error data
             val metrics = TelemetryMetrics(
                 throughput = fallbackThroughput,
                 rttP95 = rtt,
                 handshakeTime = handshakeTime,
                 loss = loss,
+                udpErrorRate = udpErrorPattern.errorRate,
+                udpErrorCategoryCounts = listOf(
+                    udpErrorPattern.errorsByCategory.getOrDefault(UdpErrorCategory.IDLE_TIMEOUT, 0),
+                    udpErrorPattern.errorsByCategory.getOrDefault(UdpErrorCategory.SHUTDOWN, 0),
+                    udpErrorPattern.errorsByCategory.getOrDefault(UdpErrorCategory.NORMAL_OPERATION, 0),
+                    udpErrorPattern.errorsByCategory.getOrDefault(UdpErrorCategory.UNKNOWN, 0)
+                ),
                 timestamp = Instant.now()
             )
             
@@ -524,6 +572,7 @@ class TProxyMetricsCollector(
             rttP95 = windowMetrics.map { it.rttP95 }.maxOrNull() ?: 0.0,
             avgHandshakeTime = windowMetrics.map { it.handshakeTime }.average(),
             avgLoss = windowMetrics.map { it.loss }.average(),
+            avgUdpErrorRate = windowMetrics.map { it.udpErrorRate }.average(),
             sampleCount = windowMetrics.size,
             windowStart = windowStart,
             windowEnd = now

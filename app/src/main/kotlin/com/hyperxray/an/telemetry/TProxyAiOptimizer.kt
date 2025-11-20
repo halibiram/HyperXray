@@ -163,14 +163,17 @@ class TProxyAiOptimizer(
                         Log.w(TAG, "Failed to collect metrics, skipping optimization cycle")
                     }
                     
-                    // Wait before next optimization cycle
-                    delay(optimizationIntervalMs)
+                    // Adaptive polling: adjust interval based on traffic
+                    val adaptiveInterval = calculateAdaptivePollingInterval(coreStatsState, optimizationIntervalMs)
+                    delay(adaptiveInterval)
                 } catch (e: Exception) {
                     // Catch-all for any unexpected exceptions in loop
                     Log.e(TAG, "Error in optimization loop: ${e.javaClass.simpleName}: ${e.message}", e)
                     // Continue loop - don't let exceptions kill the optimization thread
                     try {
-                        delay(optimizationIntervalMs)
+                        // Adaptive polling: adjust interval based on traffic
+                        val adaptiveInterval = calculateAdaptivePollingInterval(coreStatsState, optimizationIntervalMs)
+                        delay(adaptiveInterval)
                     } catch (delayEx: Exception) {
                         Log.e(TAG, "Error in delay, breaking loop", delayEx)
                         break
@@ -630,6 +633,28 @@ class TProxyAiOptimizer(
      * Can be set to trigger TProxy reload.
      */
     var onConfigurationApplied: ((TProxyOptimizedConfig, Boolean) -> Unit)? = null
+    
+    /**
+     * Calculates adaptive polling interval based on traffic state.
+     * No traffic: 60 seconds
+     * Low traffic: 30 seconds
+     * High traffic: 10-15 seconds
+     */
+    private fun calculateAdaptivePollingInterval(stats: CoreStatsState?, baseInterval: Long): Long {
+        if (stats == null) {
+            return baseInterval // Use base interval when no stats available
+        }
+        
+        val totalThroughput = stats.uplinkThroughput + stats.downlinkThroughput
+        val highTrafficThreshold = 100_000.0 // 100 KB/s
+        val lowTrafficThreshold = 10_000.0 // 10 KB/s
+        
+        return when {
+            totalThroughput > highTrafficThreshold -> 10000L // 10 seconds for high traffic
+            totalThroughput > lowTrafficThreshold -> 30000L // 30 seconds for low traffic
+            else -> 60000L // 60 seconds for no/low traffic
+        }
+    }
     
     /**
      * Get current configuration from Preferences.

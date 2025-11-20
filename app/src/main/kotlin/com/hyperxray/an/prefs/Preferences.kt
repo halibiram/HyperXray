@@ -513,6 +513,28 @@ class Preferences(context: Context) {
             setValueInProvider(BYPASS_IPS, jsonList)
         }
 
+    var xrayCoreInstanceCount: Int
+        get() {
+            val value = getPrefData(XRAY_CORE_INSTANCE_COUNT).first
+            val count = value?.toIntOrNull()
+            // Ensure value is between 1 and 4
+            return when {
+                count == null -> 1
+                count < 1 -> 1
+                count > 4 -> 4
+                else -> count
+            }
+        }
+        set(count) {
+            // Clamp value between 1 and 4
+            val clampedCount = when {
+                count < 1 -> 1
+                count > 4 -> 4
+                else -> count
+            }
+            setValueInProvider(XRAY_CORE_INSTANCE_COUNT, clampedCount.toString())
+        }
+
     companion object {
         const val SOCKS_ADDR: String = "SocksAddr"
         const val SOCKS_PORT: String = "SocksPort"
@@ -568,6 +590,7 @@ class Preferences(context: Context) {
         const val EXTREME_PROXY_OPTIMIZATION: String = "ExtremeProxyOptimization"
         const val BYPASS_DOMAINS: String = "BypassDomains"
         const val BYPASS_IPS: String = "BypassIps"
+        const val XRAY_CORE_INSTANCE_COUNT: String = "XrayCoreInstanceCount"
         
         private const val TAG = "Preferences"
     }

@@ -28,15 +28,21 @@ object ConfigUtils {
 
     @Throws(JSONException::class)
     fun injectStatsService(prefs: Preferences, configContent: String): String {
+        return injectStatsServiceWithPort(prefs, configContent, prefs.apiPort)
+    }
+
+    @Throws(JSONException::class)
+    fun injectStatsServiceWithPort(prefs: Preferences, configContent: String, apiPort: Int): String {
         Log.d(TAG, "=== Starting config injection ===")
         Log.d(TAG, "Aggressive optimizations: ${prefs.aggressiveSpeedOptimizations}")
         Log.d(TAG, "Extreme optimizations: ${prefs.extremeRamCpuOptimizations}")
+        Log.d(TAG, "API port: $apiPort")
         
         val jsonObject = JSONObject(configContent)
 
         val apiObject = JSONObject()
         apiObject.put("tag", "api")
-        apiObject.put("listen", "127.0.0.1:${prefs.apiPort}")
+        apiObject.put("listen", "127.0.0.1:$apiPort")
         val servicesArray = org.json.JSONArray()
         servicesArray.put("StatsService")
         apiObject.put("services", servicesArray)
@@ -1200,20 +1206,23 @@ object ConfigUtils {
         // Set to 1800 seconds (30 minutes) to allow UDP sessions to stay alive much longer
         // This prevents premature closure of UDP dispatcher connections which causes
         // "failed to write/handle UDP input > io: read/write on closed pipe" errors
+        // OPTIMIZATION: Increased to 3600 seconds (60 minutes) to further reduce race conditions
+        // with Xray's hardcoded 1-minute inactivity timer
         val currentConnIdle = connectionSettings.optInt("connIdle", 300)
-        val udpConnIdle = 1800 // 30 minutes - much longer for UDP stability
+        val udpConnIdle = 3600 // 60 minutes - even longer for UDP stability and error reduction
         if (currentConnIdle < udpConnIdle) {
             connectionSettings.put("connIdle", udpConnIdle)
-            Log.d(TAG, "  Increased connIdle timeout from ${currentConnIdle}s to ${udpConnIdle}s for UDP stability (30 min)")
+            Log.d(TAG, "  Increased connIdle timeout from ${currentConnIdle}s to ${udpConnIdle}s for UDP stability (60 min)")
         } else {
             Log.d(TAG, "  connIdle timeout already sufficient: ${currentConnIdle}s")
         }
         
         // CRITICAL: Set uplinkOnly and downlinkOnly to longer timeout for UDP
         // UDP operations can be bidirectional and need longer timeout on both directions
-        // Set to 900 seconds (15 minutes) to prevent premature closure
+        // OPTIMIZATION: Increased to 1800 seconds (30 minutes) to match connection timeout better
         // This ensures UDP packets can flow in both directions for extended periods
-        val udpDirectionTimeout = 900 // 15 minutes for uplink/downlink - longer for UDP stability
+        // and reduces race conditions during bidirectional UDP communication
+        val udpDirectionTimeout = 1800 // 30 minutes for uplink/downlink - optimized for UDP stability
         val currentUplinkOnly = connectionSettings.optInt("uplinkOnly", 0)
         val currentDownlinkOnly = connectionSettings.optInt("downlinkOnly", 0)
         
@@ -1248,9 +1257,11 @@ object ConfigUtils {
         
         // Set buffer timeout to match connection timeout
         // This ensures UDP buffers stay active as long as connections do
+        // OPTIMIZATION: Buffer settings also increased to prevent premature buffer cleanup
         val currentBufferConnIdle = bufferSettings.optInt("connIdle", 300)
         if (currentBufferConnIdle < udpConnIdle) {
             bufferSettings.put("connIdle", udpConnIdle)
+            Log.d(TAG, "  Increased buffer connIdle timeout from ${currentBufferConnIdle}s to ${udpConnIdle}s (60 min)")
             Log.d(TAG, "  Increased buffer connIdle timeout from ${currentBufferConnIdle}s to ${udpConnIdle}s for UDP")
         }
         
