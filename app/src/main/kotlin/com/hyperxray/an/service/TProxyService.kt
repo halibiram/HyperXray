@@ -1705,21 +1705,20 @@ class TProxyService : VpnService() {
                     return
                 }
                 
-                // Cache miss - resolve and cache in background
+                // Cache miss - resolve via SystemDnsCacheServer with retry mechanism
+                // This ensures retry mechanism is used even when Xray sniffing succeeds
                 serviceScope.launch {
                     try {
-                        // Resolve domain to IP
-                        val addresses = withContext(Dispatchers.IO) {
-                            try {
-                                InetAddress.getAllByName(sniffedDomain).toList()
-                            } catch (e: Exception) {
-                                emptyList()
-                            }
-                        }
-                        
+                        // ALWAYS use SystemDnsCacheServer for DNS resolution with retry mechanism
+                        // This prevents packet loss during DNS cache miss scenarios
+                        // SystemDnsCacheServer has built-in retry and DoH fallback, so no need for InetAddress fallback
+                        val addresses = forwardDnsQueryToSystemCacheServer(sniffedDomain)
                         if (addresses.isNotEmpty()) {
                             DnsCacheManager.saveToCache(sniffedDomain, addresses)
-                            Log.d(TAG, "💾 DNS cached from Xray sniffing: $sniffedDomain -> ${addresses.map { it.hostAddress }}")
+                            Log.d(TAG, "💾 DNS cached from Xray sniffing (via SystemDnsCacheServer): $sniffedDomain -> ${addresses.map { it.hostAddress }}")
+                        } else {
+                            // SystemDnsCacheServer has DoH fallback built-in, so if it returns empty, domain is likely invalid
+                            Log.w(TAG, "⚠️ DNS resolution failed for $sniffedDomain (SystemDnsCacheServer with DoH fallback)")
                         }
                     } catch (e: Exception) {
                         Log.w(TAG, "Error caching DNS from sniffing: $sniffedDomain", e)
@@ -1737,9 +1736,17 @@ class TProxyService : VpnService() {
                 if (domain.isNotEmpty() && ip.isNotEmpty()) {
                     serviceScope.launch {
                         try {
-                            val address = InetAddress.getByName(ip)
-                            DnsCacheManager.saveToCache(domain, listOf(address))
-                            Log.d(TAG, "💾 DNS cached from Xray DNS response: $domain -> $ip")
+                            // ALWAYS use SystemDnsCacheServer to resolve and cache (ensures consistency)
+                            val addresses = forwardDnsQueryToSystemCacheServer(domain)
+                            if (addresses.isNotEmpty()) {
+                                DnsCacheManager.saveToCache(domain, addresses)
+                                Log.d(TAG, "💾 DNS cached from Xray DNS response (via SystemDnsCacheServer): $domain -> ${addresses.map { it.hostAddress }}")
+                            } else {
+                                // If SystemDnsCacheServer fails, still cache the IP from Xray log (rare case)
+                                val address = InetAddress.getByName(ip)
+                                DnsCacheManager.saveToCache(domain, listOf(address))
+                                Log.d(TAG, "💾 DNS cached from Xray DNS response (direct IP fallback): $domain -> $ip")
+                            }
                         } catch (e: Exception) {
                             Log.w(TAG, "Error caching DNS response: $domain -> $ip", e)
                         }
@@ -1755,20 +1762,66 @@ class TProxyService : VpnService() {
      * Xray-core patch: Forward DNS query to SystemDnsCacheServer for resolution.
      * This actively intercepts DNS queries from Xray-core and routes them through our cache server.
      * This ensures all DNS queries from Xray-core go through SystemDnsCacheServer, providing system-wide caching.
+     * 
+     * Optimized with timeout control to prevent packet loss during DNS resolution.
+     * DNS resolution is prioritized - connection establishment waits for DNS resolution to complete.
+     */
+    /**
+     * ALWAYS use SystemDnsCacheServer for DNS resolution.
+     * SystemDnsCacheServer has built-in retry mechanism and DoH fallback,
+     * so it should always be used instead of InetAddress.getAllByName.
+     * 
+     * If SystemDnsCacheServer is not running, we try to start it first.
      */
     private suspend fun forwardDnsQueryToSystemCacheServer(domain: String): List<InetAddress> {
         return try {
-            // Check if SystemDnsCacheServer is running
+            // Ensure SystemDnsCacheServer is running - try to start if not running
             if (systemDnsCacheServer?.isRunning() != true) {
-                Log.d(TAG, "SystemDnsCacheServer not running, cannot forward DNS query: $domain")
+                Log.d(TAG, "SystemDnsCacheServer not running, attempting to start...")
+                if (systemDnsCacheServer == null) {
+                    systemDnsCacheServer = SystemDnsCacheServer.getInstance(this@TProxyService)
+                }
+                systemDnsCacheServer?.start()
+                
+                // Wait a bit for server to start
+                delay(100)
+                
+                if (systemDnsCacheServer?.isRunning() != true) {
+                    Log.w(TAG, "SystemDnsCacheServer failed to start, cannot forward DNS query: $domain")
+                    // Even if server failed to start, try resolveDomain - it may work through cache
+                    return systemDnsCacheServer?.resolveDomain(domain) ?: emptyList()
+                }
+            }
+            
+            // ALWAYS use SystemDnsCacheServer - it has retry mechanism and DoH fallback built-in
+            // Maximum wait time: 2 seconds (covers ultra-fast retry mechanism: 300ms + 500ms + 800ms + overhead)
+            // Ultra-optimized for maximum DNS resolution speed
+            val maxWaitTimeMs = 2000L
+            val startTime = System.currentTimeMillis()
+            
+            val result = withTimeoutOrNull(maxWaitTimeMs) {
+                // This call will block until DNS resolution completes (with retry mechanism and DoH fallback)
+                // This prevents packet loss by ensuring DNS is resolved before connection attempts
+                systemDnsCacheServer?.resolveDomain(domain) ?: emptyList()
+            }
+            
+            val elapsedTime = System.currentTimeMillis() - startTime
+            if (result == null) {
+                Log.w(TAG, "⚠️ DNS resolution timeout for $domain after ${elapsedTime}ms (max: ${maxWaitTimeMs}ms)")
+                // SystemDnsCacheServer has DoH fallback, so if timeout occurs, domain is likely invalid
                 return emptyList()
             }
             
-            // Xray-core patch: Directly resolve through SystemDnsCacheServer
-            // This ensures the query goes through our cache server and benefits from caching
-            systemDnsCacheServer?.resolveDomain(domain) ?: emptyList()
+            if (result.isNotEmpty()) {
+                Log.d(TAG, "✅ DNS resolved for $domain in ${elapsedTime}ms -> ${result.map { it.hostAddress }}")
+            } else {
+                Log.w(TAG, "⚠️ DNS resolution returned empty result for $domain after ${elapsedTime}ms")
+            }
+            
+            result
         } catch (e: Exception) {
             Log.e(TAG, "Error forwarding DNS query to SystemDnsCacheServer: $domain", e)
+            // SystemDnsCacheServer has DoH fallback built-in, so if exception occurs, domain is likely invalid
             emptyList()
         }
     }

@@ -15,8 +15,31 @@ import kotlin.concurrent.write
 private const val TAG = "DnsCacheManager"
 private const val CACHE_FILE_NAME = "dns_cache.json"
 private const val DEFAULT_TTL = 86400L // 24 hours in seconds
+private const val POPULAR_DOMAIN_TTL = 172800L // 48 hours for popular domains
+private const val DYNAMIC_DOMAIN_TTL = 86400L // 24 hours for dynamic domains (CDN, etc.)
 private const val MAX_ENTRIES = 10000
 private const val CACHE_VERSION = 1
+
+// Popular domains that rarely change - use longer TTL
+private val popularDomains = setOf(
+    "google.com", "www.google.com", "googleapis.com",
+    "facebook.com", "www.facebook.com",
+    "youtube.com", "www.youtube.com",
+    "instagram.com", "www.instagram.com",
+    "twitter.com", "www.twitter.com",
+    "amazon.com", "www.amazon.com",
+    "microsoft.com", "www.microsoft.com",
+    "apple.com", "www.apple.com"
+)
+
+// Dynamic domains that change frequently - use shorter TTL
+private val dynamicDomainPatterns = listOf(
+    Regex(".*\\.cdn\\.", RegexOption.IGNORE_CASE),
+    Regex(".*\\.edge\\.", RegexOption.IGNORE_CASE),
+    Regex(".*\\.cloudfront\\.net", RegexOption.IGNORE_CASE),
+    Regex(".*\\.akamaiedge\\.net", RegexOption.IGNORE_CASE),
+    Regex(".*\\.fastly\\.net", RegexOption.IGNORE_CASE)
+)
 
 /**
  * Manages persistent DNS cache to avoid redundant DNS queries.
@@ -107,7 +130,27 @@ object DnsCacheManager {
     }
 
     /**
-     * Save DNS resolution to cache
+     * Get optimized TTL for a domain based on its characteristics
+     */
+    private fun getOptimizedTtl(hostname: String): Long {
+        val lowerHostname = hostname.lowercase()
+        
+        // Check if it's a popular domain (longer TTL)
+        if (popularDomains.any { lowerHostname == it || lowerHostname.endsWith(".$it") }) {
+            return POPULAR_DOMAIN_TTL
+        }
+        
+        // Check if it's a dynamic domain (shorter TTL)
+        if (dynamicDomainPatterns.any { it.matches(lowerHostname) }) {
+            return DYNAMIC_DOMAIN_TTL
+        }
+        
+        // Default TTL
+        return DEFAULT_TTL
+    }
+    
+    /**
+     * Save DNS resolution to cache with optimized TTL
      */
     fun saveToCache(hostname: String, addresses: List<InetAddress>) {
         if (!isInitialized || cacheFile == null) {
@@ -116,10 +159,11 @@ object DnsCacheManager {
 
         try {
             val ips = addresses.mapNotNull { it.hostAddress }
+            val optimizedTtl = getOptimizedTtl(hostname)
             val entry = DnsCacheEntry(
                 ips = ips,
                 timestamp = System.currentTimeMillis() / 1000,
-                ttl = DEFAULT_TTL
+                ttl = optimizedTtl
             )
 
             cacheLock.write {

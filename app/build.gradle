@@ -481,6 +481,78 @@ task generateHyperXrayPolicyModel {
     }
 }
 
+// Fix symlink include files for Windows compatibility
+task fixIncludeFiles {
+    group = 'build'
+    description = 'Fix symlink include files for Windows build compatibility'
+    
+    doLast {
+        println "Fixing include files for Windows compatibility..."
+        
+        // Fix hev-task-system include files
+        def hevTaskSystemInclude = file("${projectDir}/src/main/jni/hev-socks5-tunnel/third-part/hev-task-system/include")
+        if (hevTaskSystemInclude.exists()) {
+            hevTaskSystemInclude.listFiles().each { includeFile ->
+                if (includeFile.isFile() && includeFile.name.endsWith('.h')) {
+                    def lines = includeFile.readLines()
+                    if (lines.size() > 0) {
+                        def firstLine = lines[0]
+                        if (firstLine && firstLine.startsWith('../src/')) {
+                            def targetPath = file("${hevTaskSystemInclude.parent}/src/${firstLine.substring(7)}")
+                            if (targetPath.exists()) {
+                                includeFile.write(targetPath.text)
+                                println "Fixed: ${includeFile.name}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Fix yaml include files
+        def yamlInclude = file("${projectDir}/src/main/jni/hev-socks5-tunnel/third-part/yaml/include")
+        if (yamlInclude.exists()) {
+            yamlInclude.listFiles().each { includeFile ->
+                if (includeFile.isFile() && includeFile.name.endsWith('.h')) {
+                    def lines = includeFile.readLines()
+                    if (lines.size() > 0) {
+                        def firstLine = lines[0]
+                        if (firstLine && firstLine.startsWith('../src/')) {
+                            def targetPath = file("${yamlInclude.parent}/src/${firstLine.substring(7)}")
+                            if (targetPath.exists()) {
+                                includeFile.write(targetPath.text)
+                                println "Fixed: ${includeFile.name}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Fix hev-socks5-tunnel core include files
+        def coreInclude = file("${projectDir}/src/main/jni/hev-socks5-tunnel/src/core/include")
+        if (coreInclude.exists()) {
+            coreInclude.listFiles().each { includeFile ->
+                if (includeFile.isFile() && includeFile.name.endsWith('.h')) {
+                    def lines = includeFile.readLines()
+                    if (lines.size() > 0) {
+                        def firstLine = lines[0]
+                        if (firstLine && firstLine.startsWith('../src/')) {
+                            def targetPath = file("${coreInclude.parent}/src/${firstLine.substring(7)}")
+                            if (targetPath.exists()) {
+                                includeFile.write(targetPath.text)
+                                println "Fixed: ${includeFile.name}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        println "Include files fixed successfully"
+    }
+}
+
 // Download geo files before processing assets
 android.applicationVariants.all { variant ->
     variant.mergeAssetsProvider.get().dependsOn downloadGeoFiles
@@ -605,6 +677,13 @@ android {
     externalNativeBuild {
         ndkBuild {
             path "src/main/jni/Android.mk"
+        }
+    }
+    
+    // Fix include files before NDK build (Windows compatibility)
+    tasks.whenTaskAdded { task ->
+        if (task.name.startsWith('externalNativeBuild') && !task.name.contains('Clean')) {
+            task.dependsOn fixIncludeFiles
         }
     }
 
