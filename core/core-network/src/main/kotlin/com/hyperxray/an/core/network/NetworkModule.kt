@@ -32,18 +32,19 @@ object NetworkModule {
      */
     fun initialize(context: Context) {
         if (isInitialized) {
-            Log.d(TAG, "NetworkModule already initialized")
+            Log.i(TAG, "⚠️ NetworkModule already initialized")
             return
         }
         
         try {
             // Initialize HTTP client factory with Cronet + Conscrypt
+            Log.i(TAG, "🚀 Initializing NetworkModule (HttpClientFactory + DNS Cache + HTTP Cache + Retry)")
             HttpClientFactory.initialize(context.applicationContext)
             
             isInitialized = true
-            Log.d(TAG, "NetworkModule initialized successfully")
+            Log.i(TAG, "✅ NetworkModule initialized successfully")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize NetworkModule", e)
+            Log.e(TAG, "❌ Failed to initialize NetworkModule", e)
             // Continue anyway - OkHttp fallback will work
             isInitialized = true
         }

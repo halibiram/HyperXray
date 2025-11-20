@@ -2319,6 +2319,7 @@ class MainViewModel(application: Application) :
     }
 
     fun testConnectivity() {
+        Log.d(TAG, "testConnectivity() called")
         viewModelScope.launch(Dispatchers.IO) {
             val prefs = prefs
             val url: URL

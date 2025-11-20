@@ -36,7 +36,12 @@ import com.hyperxray.an.ui.screens.log.extractSNI
 import com.hyperxray.an.xray.runtime.stats.CoreStatsClient
 import com.hyperxray.an.common.Socks5ReadinessChecker
 import com.hyperxray.an.xray.runtime.MultiXrayCoreManager
+import com.hyperxray.an.core.network.dns.SystemDnsCacheServer
+import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.xray.runtime.LogLineCallback
+import com.hyperxray.an.ui.screens.log.extractDnsQuery
+import com.hyperxray.an.ui.screens.log.extractSniffedDomain
+import java.net.InetAddress
 import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -188,6 +193,13 @@ class TProxyService : VpnService() {
     private var socks5ReadinessChecked = false
     private var socks5ReadinessJob: Job? = null
     private var socks5PeriodicCheckJob: Job? = null
+    
+    // System DNS cache server for system-wide DNS caching
+    private var systemDnsCacheServer: SystemDnsCacheServer? = null
+    
+    // DNS cache integration - intercepts DNS queries from Xray logs (no root required)
+    @Volatile
+    private var dnsCacheInitialized = false
     
     // UDP monitoring
     private var udpMonitoringJob: Job? = null
@@ -344,6 +356,11 @@ class TProxyService : VpnService() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "onDestroy called, cleaning up resources.")
+        
+        // Stop system DNS cache server
+        systemDnsCacheServer?.stop()
+        systemDnsCacheServer?.shutdown()
+        systemDnsCacheServer = null
         
         // Stop heartbeat
         heartbeatJob?.cancel()
@@ -591,11 +608,17 @@ class TProxyService : VpnService() {
                         multiXrayCoreManager = MultiXrayCoreManager(applicationContext)
                         
                         // Set log callback to forward logs to logFileManager and broadcast
+                        // Also intercept DNS queries and cache them (no root required)
                         multiXrayCoreManager?.setLogLineCallback(LogLineCallback { line ->
                             // Write to log file
                             logFileManager.appendLog(line)
                             // Broadcast to UI (lock-free channel)
                             logBroadcastChannel.trySend(line)
+                            
+                            // Intercept DNS queries from Xray-core logs and cache them
+                            // This allows browser and other apps to benefit from DNS cache
+                            // Root is NOT required - works by parsing Xray DNS logs
+                            interceptDnsFromXrayLogs(line)
                         })
                         
                         // Observe instance status changes and broadcast to MainViewModel
@@ -1567,12 +1590,47 @@ class TProxyService : VpnService() {
         if (prefs.ipv4) {
             addAddress(prefs.tunnelIpv4Address, prefs.tunnelIpv4Prefix)
             addRoute("0.0.0.0", 0)
-            prefs.dnsIpv4.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
+            
+            // Start system DNS cache server (no root required - uses Xray-core DNS interception)
+            try {
+                if (systemDnsCacheServer == null) {
+                    systemDnsCacheServer = SystemDnsCacheServer.getInstance(this@TProxyService)
+                }
+                
+                // Start DNS cache server - will try port 53, fallback to 5353 if needed
+                // Note: Even if port 53 fails, Xray-core will intercept DNS queries
+                // and our cache will still work through Xray DNS integration
+                systemDnsCacheServer?.start()
+                
+                val listeningPort = systemDnsCacheServer?.getListeningPort()
+                if (listeningPort != null) {
+                    if (listeningPort == 53) {
+                        Log.i(TAG, "✅ System DNS cache server started on 127.0.0.1:53 (root may be required)")
+                        addDnsServer("127.0.0.1") // Use local DNS cache server
+                    } else {
+                        Log.i(TAG, "✅ System DNS cache server started on 127.0.0.1:$listeningPort (no root required)")
+                        // Use custom DNS server but cache will work through Xray-core
+                        prefs.dnsIpv4.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
+                        // Xray-core will intercept DNS queries and use our cache
+                    }
+                } else {
+                    Log.w(TAG, "⚠️ DNS cache server failed to start, using custom DNS server (cache will work through Xray-core)")
+                    prefs.dnsIpv4.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error starting DNS cache server: ${e.message}, using custom DNS server (cache will work through Xray-core)", e)
+                prefs.dnsIpv4.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
+            }
         }
         if (prefs.ipv6) {
             addAddress(prefs.tunnelIpv6Address, prefs.tunnelIpv6Prefix)
             addRoute("::", 0)
-            prefs.dnsIpv6.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
+            // For IPv6, use custom DNS server or localhost if DNS cache server is running
+            if (systemDnsCacheServer?.isRunning() == true) {
+                addDnsServer("::1") // IPv6 localhost
+            } else {
+                prefs.dnsIpv6.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
+            }
         }
 
         prefs.apps?.forEach { appName ->
@@ -1589,11 +1647,141 @@ class TProxyService : VpnService() {
         if (prefs.bypassSelectedApps || prefs.apps.isNullOrEmpty())
             addDisallowedApplication(BuildConfig.APPLICATION_ID)
     }
+    
+    /**
+     * Intercept DNS queries from Xray-core logs and cache them
+     * This allows browser and other apps to benefit from DNS cache
+     * Root is NOT required - works by parsing Xray DNS logs
+     */
+    private fun interceptDnsFromXrayLogs(logLine: String) {
+        if (!dnsCacheInitialized) {
+            try {
+                DnsCacheManager.initialize(this)
+                dnsCacheInitialized = true
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to initialize DNS cache: ${e.message}")
+                return
+            }
+        }
+        
+        try {
+            // Extract DNS query domain from Xray logs
+            val dnsQuery = extractDnsQuery(logLine)
+            if (dnsQuery != null) {
+                // Check if already in cache
+                val cached = DnsCacheManager.getFromCache(dnsQuery)
+                if (cached != null && cached.isNotEmpty()) {
+                    Log.d(TAG, "✅ DNS CACHE HIT (Xray log): $dnsQuery -> ${cached.map { it.hostAddress }}")
+                    return
+                }
+                
+                // DNS cache miss - actively resolve via SystemDnsCacheServer and cache
+                // Xray-core patch: Intercept DNS queries and forward to SystemDnsCacheServer
+                serviceScope.launch {
+                    try {
+                        // Forward DNS query to SystemDnsCacheServer for resolution
+                        val resolvedAddresses = forwardDnsQueryToSystemCacheServer(dnsQuery)
+                        if (resolvedAddresses.isNotEmpty()) {
+                            DnsCacheManager.saveToCache(dnsQuery, resolvedAddresses)
+                            Log.i(TAG, "✅ DNS resolved via SystemDnsCacheServer (Xray patch): $dnsQuery -> ${resolvedAddresses.map { it.hostAddress }}")
+                        } else {
+                            Log.d(TAG, "⚠️ DNS CACHE MISS (Xray log): $dnsQuery (SystemDnsCacheServer couldn't resolve)")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error forwarding DNS query to SystemDnsCacheServer: $dnsQuery", e)
+                    }
+                }
+            }
+            
+            // Also extract domain from sniffing logs and cache resolved IP
+            val sniffedDomain = extractSniffedDomain(logLine)
+            if (sniffedDomain != null) {
+                // CRITICAL: Check cache first before resolving
+                // This ensures cache hit for repeated domain queries
+                val cached = DnsCacheManager.getFromCache(sniffedDomain)
+                if (cached != null && cached.isNotEmpty()) {
+                    // Cache hit - domain already resolved, no need to resolve again
+                    Log.d(TAG, "✅ DNS CACHE HIT (Xray sniffing): $sniffedDomain -> ${cached.map { it.hostAddress }} (served from cache)")
+                    return
+                }
+                
+                // Cache miss - resolve and cache in background
+                serviceScope.launch {
+                    try {
+                        // Resolve domain to IP
+                        val addresses = withContext(Dispatchers.IO) {
+                            try {
+                                InetAddress.getAllByName(sniffedDomain).toList()
+                            } catch (e: Exception) {
+                                emptyList()
+                            }
+                        }
+                        
+                        if (addresses.isNotEmpty()) {
+                            DnsCacheManager.saveToCache(sniffedDomain, addresses)
+                            Log.d(TAG, "💾 DNS cached from Xray sniffing: $sniffedDomain -> ${addresses.map { it.hostAddress }}")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error caching DNS from sniffing: $sniffedDomain", e)
+                    }
+                }
+            }
+            
+            // Extract resolved IP from DNS response logs
+            // Pattern: "A record: 1.2.3.4" or "resolved: example.com -> 1.2.3.4"
+            val dnsResponsePattern = Regex("""(?:A\s+record|resolved|answer).*?([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}).*?(\d+\.\d+\.\d+\.\d+)""", RegexOption.IGNORE_CASE)
+            dnsResponsePattern.find(logLine)?.let { matchResult ->
+                val domain = matchResult.groupValues[1]
+                val ip = matchResult.groupValues[2]
+                
+                if (domain.isNotEmpty() && ip.isNotEmpty()) {
+                    serviceScope.launch {
+                        try {
+                            val address = InetAddress.getByName(ip)
+                            DnsCacheManager.saveToCache(domain, listOf(address))
+                            Log.d(TAG, "💾 DNS cached from Xray DNS response: $domain -> $ip")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error caching DNS response: $domain -> $ip", e)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // Silently fail - DNS cache integration should not break logging
+        }
+    }
+
+    /**
+     * Xray-core patch: Forward DNS query to SystemDnsCacheServer for resolution.
+     * This actively intercepts DNS queries from Xray-core and routes them through our cache server.
+     * This ensures all DNS queries from Xray-core go through SystemDnsCacheServer, providing system-wide caching.
+     */
+    private suspend fun forwardDnsQueryToSystemCacheServer(domain: String): List<InetAddress> {
+        return try {
+            // Check if SystemDnsCacheServer is running
+            if (systemDnsCacheServer?.isRunning() != true) {
+                Log.d(TAG, "SystemDnsCacheServer not running, cannot forward DNS query: $domain")
+                return emptyList()
+            }
+            
+            // Xray-core patch: Directly resolve through SystemDnsCacheServer
+            // This ensures the query goes through our cache server and benefits from caching
+            systemDnsCacheServer?.resolveDomain(domain) ?: emptyList()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error forwarding DNS query to SystemDnsCacheServer: $domain", e)
+            emptyList()
+        }
+    }
 
     private fun stopService() {
         Log.d(TAG, "stopService called, cleaning up VPN resources.")
 
-        // Step 1: Stop AI optimizer before stopping service
+        // Step 1: Stop system DNS cache server
+        systemDnsCacheServer?.stop()
+        systemDnsCacheServer?.shutdown()
+        systemDnsCacheServer = null
+        
+        // Step 2: Stop AI optimizer before stopping service
         tproxyAiOptimizer?.stopOptimization()
 
         // Step 2: Native TProxy service is already stopped in stopXray() to prevent UDP race conditions

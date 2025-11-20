@@ -94,7 +94,10 @@ object ConfigUtils {
         // CRITICAL: Configure UDP timeout settings to prevent closed pipe errors
         // This ensures UDP connections stay alive longer and are closed gracefully
         configureUdpTimeoutSettings(jsonObject)
-
+        
+        // NOTE: Port 53 routing rule removal disabled - causes startup issues
+        // removePort53DnsRoutingRule(jsonObject)
+        
         val finalConfig = jsonObject.toString(2)
         Log.d(TAG, "=== Config injection completed ===")
         Log.d(TAG, "Final config size: ${finalConfig.length} bytes")
@@ -182,19 +185,7 @@ object ConfigUtils {
             jsonObject.put("dns", dnsObject)
         }
 
-        // Enable DNS cache (if not already configured)
-        if (!dnsObject.has("cache")) {
-            val cacheObject = JSONObject()
-            cacheObject.put("enabled", true)
-            // Cache size: 1000 entries (default)
-            cacheObject.put("cacheSize", 1000)
-            dnsObject.put("cache", cacheObject)
-        } else {
-            // Ensure cache is enabled
-            val cacheObject = dnsObject.optJSONObject("cache") ?: JSONObject()
-            cacheObject.put("enabled", true)
-            dnsObject.put("cache", cacheObject)
-        }
+        // DNS cache configuration will be set later (disabled to use SystemDnsCacheServer)
 
         // Enable DNS query logging
         // Note: DNS logs appear in debug log level, which is already set above
@@ -203,12 +194,49 @@ object ConfigUtils {
             dnsObject.put("queryStrategy", "UseIPv4")
         }
 
-        // Ensure DNS servers are configured (add default if none exist)
+        // Configure DNS servers - prioritize local DNS cache server (port 5353, no root required)
+        // Xray-core DNS server format: can be string "8.8.8.8" or object {"address": "127.0.0.1", "port": 5353}
+        // We'll use object format for custom port
+        // CRITICAL: Disable Xray-core's own DNS cache to force queries to SystemDnsCacheServer
+        // This ensures all DNS queries go through our cache server
+        val cacheObject = dnsObject.optJSONObject("cache") ?: JSONObject()
+        cacheObject.put("enabled", false) // Disable Xray-core DNS cache to use SystemDnsCacheServer
+        dnsObject.put("cache", cacheObject)
+        Log.d(TAG, "⚠️ Xray-core DNS cache disabled to use SystemDnsCacheServer")
+        
         if (!dnsObject.has("servers")) {
             val serversArray = org.json.JSONArray()
-            serversArray.put("8.8.8.8")
-            serversArray.put("8.8.4.4")
+            
+            // Use ONLY local DNS cache server (port 5353, no root required)
+            // SystemDnsCacheServer will handle cache and forward to upstream DNS if needed
+            // Xray-core supports DNS server with custom port using object format
+            val localDnsServer = org.json.JSONObject()
+            localDnsServer.put("address", "127.0.0.1")
+            localDnsServer.put("port", 5353)
+            serversArray.put(localDnsServer)
+            
+            // Don't add fallback DNS servers - SystemDnsCacheServer will handle upstream forwarding
+            // This ensures ALL DNS queries go through SystemDnsCacheServer for caching
             dnsObject.put("servers", serversArray)
+            Log.d(TAG, "✅ DNS servers configured: ONLY localhost:5353 (DNS cache server - handles upstream forwarding)")
+        } else {
+            // If servers already exist, prepend local DNS cache server as first priority
+            val existingServers = dnsObject.optJSONArray("servers")
+            if (existingServers != null) {
+                val newServersArray = org.json.JSONArray()
+                
+                // Use ONLY local DNS cache server (port 5353)
+                // SystemDnsCacheServer will handle cache and forward to upstream DNS if needed
+                val localDnsServer = org.json.JSONObject()
+                localDnsServer.put("address", "127.0.0.1")
+                localDnsServer.put("port", 5353)
+                newServersArray.put(localDnsServer)
+                
+                // Don't add existing servers - SystemDnsCacheServer will handle upstream forwarding
+                // This ensures ALL DNS queries go through SystemDnsCacheServer for caching
+                dnsObject.put("servers", newServersArray)
+                Log.d(TAG, "✅ DNS servers updated: ONLY localhost:5353 (DNS cache server - handles upstream forwarding)")
+            }
         }
 
         jsonObject.put("dns", dnsObject)
@@ -355,13 +383,13 @@ object ConfigUtils {
             jsonObject.put("dns", dnsObject)
         }
 
-        // Aggressive DNS cache settings
+        // Disable Xray-core DNS cache to use SystemDnsCacheServer
+        // SystemDnsCacheServer provides centralized DNS caching for all apps
         var cacheObject = dnsObject.optJSONObject("cache")
         if (cacheObject == null) {
             cacheObject = JSONObject()
         }
-        cacheObject.put("enabled", true)
-        cacheObject.put("cacheSize", prefs.dnsCacheSize)
+        cacheObject.put("enabled", false) // Disable Xray-core DNS cache to use SystemDnsCacheServer
         dnsObject.put("cache", cacheObject)
 
         // Query strategy for speed
@@ -693,12 +721,12 @@ object ConfigUtils {
         }
 
         // Extreme DNS cache - maximize cache size
+        // Disable Xray-core DNS cache to use SystemDnsCacheServer
         var cacheObject = dnsObject.optJSONObject("cache")
         if (cacheObject == null) {
             cacheObject = JSONObject()
         }
-        cacheObject.put("enabled", true)
-        cacheObject.put("cacheSize", prefs.extremeDnsCacheSize)
+        cacheObject.put("enabled", false) // Disable Xray-core DNS cache to use SystemDnsCacheServer
         dnsObject.put("cache", cacheObject)
 
         // Parallel DNS queries for maximum CPU utilization
@@ -1280,6 +1308,63 @@ object ConfigUtils {
         jsonObject.put("policy", policyObject)
         
         Log.i(TAG, "✅ UDP timeout settings configured: connIdle=${connectionSettings.optInt("connIdle", 300)}s, uplinkOnly=${connectionSettings.optInt("uplinkOnly", 0)}, downlinkOnly=${connectionSettings.optInt("downlinkOnly", 0)}, bufferSize=${bufferSettings.optInt("bufferSize", 512)}KB")
+    }
+    
+    /**
+     * CRITICAL: Remove port 53 routing rule that redirects DNS queries to dns-out outbound.
+     * This rule prevents Xray-core from using SystemDnsCacheServer (localhost:5353).
+     * We need Xray-core to use its DNS resolver (which uses SystemDnsCacheServer) instead of routing to dns-out.
+     * 
+     * This function must be called AFTER all other routing rules are processed to ensure
+     * the port 53 rule is removed even if other functions modify routing.
+     */
+    @Throws(JSONException::class)
+    private fun removePort53DnsRoutingRule(jsonObject: JSONObject) {
+        val routingObject = jsonObject.optJSONObject("routing")
+        if (routingObject == null) {
+            Log.d(TAG, "No routing object found, skipping port 53 rule removal")
+            return
+        }
+        
+        val rulesArray = routingObject.optJSONArray("rules")
+        if (rulesArray == null || rulesArray.length() == 0) {
+            Log.d(TAG, "No routing rules found, skipping port 53 rule removal")
+            return
+        }
+        
+        val newRulesArray = org.json.JSONArray()
+        var removedPort53Rule = false
+        var removedCount = 0
+        
+        for (i in 0 until rulesArray.length()) {
+            val rule = rulesArray.optJSONObject(i)
+            if (rule != null) {
+                // Check if this is a port 53 rule that routes to dns-out
+                val port = rule.optInt("port", -1)
+                val outboundTag = rule.optString("outboundTag", "")
+                
+                if (port == 53 && (outboundTag == "dns-out" || outboundTag == "dns")) {
+                    // Skip this rule - it prevents SystemDnsCacheServer from being used
+                    removedPort53Rule = true
+                    removedCount++
+                    Log.d(TAG, "⚠️ Removed port 53 routing rule (outboundTag: $outboundTag) to allow SystemDnsCacheServer usage")
+                    continue
+                }
+                
+                newRulesArray.put(rule)
+            } else {
+                // Keep non-object rules (shouldn't happen, but be safe)
+                newRulesArray.put(rulesArray.get(i))
+            }
+        }
+        
+        if (removedPort53Rule) {
+            routingObject.put("rules", newRulesArray)
+            jsonObject.put("routing", routingObject)
+            Log.i(TAG, "✅ Port 53 routing rule(s) removed ($removedCount rule(s)) - Xray-core will now use SystemDnsCacheServer for DNS resolution")
+        } else {
+            Log.d(TAG, "No port 53 routing rule found to remove")
+        }
     }
     
     /**

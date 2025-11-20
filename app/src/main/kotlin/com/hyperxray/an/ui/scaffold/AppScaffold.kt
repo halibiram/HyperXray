@@ -503,7 +503,7 @@ private fun ConfigActions(
                 mainViewModel.testConnectivity()
                 expanded = false
             },
-            enabled = isServiceEnabled
+            enabled = true
         )
     }
 }
@@ -682,7 +682,7 @@ private fun StatsActions(
                 mainViewModel.testConnectivity()
                 expanded = false
             },
-            enabled = isServiceEnabled
+            enabled = true
         )
     }
 }
