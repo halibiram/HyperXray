@@ -154,6 +154,8 @@ jobs:
           distribution: 'temurin'
           java-version: '22'
           cache: 'gradle'
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME }}
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -344,6 +346,8 @@ jobs:
           distribution: 'temurin'
           java-version: '22'
           cache: 'gradle'
+        env:
+          JAVA_HOME: ${{ env.JAVA_HOME }}
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
