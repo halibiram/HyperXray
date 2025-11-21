@@ -52,6 +52,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.hyperxray.an.feature.dashboard.components.AnimatedStatCard
 import com.hyperxray.an.feature.dashboard.components.ConnectionQualityCard
 import com.hyperxray.an.feature.dashboard.components.ConnectionStatusCard
+import com.hyperxray.an.feature.dashboard.components.DnsCacheCard
 import com.hyperxray.an.feature.dashboard.components.InstanceStatusCard
 import com.hyperxray.an.feature.dashboard.components.ModernStatCard
 import com.hyperxray.an.feature.dashboard.components.PerformanceIndicator
@@ -80,6 +81,7 @@ fun DashboardScreen(
 ) {
     val coreStats by viewModel.coreStatsState.collectAsState()
     val telemetryState by viewModel.telemetryState.collectAsState()
+    val dnsCacheStats by viewModel.dnsCacheStats.collectAsState()
     val isServiceEnabled by viewModel.isServiceEnabled.collectAsState()
     val controlMenuClickable by viewModel.controlMenuClickable.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
@@ -93,6 +95,7 @@ fun DashboardScreen(
             while (true) {
                 viewModel.updateCoreStats()
                 viewModel.updateTelemetryStats()
+                viewModel.updateDnsCacheStats()
                 delay(1000)
             }
         }
@@ -131,6 +134,7 @@ fun DashboardScreen(
     val systemGradient = DashboardColors.systemGradient()
     val memoryGradient = DashboardColors.memoryGradient()
     val telemetryGradient = DashboardColors.telemetryGradient()
+    val dnsCacheGradient = DashboardColors.dnsCacheGradient()
     val successColor = DashboardColors.successColor()
     val errorColor = DashboardColors.errorColor()
     val warningColor = DashboardColors.warningColor()
@@ -1001,6 +1005,22 @@ fun DashboardScreen(
                 }
             }
         )
+        }
+    }
+
+    // DNS Cache Card
+    item(key = "dns_cache") {
+        AnimatedVisibility(
+            visible = dnsCacheStats != null,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically()
+        ) {
+            if (dnsCacheStats != null) {
+                DnsCacheCard(
+                    stats = dnsCacheStats!!,
+                    gradientColors = dnsCacheGradient
+                )
+            }
         }
     }
     }

@@ -3,11 +3,15 @@ package com.hyperxray.an.viewmodel
 import com.hyperxray.an.feature.dashboard.DashboardViewModel
 import com.hyperxray.an.feature.dashboard.CoreStatsState as FeatureCoreStatsState
 import com.hyperxray.an.feature.dashboard.AggregatedTelemetry as FeatureAggregatedTelemetry
+import com.hyperxray.an.feature.dashboard.DnsCacheStats as FeatureDnsCacheStats
+import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.telemetry.AggregatedTelemetry
 import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
@@ -48,12 +52,32 @@ fun AggregatedTelemetry.toFeatureState(): FeatureAggregatedTelemetry {
 }
 
 /**
+ * Extension function to convert DnsCacheManager.DnsCacheStats to feature module DnsCacheStats
+ */
+fun DnsCacheManager.DnsCacheStats.toFeatureState(): FeatureDnsCacheStats {
+    return FeatureDnsCacheStats(
+        entryCount = entryCount,
+        memoryUsageMB = memoryUsageMB,
+        memoryLimitMB = memoryLimitMB,
+        memoryUsagePercent = memoryUsagePercent,
+        hits = hits,
+        misses = misses,
+        hitRate = hitRate,
+        avgDomainHitRate = avgDomainHitRate,
+        avgHitLatencyMs = avgHitLatencyMs,
+        avgMissLatencyMs = avgMissLatencyMs
+    )
+}
+
+/**
  * MainViewModel implementation of DashboardViewModel
  * Uses viewModelScope for StateFlow conversion
  */
 val MainViewModel.dashboardViewModel: DashboardViewModel
     get() {
         val mainViewModel = this
+        val dnsCacheStatsFlow = MutableStateFlow<FeatureDnsCacheStats?>(null)
+        
         return object : DashboardViewModel {
             override val coreStatsState: StateFlow<FeatureCoreStatsState> =
                 mainViewModel.coreStatsState
@@ -72,6 +96,9 @@ val MainViewModel.dashboardViewModel: DashboardViewModel
                         started = SharingStarted.WhileSubscribed(5000),
                         initialValue = mainViewModel.telemetryState.value?.toFeatureState()
                     )
+            
+            override val dnsCacheStats: StateFlow<FeatureDnsCacheStats?> =
+                dnsCacheStatsFlow.asStateFlow()
             
             override val isServiceEnabled: StateFlow<Boolean> =
                 mainViewModel.isServiceEnabled
@@ -94,6 +121,18 @@ val MainViewModel.dashboardViewModel: DashboardViewModel
             override fun updateTelemetryStats() {
                 mainViewModel.viewModelScope.launch {
                     mainViewModel.updateTelemetryStats()
+                }
+            }
+            
+            override fun updateDnsCacheStats() {
+                mainViewModel.viewModelScope.launch {
+                    try {
+                        val stats = DnsCacheManager.getStatsData()
+                        dnsCacheStatsFlow.value = stats.toFeatureState()
+                    } catch (e: Exception) {
+                        // DnsCacheManager might not be initialized yet
+                        dnsCacheStatsFlow.value = null
+                    }
                 }
             }
         }

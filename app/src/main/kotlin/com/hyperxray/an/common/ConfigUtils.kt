@@ -39,6 +39,24 @@ object ConfigUtils {
         Log.d(TAG, "API port: $apiPort")
         
         val jsonObject = JSONObject(configContent)
+        
+        // CRITICAL FIX: Remove or fix invalid version field
+        // Xray-core expects version to be a VersionConfig object, not a string
+        // If version exists as string, remove it (Xray will use default)
+        if (jsonObject.has("version")) {
+            val versionValue = jsonObject.get("version")
+            if (versionValue is String) {
+                Log.w(TAG, "⚠️ Found invalid version field (string): '$versionValue' - removing (Xray will use default)")
+                jsonObject.remove("version")
+            } else if (versionValue is JSONObject) {
+                // Version is already an object - keep it
+                Log.d(TAG, "Version field is valid object format, keeping")
+            } else {
+                // Unknown format - remove it
+                Log.w(TAG, "⚠️ Found invalid version field type: ${versionValue.javaClass.simpleName} - removing")
+                jsonObject.remove("version")
+            }
+        }
 
         val apiObject = JSONObject()
         apiObject.put("tag", "api")

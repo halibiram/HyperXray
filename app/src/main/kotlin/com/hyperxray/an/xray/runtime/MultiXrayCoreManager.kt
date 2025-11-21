@@ -60,7 +60,7 @@ class MultiXrayCoreManager(private val context: Context) {
         private const val TAG = "MultiXrayCoreManager"
         private const val MIN_PORT = 10000
         private const val MAX_PORT = 65535
-        private const val INSTANCE_STARTUP_TIMEOUT_MS = 5000L // 5 seconds timeout for instance to reach Running state
+        private const val INSTANCE_STARTUP_TIMEOUT_MS = 15000L // 15 seconds timeout for instance to reach Running state
         
         @Volatile
         private var INSTANCE: MultiXrayCoreManager? = null
@@ -382,10 +382,30 @@ class MultiXrayCoreManager(private val context: Context) {
      * @return Map of instance index to API port
      */
     fun getActiveInstances(): Map<Int, Int> {
-        return instancePorts.filter { (index, _) ->
+        val activeInstances = instancePorts.filter { (index, _) ->
             val service = instances[index]
-            service != null && service.isRunning()
+            val isRunning = service != null && service.isRunning()
+            
+            if (!isRunning && service != null) {
+                // Log why instance is not considered active
+                val status = service.status.value
+                Log.d(TAG, "Instance $index is not active: status=$status, isAlive=${service.getProcessId() != null}")
+            }
+            
+            isRunning
         }
+        
+        if (activeInstances.isEmpty() && instancePorts.isNotEmpty()) {
+            // Log detailed status of all instances for debugging
+            Log.w(TAG, "No active instances found. Total instances: ${instances.size}, Ports: ${instancePorts.size}")
+            instances.forEach { (index, service) ->
+                val status = service.status.value
+                val port = instancePorts[index]
+                Log.w(TAG, "Instance $index: port=$port, status=$status, isRunning=${service.isRunning()}, processId=${service.getProcessId()}")
+            }
+        }
+        
+        return activeInstances
     }
     
     /**

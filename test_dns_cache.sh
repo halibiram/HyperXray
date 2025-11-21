@@ -29,3 +29,6 @@ echo ""
 echo "=== DNS Cache Test Tamamlandı ==="
 
 
+
+
+

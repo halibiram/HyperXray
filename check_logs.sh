@@ -22,3 +22,6 @@ echo "Logları canlı izlemek için şu komutu çalıştırın:"
 echo "adb logcat -s HttpClientFactory:D DnsCacheManager:D RetryInterceptor:D CacheLoggingInterceptor:D"
 
 
+
+
+

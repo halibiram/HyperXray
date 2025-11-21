@@ -27,14 +27,14 @@ import java.net.SocketTimeoutException
 object Socks5ReadinessChecker {
     private const val TAG = "Socks5ReadinessChecker"
     
-    // Default timeout for socket connection attempts
-    private const val SOCKET_CONNECT_TIMEOUT_MS = 2000L
+    // Default timeout for socket connection attempts (optimized for faster failure detection)
+    private const val SOCKET_CONNECT_TIMEOUT_MS = 500L
     
-    // Retry interval when waiting for SOCKS5 to become ready
-    private const val RETRY_INTERVAL_MS = 500L
+    // Retry interval when waiting for SOCKS5 to become ready (optimized for faster detection)
+    private const val RETRY_INTERVAL_MS = 100L
     
-    // Maximum wait time before giving up
-    private const val MAX_WAIT_TIME_MS = 30000L // 30 seconds
+    // Maximum wait time before giving up (fallback timeout)
+    private const val MAX_WAIT_TIME_MS = 5000L // 5 seconds
     
     // StateFlow to track SOCKS5 readiness
     private val _isSocks5Ready = MutableStateFlow<Boolean>(false)

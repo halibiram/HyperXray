@@ -12,3 +12,6 @@ interface ScheduleControlUseCase {
     suspend fun getScheduleStatus(): Result<String>
 }
 
+
+
+

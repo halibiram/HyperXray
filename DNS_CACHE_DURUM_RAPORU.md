@@ -97,3 +97,6 @@ Eğer DNS cache logları görünmüyorsa:
 2. DNS lookup'un çağrılıp çağrılmadığını kontrol edin
 3. Log seviyesini artırın: `adb logcat *:D | grep -E "DNS|HttpClientFactory"`
 
+
+
+

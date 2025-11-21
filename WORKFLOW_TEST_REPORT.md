@@ -50,3 +50,6 @@
 2. Tag push event'lerini manuel test et
 3. Workflow yapılandırmasını düzelt
 4. Başarılı olana kadar test et
+
+
+

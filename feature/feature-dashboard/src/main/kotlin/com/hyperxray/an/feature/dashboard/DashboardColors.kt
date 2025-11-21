@@ -127,5 +127,23 @@ object DashboardColors {
         val isDark = isSystemInDarkTheme()
         return if (isDark) Color(0xFF00FF88) else Color(0xFF059669) // Neon green for high contrast on obsidian
     }
+    
+    @Composable
+    fun dnsCacheGradient(): List<Color> {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) {
+            listOf(
+                Color(0xFF00BCD4), // Cyan
+                Color(0xFF0097A7), // Teal
+                Color(0xFF00838F)  // Dark Teal
+            )
+        } else {
+            listOf(
+                Color(0xFF0891B2),
+                Color(0xFF0E7490),
+                Color(0xFF155E75)
+            )
+        }
+    }
 }
 

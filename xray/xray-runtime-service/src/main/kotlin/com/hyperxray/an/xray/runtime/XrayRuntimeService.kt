@@ -464,6 +464,15 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
                 }
             }
             
+            // CRITICAL: Start reading process output IMMEDIATELY (before config write)
+            // This allows us to capture error messages even if process crashes immediately after config write
+            val processOutputJob = serviceScope.launch {
+                readProcessStream(currentProcess)
+            }
+            
+            // Small delay to allow process to potentially output startup errors
+            delay(100)
+            
             // Write config to stdin
             Log.d(TAG, "Writing config to Xray stdin")
             try {
@@ -471,13 +480,81 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
                     os.write(configContent.toByteArray())
                     os.flush()
                 }
+                Log.d(TAG, "Config written to Xray stdin successfully")
             } catch (e: IOException) {
                 if (!currentProcess.isAlive) {
                     val exitValue = try { currentProcess.exitValue() } catch (ex: IllegalThreadStateException) { -1 }
                     Log.e(TAG, "Xray process exited while writing config, exit code: $exitValue")
+                    
+                    // Try to read error output before it's lost
+                    try {
+                        val errorReader = BufferedReader(InputStreamReader(currentProcess.inputStream))
+                        val errorOutput = StringBuilder()
+                        var lineCount = 0
+                        var line = errorReader.readLine()
+                        while (lineCount < 20 && line != null) {
+                            errorOutput.append(line).append("\n")
+                            line = errorReader.readLine()
+                            lineCount++
+                        }
+                        if (errorOutput.isNotEmpty()) {
+                            Log.e(TAG, "Xray error output during config write:\n$errorOutput")
+                        }
+                    } catch (ex: Exception) {
+                        Log.w(TAG, "Could not read error output: ${ex.message}")
+                    }
+                    
                     _status.value = XrayRuntimeStatus.ProcessExited(exitValue, "Process exited during config write")
                 }
+                processOutputJob.cancel()
                 throw e
+            }
+            
+            // CRITICAL: Check if process is still alive after config write
+            // Xray may exit immediately if config is invalid
+            delay(500) // Wait a moment to allow process to process config and potentially output errors
+            if (!currentProcess.isAlive) {
+                val exitValue = try {
+                    currentProcess.exitValue()
+                } catch (e: IllegalThreadStateException) {
+                    -1
+                }
+                
+                // Try to read error output before process cleanup
+                val errorOutput = StringBuilder()
+                try {
+                    val reader = BufferedReader(InputStreamReader(currentProcess.inputStream))
+                    var lineCount = 0
+                    var line = reader.readLine()
+                    while (lineCount < 30 && line != null) {
+                        errorOutput.append(line).append("\n")
+                        line = reader.readLine()
+                        lineCount++
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not read process output: ${e.message}")
+                }
+                
+                // Wait a bit more to allow stream reading job to capture error messages
+                delay(1000)
+                processOutputJob.cancel()
+                
+                val errorMessage = if (errorOutput.isNotEmpty()) {
+                    "Xray process exited immediately after config write (exit code: $exitValue)\n\n" +
+                    "Xray error output:\n$errorOutput"
+                } else {
+                    "Xray process exited immediately after config write (exit code: $exitValue)\n\n" +
+                    "No error output captured. Possible causes:\n" +
+                    "1. Invalid JSON config format\n" +
+                    "2. Missing required config fields\n" +
+                    "3. Invalid inbound/outbound configuration\n" +
+                    "4. File permissions issue\n" +
+                    "5. Missing geoip/geosite files"
+                }
+                
+                Log.e(TAG, errorMessage)
+                _status.value = XrayRuntimeStatus.ProcessExited(exitValue, errorMessage)
+                return@runXrayProcess
             }
             
             // Update status to Running
@@ -494,8 +571,12 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
             _status.value = XrayRuntimeStatus.Running(processId, apiPort)
             Log.d(TAG, "Xray-core started successfully (pid=$processId, apiPort=$apiPort)")
             
-            // Monitor process output (optional - can be used for logging)
-            readProcessStream(currentProcess)
+            // Monitor process output continues in background job
+            // CRITICAL FIX: Wait for process to exit. 
+            // If we don't wait here, the method returns, finally block executes, 
+            // and status is set to ProcessExited while process is actually running.
+            currentProcess.waitFor()
+            Log.d(TAG, "Xray process exited naturally")
             
         } catch (e: InterruptedIOException) {
             Log.d(TAG, "Xray process reading interrupted")

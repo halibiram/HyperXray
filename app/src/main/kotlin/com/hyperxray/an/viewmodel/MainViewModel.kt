@@ -1269,11 +1269,20 @@ class MainViewModel(application: Application) :
             null
         }
         val activeInstances = if (managerForTraffic != null) {
-            managerForTraffic.getActiveInstances()
+            val instances = managerForTraffic.getActiveInstances()
+            if (instances.isEmpty()) {
+                // Manager exists but no active instances - log detailed status
+                val allStatuses = managerForTraffic.instancesStatus.value
+                Log.w(TAG, "MultiXrayCoreManager exists but no active instances. Total instances in status: ${allStatuses.size}")
+                allStatuses.forEach { (index, status) ->
+                    Log.w(TAG, "Instance $index status: $status")
+                }
+            }
+            instances
         } else {
             // MultiXrayCoreManager might not be initialized yet (service not started)
             // Log this case and use fallback
-            Log.w(TAG, "MultiXrayCoreManager instance not available, using fallback port ${prefs.apiPort}")
+            Log.w(TAG, "MultiXrayCoreManager instance not available (service may not be started), using fallback port ${prefs.apiPort}")
             emptyMap()
         }
         
@@ -1283,9 +1292,10 @@ class MainViewModel(application: Application) :
             // Fallback to prefs.apiPort if no active instances found
             // This can happen if:
             // 1. multiXrayCoreManager is null (not initialized yet)
-            // 2. No active instances are running
-            // 3. Single instance mode (instanceCount = 1)
-            Log.d(TAG, "No active instances found in multiXrayCoreManager, using fallback port ${prefs.apiPort}")
+            // 2. No active instances are running (instances may have crashed or not started)
+            // 3. Single instance mode (instanceCount = 1) but instance not running
+            Log.w(TAG, "No active instances found in multiXrayCoreManager (manager=${managerForTraffic != null}), using fallback port ${prefs.apiPort}. " +
+                    "This may indicate instances failed to start or crashed.")
             listOf(prefs.apiPort)
         }
         

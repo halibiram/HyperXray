@@ -17,3 +17,6 @@ data class TelegramConfig(
         get() = botToken.isNotBlank() && chatId.isNotBlank()
 }
 
+
+
+

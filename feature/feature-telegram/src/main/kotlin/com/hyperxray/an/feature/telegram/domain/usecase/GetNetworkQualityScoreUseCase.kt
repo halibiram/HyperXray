@@ -11,3 +11,6 @@ interface GetNetworkQualityScoreUseCase {
     suspend operator fun invoke(): Result<String>
 }
 
+
+
+

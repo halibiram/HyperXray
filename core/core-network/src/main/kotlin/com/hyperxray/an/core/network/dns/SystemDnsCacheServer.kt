@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CompletableDeferred
 
 private const val TAG = "SystemDnsCacheServer"
 private const val DNS_PORT = 53
@@ -107,6 +108,14 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     private val adaptiveTimeouts = ConcurrentHashMap<String, Long>()
     private val BASE_TIMEOUT_MS = 300L
     private val MAX_TIMEOUT_MS = 1000L
+    
+    // Query deduplication: track pending queries to avoid duplicate upstream requests
+    private data class PendingQuery(
+        val deferred: CompletableDeferred<ByteArray?>,
+        val timestamp: Long = System.currentTimeMillis()
+    )
+    private val pendingQueries = ConcurrentHashMap<String, PendingQuery>()
+    private val QUERY_DEDUP_TIMEOUT_MS = 5000L // 5 seconds max wait for duplicate queries
     
     init {
         // Initialize stats for all DNS servers
@@ -456,13 +465,28 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                 // Forward to upstream DNS servers with retry mechanism (reduces packet loss)
                 val responseData = forwardToUpstreamDnsWithRetry(queryData, domain)
                 if (responseData != null) {
-                    // Parse response and extract IP addresses
-                    val addresses = parseDnsResponse(responseData, domain)
-                    if (addresses.isNotEmpty()) {
-                        // Save to cache
-                        DnsCacheManager.saveToCache(domain, addresses)
-                        Log.i(TAG, "✅ DNS resolved and cached (resolveDomain): $domain -> ${addresses.map { it.hostAddress ?: "unknown" }}")
-                        return@withContext addresses
+                    // Parse response and extract IP addresses and TTL
+                    val parseResult = parseDnsResponseWithTtl(responseData, domain)
+                    if (parseResult.addresses.isNotEmpty()) {
+                        // Save to cache with TTL and raw response packet
+                        DnsCacheManager.saveToCache(
+                            domain, 
+                            parseResult.addresses, 
+                            ttl = parseResult.ttl,
+                            rawResponse = responseData
+                        )
+                        Log.i(TAG, "✅ DNS resolved and cached (resolveDomain): $domain -> ${parseResult.addresses.map { it.hostAddress ?: "unknown" }} (TTL: ${parseResult.ttl}s)")
+                        return@withContext parseResult.addresses
+                    } else if (parseResult.isNxDomain) {
+                        // NXDOMAIN - save as negative cache
+                        DnsCacheManager.saveToCache(
+                            domain,
+                            emptyList(),
+                            ttl = null,
+                            rawResponse = responseData,
+                            isNegative = true
+                        )
+                        Log.d(TAG, "✅ NXDOMAIN cached for $domain")
                     }
                 }
                 
@@ -600,22 +624,57 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
             val hostname = query.hostname
             Log.i(TAG, "🔍 DNS query parsed: $hostname from ${requestPacket.address}:${requestPacket.port}")
             
-            // Check cache first
-            val cachedResult = DnsCacheManager.getFromCache(hostname)
-            if (cachedResult != null && cachedResult.isNotEmpty()) {
-                Log.i(TAG, "✅ DNS CACHE HIT (SystemDnsCacheServer): $hostname -> ${cachedResult.map { it.hostAddress ?: "unknown" }} (served from cache)")
+            // Check cache first (including raw response packet)
+            val rawResponse = DnsCacheManager.getRawResponseFromCache(hostname)
+            if (rawResponse != null) {
+                // Use cached raw response packet for fastest response
+                val responsePacket = DatagramPacket(
+                    rawResponse,
+                    rawResponse.size,
+                    requestPacket.socketAddress
+                )
+                // Update transaction ID to match request
+                val requestTransactionId = ByteBuffer.wrap(requestData, 0, 2).order(ByteOrder.BIG_ENDIAN).short.toInt()
+                rawResponse[0] = ((requestTransactionId shr 8) and 0xFF).toByte()
+                rawResponse[1] = (requestTransactionId and 0xFF).toByte()
                 
-                // Build DNS response from cache
-                val response = DnsResponseBuilder.buildResponse(requestData, cachedResult)
-                if (response != null) {
-                    val responsePacket = DatagramPacket(
-                        response,
-                        response.size,
-                        requestPacket.socketAddress
-                    )
-                    socket.send(responsePacket)
-                    Log.d(TAG, "✅ DNS response sent from cache: $hostname")
-                    return
+                socket.send(responsePacket)
+                Log.d(TAG, "✅ DNS response sent from cached raw packet: $hostname")
+                return
+            }
+            
+            // Fallback to regular cache check
+            val cachedResult = DnsCacheManager.getFromCache(hostname, allowStale = true)
+            if (cachedResult != null) {
+                if (cachedResult.isEmpty()) {
+                    // Negative cache (NXDOMAIN)
+                    Log.d(TAG, "✅ DNS negative cache HIT (SystemDnsCacheServer): $hostname (NXDOMAIN)")
+                    // Build NXDOMAIN response
+                    val response = buildNxDomainResponse(requestData)
+                    if (response != null) {
+                        val responsePacket = DatagramPacket(
+                            response,
+                            response.size,
+                            requestPacket.socketAddress
+                        )
+                        socket.send(responsePacket)
+                        return
+                    }
+                } else {
+                    Log.i(TAG, "✅ DNS CACHE HIT (SystemDnsCacheServer): $hostname -> ${cachedResult.map { it.hostAddress ?: "unknown" }} (served from cache)")
+                    
+                    // Build DNS response from cache using buildDnsResponse
+                    val response = buildDnsResponse(requestData, cachedResult)
+                    if (response != null) {
+                        val responsePacket = DatagramPacket(
+                            response,
+                            response.size,
+                            requestPacket.socketAddress
+                        )
+                        socket.send(responsePacket)
+                        Log.d(TAG, "✅ DNS response sent from cache: $hostname")
+                        return
+                    }
                 }
             }
             
@@ -628,10 +687,15 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
             
             if (upstreamResponse != null && upstreamResponse.isNotEmpty()) {
                 // Parse upstream response and save to cache
-                val resolvedAddresses = parseDnsResponse(upstreamResponse, hostname)
-                if (resolvedAddresses.isNotEmpty()) {
-                    DnsCacheManager.saveToCache(hostname, resolvedAddresses)
-                    Log.i(TAG, "✅ DNS resolved from upstream and cached: $hostname -> ${resolvedAddresses.map { it.hostAddress ?: "unknown" }}")
+                val parseResult = parseDnsResponseWithTtl(upstreamResponse, hostname)
+                if (parseResult.addresses.isNotEmpty()) {
+                    DnsCacheManager.saveToCache(
+                        hostname,
+                        parseResult.addresses,
+                        ttl = parseResult.ttl,
+                        rawResponse = upstreamResponse
+                    )
+                    Log.i(TAG, "✅ DNS resolved from upstream and cached: $hostname -> ${parseResult.addresses.map { it.hostAddress ?: "unknown" }} (TTL: ${parseResult.ttl}s)")
                     
                     // Send response to client
                     val responsePacket = DatagramPacket(
@@ -641,6 +705,24 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                     )
                     socket.send(responsePacket)
                     Log.d(TAG, "✅ DNS response sent from upstream: $hostname")
+                } else if (parseResult.isNxDomain) {
+                    // NXDOMAIN - save as negative cache
+                    DnsCacheManager.saveToCache(
+                        hostname,
+                        emptyList(),
+                        ttl = null,
+                        rawResponse = upstreamResponse,
+                        isNegative = true
+                    )
+                    Log.d(TAG, "✅ NXDOMAIN cached for $hostname")
+                    
+                    // Send NXDOMAIN response to client
+                    val responsePacket = DatagramPacket(
+                        upstreamResponse,
+                        upstreamResponse.size,
+                        requestPacket.socketAddress
+                    )
+                    socket.send(responsePacket)
                 } else {
                     Log.w(TAG, "Failed to parse upstream DNS response for $hostname")
                 }
@@ -667,43 +749,83 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
      * Retries with ultra-fast timeouts (300ms -> 500ms -> 800ms) for maximum speed
      * Uses performance-based DNS server ordering (fastest first)
      * Uses aggressive parallel queries to minimize latency
+     * Implements query deduplication to avoid duplicate upstream requests
      * This reduces packet loss during DNS cache miss scenarios
      */
     private suspend fun forwardToUpstreamDnsWithRetry(queryData: ByteArray, hostname: String): ByteArray? {
-        // Ultra-fast timeouts: very aggressive for maximum speed
-        val timeouts = listOf(300L, 500L, 800L) // Ultra-fast timeouts for maximum performance
-        var lastError: Exception? = null
+        val lowerHostname = hostname.lowercase()
         
-        for ((attempt, timeoutMs) in timeouts.withIndex()) {
-            try {
-                val startTime = System.currentTimeMillis()
-                val result = forwardToUpstreamDnsWithTimeout(queryData, hostname, timeoutMs)
-                val elapsed = System.currentTimeMillis() - startTime
-                
-                if (result != null) {
-                    if (attempt > 0) {
-                        Log.i(TAG, "✅ DNS resolved on retry attempt ${attempt + 1} for $hostname (${elapsed}ms)")
-                    } else {
-                        Log.d(TAG, "✅ DNS resolved on first attempt for $hostname (${elapsed}ms)")
-                    }
-                    return result
-                }
-            } catch (e: Exception) {
-                lastError = e
-                if (attempt < timeouts.size - 1) {
-                    Log.d(TAG, "⚠️ DNS query attempt ${attempt + 1} failed for $hostname, retrying with timeout ${timeouts[attempt + 1]}ms...")
-                    delay(20) // Ultra-fast retry delay (20ms for maximum speed)
-                }
+        // Check if there's already a pending query for this domain (deduplication)
+        val existingQuery = pendingQueries[lowerHostname]
+        if (existingQuery != null) {
+            val age = System.currentTimeMillis() - existingQuery.timestamp
+            if (age < QUERY_DEDUP_TIMEOUT_MS) {
+                // Wait for existing query to complete
+                Log.d(TAG, "🔄 Query deduplication: waiting for existing query for $hostname (age: ${age}ms)")
+                return existingQuery.deferred.await()
+            } else {
+                // Existing query timed out, remove it
+                pendingQueries.remove(lowerHostname)
             }
         }
         
-        if (lastError != null) {
-            Log.w(TAG, "❌ DNS query failed after ${timeouts.size} attempts for $hostname: ${lastError.message}")
-            // Try DoH fallback if UDP failed
-            return tryDoHFallback(hostname)
-        }
+        // Create new pending query
+        val deferred = CompletableDeferred<ByteArray?>()
+        pendingQueries[lowerHostname] = PendingQuery(deferred)
         
-        return null
+        try {
+            // Ultra-fast timeouts: very aggressive for maximum speed
+            val timeouts = listOf(300L, 500L, 800L) // Ultra-fast timeouts for maximum performance
+            var lastError: Exception? = null
+            
+            for ((attempt, timeoutMs) in timeouts.withIndex()) {
+                try {
+                    val startTime = System.currentTimeMillis()
+                    val result = forwardToUpstreamDnsWithTimeout(queryData, hostname, timeoutMs)
+                    val elapsed = System.currentTimeMillis() - startTime
+                    
+                    if (result != null) {
+                        if (attempt > 0) {
+                            Log.i(TAG, "✅ DNS resolved on retry attempt ${attempt + 1} for $hostname (${elapsed}ms)")
+                        } else {
+                            Log.d(TAG, "✅ DNS resolved on first attempt for $hostname (${elapsed}ms)")
+                        }
+                        
+                        // Complete deferred and notify waiting queries
+                        deferred.complete(result)
+                        pendingQueries.remove(lowerHostname)
+                        return result
+                    }
+                } catch (e: Exception) {
+                    lastError = e
+                    if (attempt < timeouts.size - 1) {
+                        Log.d(TAG, "⚠️ DNS query attempt ${attempt + 1} failed for $hostname, retrying with timeout ${timeouts[attempt + 1]}ms...")
+                        delay(20) // Ultra-fast retry delay (20ms for maximum speed)
+                    }
+                }
+            }
+            
+            // Try DoH fallback if UDP failed
+            val dohResult = tryDoHFallback(hostname)
+            if (dohResult != null) {
+                deferred.complete(dohResult)
+                pendingQueries.remove(lowerHostname)
+                return dohResult
+            }
+            
+            if (lastError != null) {
+                Log.w(TAG, "❌ DNS query failed after ${timeouts.size} attempts for $hostname: ${lastError.message}")
+            }
+            
+            // Complete with null on failure
+            deferred.complete(null)
+            pendingQueries.remove(lowerHostname)
+            return null
+        } catch (e: Exception) {
+            deferred.completeExceptionally(e)
+            pendingQueries.remove(lowerHostname)
+            throw e
+        }
     }
     
     /**
@@ -915,26 +1037,230 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     }
     
     /**
-     * Parse DNS response and extract IP addresses
+     * Parse result containing addresses, TTL, and NXDOMAIN flag
+     */
+    private data class DnsParseResult(
+        val addresses: List<InetAddress>,
+        val ttl: Long? = null,
+        val isNxDomain: Boolean = false
+    )
+    
+    /**
+     * Parse DNS response and extract IP addresses with TTL
+     * Full DNS packet parser implementation according to RFC 1035
      */
     private fun parseDnsResponse(responseData: ByteArray, hostname: String): List<InetAddress> {
+        return parseDnsResponseWithTtl(responseData, hostname).addresses
+    }
+    
+    /**
+     * Parse DNS response and extract IP addresses, TTL, and NXDOMAIN flag
+     * Full DNS packet parser implementation according to RFC 1035
+     */
+    private fun parseDnsResponseWithTtl(responseData: ByteArray, hostname: String): DnsParseResult {
         return try {
-            // Simple DNS response parser - extract A records
-            val addresses = mutableListOf<InetAddress>()
-            val buffer = ByteBuffer.wrap(responseData).apply {
-                order(ByteOrder.BIG_ENDIAN) // DNS uses big-endian
+            if (responseData.size < 12) {
+                Log.w(TAG, "DNS response too short: ${responseData.size} bytes")
+                return DnsParseResult(emptyList())
             }
             
-            // Skip DNS header (12 bytes)
-            buffer.position(12)
+            val buffer = ByteBuffer.wrap(responseData).apply {
+                order(ByteOrder.BIG_ENDIAN)
+            }
             
-            // Parse answers section (simplified - real parser would be more complex)
-            // This is a simplified parser - for production, use a proper DNS library
-            // For now, fallback to resolving via Java API
-            InetAddress.getAllByName(hostname).toList()
+            // Parse DNS header
+            val transactionId = buffer.short.toInt() and 0xFFFF
+            val flags = buffer.short.toInt() and 0xFFFF
+            val questions = buffer.short.toInt() and 0xFFFF
+            val answers = buffer.short.toInt() and 0xFFFF
+            val authority = buffer.short.toInt() and 0xFFFF
+            val additional = buffer.short.toInt() and 0xFFFF
+            
+            // Check if response is valid (QR bit must be 1, RCODE should be 0)
+            val qr = (flags shr 15) and 0x01
+            val rcode = flags and 0x0F
+            
+            if (qr != 1) {
+                Log.w(TAG, "Invalid DNS response: not a response packet")
+                return DnsParseResult(emptyList())
+            }
+            
+            if (rcode != 0) {
+                // NXDOMAIN or other error
+                if (rcode == 3) {
+                    Log.d(TAG, "NXDOMAIN for $hostname")
+                    return DnsParseResult(emptyList(), isNxDomain = true)
+                } else {
+                    Log.w(TAG, "DNS error response for $hostname: RCODE=$rcode")
+                    return DnsParseResult(emptyList())
+                }
+            }
+            
+            // Skip question section
+            buffer.position(12)
+            for (i in 0 until questions) {
+                skipDnsName(buffer)
+                buffer.getShort() // QTYPE
+                buffer.getShort() // QCLASS
+            }
+            
+            // Parse answer section
+            val addresses = mutableListOf<InetAddress>()
+            var minTtl: Long? = null
+            
+            for (i in 0 until answers) {
+                // Check buffer bounds before parsing
+                if (buffer.position() >= buffer.limit()) {
+                    Log.w(TAG, "Buffer overflow: position ${buffer.position()} >= limit ${buffer.limit()}, stopping answer parsing")
+                    break
+                }
+                
+                val answerOffset = buffer.position()
+                
+                // Parse name (may use compression)
+                try {
+                    skipDnsName(buffer)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to skip DNS name at position $answerOffset: ${e.message}")
+                    break
+                }
+                
+                // Check bounds before reading type, class, TTL, and dataLength
+                if (buffer.remaining() < 10) { // 2 (type) + 2 (class) + 4 (TTL) + 2 (dataLength) = 10 bytes
+                    Log.w(TAG, "Insufficient buffer space for answer record header at position ${buffer.position()}")
+                    break
+                }
+                
+                val type = buffer.short.toInt() and 0xFFFF
+                val qclass = buffer.short.toInt() and 0xFFFF
+                val ttl = buffer.int.toLong() and 0xFFFFFFFFL
+                val dataLength = buffer.short.toInt() and 0xFFFF
+                
+                // Validate dataLength to prevent buffer overflow
+                if (dataLength < 0 || dataLength > buffer.remaining()) {
+                    Log.w(TAG, "Invalid dataLength $dataLength (remaining: ${buffer.remaining()}) at position ${buffer.position()}, skipping record")
+                    break
+                }
+                
+                // Track minimum TTL from all A/AAAA records
+                if (type == 1 || type == 28) {
+                    if (minTtl == null || ttl < minTtl) {
+                        minTtl = ttl
+                    }
+                }
+                
+                when (type) {
+                    1 -> { // A record (IPv4)
+                        if (dataLength == 4 && buffer.remaining() >= 4) {
+                            val ipBytes = ByteArray(4)
+                            buffer.get(ipBytes)
+                            try {
+                                val address = InetAddress.getByAddress(ipBytes)
+                                addresses.add(address)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to create InetAddress from A record", e)
+                            }
+                        } else {
+                            // Skip invalid length or insufficient buffer
+                            val skipAmount = minOf(dataLength, buffer.remaining())
+                            if (skipAmount > 0) {
+                                buffer.position(buffer.position() + skipAmount)
+                            } else {
+                                Log.w(TAG, "Cannot skip A record data: dataLength=$dataLength, remaining=${buffer.remaining()}")
+                                break
+                            }
+                        }
+                    }
+                    28 -> { // AAAA record (IPv6)
+                        if (dataLength == 16 && buffer.remaining() >= 16) {
+                            val ipBytes = ByteArray(16)
+                            buffer.get(ipBytes)
+                            try {
+                                val address = InetAddress.getByAddress(ipBytes)
+                                addresses.add(address)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to create InetAddress from AAAA record", e)
+                            }
+                        } else {
+                            // Skip invalid length or insufficient buffer
+                            val skipAmount = minOf(dataLength, buffer.remaining())
+                            if (skipAmount > 0) {
+                                buffer.position(buffer.position() + skipAmount)
+                            } else {
+                                Log.w(TAG, "Cannot skip AAAA record data: dataLength=$dataLength, remaining=${buffer.remaining()}")
+                                break
+                            }
+                        }
+                    }
+                    5 -> { // CNAME - skip for now, could follow chain
+                        val skipAmount = minOf(dataLength, buffer.remaining())
+                        if (skipAmount > 0) {
+                            buffer.position(buffer.position() + skipAmount)
+                        } else {
+                            Log.w(TAG, "Cannot skip CNAME record data: dataLength=$dataLength, remaining=${buffer.remaining()}")
+                            break
+                        }
+                    }
+                    else -> {
+                        // Unknown record type, skip
+                        val skipAmount = minOf(dataLength, buffer.remaining())
+                        if (skipAmount > 0) {
+                            buffer.position(buffer.position() + skipAmount)
+                        } else {
+                            Log.w(TAG, "Cannot skip unknown record type $type data: dataLength=$dataLength, remaining=${buffer.remaining()}")
+                            break
+                        }
+                    }
+                }
+            }
+            
+            if (addresses.isEmpty()) {
+                Log.d(TAG, "No A/AAAA records found in DNS response for $hostname")
+            } else {
+                Log.d(TAG, "Parsed ${addresses.size} IP addresses from DNS response for $hostname (TTL: ${minTtl}s)")
+            }
+            
+            DnsParseResult(addresses, minTtl)
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse DNS response for $hostname: ${e.message}")
-            emptyList()
+            Log.w(TAG, "Failed to parse DNS response for $hostname: ${e.message}", e)
+            DnsParseResult(emptyList())
+        }
+    }
+    
+    /**
+     * Skip DNS name in packet (handles compression pointers)
+     */
+    private fun skipDnsName(buffer: ByteBuffer) {
+        var jumped = false
+        var maxJumps = 10 // Prevent infinite loops
+        var jumps = 0
+        
+        while (buffer.hasRemaining() && jumps < maxJumps) {
+            val length = buffer.get().toInt() and 0xFF
+            
+            if (length == 0) {
+                // End of name
+                break
+            } else if ((length and 0xC0) == 0xC0) {
+                // Compression pointer
+                val offset = ((length and 0x3F) shl 8) or (buffer.get().toInt() and 0xFF)
+                if (!jumped) {
+                    // Save current position for return
+                    val currentPos = buffer.position()
+                    buffer.position(offset)
+                    jumped = true
+                    jumps++
+                } else {
+                    // Already jumped, just skip
+                    break
+                }
+            } else if (length <= 63) {
+                // Normal label
+                buffer.position(buffer.position() + length)
+            } else {
+                // Invalid length
+                break
+            }
         }
     }
     
@@ -1033,25 +1359,46 @@ private data class DnsQuery(
     val qclass: Int
 )
 
+
 /**
- * DNS response builder
+ * Build NXDOMAIN response
  */
-private object DnsResponseBuilder {
-    fun buildResponse(originalQuery: ByteArray, addresses: List<InetAddress>): ByteArray? {
-        if (addresses.isEmpty()) {
-            return null
+private fun buildNxDomainResponse(queryData: ByteArray): ByteArray? {
+    return try {
+        if (queryData.size < 12) return null
+        
+        val buffer = ByteBuffer.wrap(queryData).apply {
+            order(ByteOrder.BIG_ENDIAN)
         }
         
-        try {
-            // This is a simplified DNS response builder
-            // For production, use a proper DNS library like dnsjava or implement full RFC 1035
-            
-            // For now, we'll forward the original query and let upstream handle it
-            // But mark it as cache hit for logging
-            return null // Simplified - will forward to upstream for now
-        } catch (e: Exception) {
-            return null
+        val transactionId = buffer.short.toInt() and 0xFFFF
+        val questions = buffer.short.toInt() and 0xFFFF
+        
+        // Skip rest of header and question
+        buffer.position(12)
+        val questionSize = queryData.size - 12
+        
+        // Build NXDOMAIN response
+        val response = ByteArray(12 + questionSize)
+        val responseBuffer = ByteBuffer.wrap(response).apply {
+            order(ByteOrder.BIG_ENDIAN)
         }
+        
+        // Header
+        responseBuffer.putShort(transactionId.toShort())
+        responseBuffer.putShort(0x8183.toShort()) // QR=1, RCODE=3 (NXDOMAIN)
+        responseBuffer.putShort(questions.toShort())
+        responseBuffer.putShort(0) // Answers
+        responseBuffer.putShort(0) // Authority
+        responseBuffer.putShort(0) // Additional
+        
+        // Copy question section
+        System.arraycopy(queryData, 12, response, 12, questionSize)
+        
+        response
+    } catch (e: Exception) {
+        Log.w(TAG, "Failed to build NXDOMAIN response", e)
+        null
     }
 }
 

@@ -54,12 +54,29 @@ data class AggregatedTelemetry(
 )
 
 /**
+ * DNS Cache statistics
+ */
+data class DnsCacheStats(
+    val entryCount: Int,
+    val memoryUsageMB: Long,
+    val memoryLimitMB: Long,
+    val memoryUsagePercent: Int,
+    val hits: Long,
+    val misses: Long,
+    val hitRate: Int,
+    val avgDomainHitRate: Int,
+    val avgHitLatencyMs: Double,
+    val avgMissLatencyMs: Double
+)
+
+/**
  * ViewModel interface for Dashboard screen.
  * This allows the feature module to work without depending on MainViewModel from app module.
  */
 interface DashboardViewModel {
     val coreStatsState: StateFlow<CoreStatsState>
     val telemetryState: StateFlow<AggregatedTelemetry?>
+    val dnsCacheStats: StateFlow<DnsCacheStats?>
     val isServiceEnabled: StateFlow<Boolean>
     val controlMenuClickable: StateFlow<Boolean>
     val connectionState: StateFlow<ConnectionState>
@@ -67,5 +84,6 @@ interface DashboardViewModel {
     
     fun updateCoreStats()
     fun updateTelemetryStats()
+    fun updateDnsCacheStats()
 }
 

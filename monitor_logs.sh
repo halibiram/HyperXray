@@ -13,3 +13,6 @@ adb logcat -c
 adb logcat -s HttpClientFactory:I DnsCacheManager:I RetryInterceptor:I CacheLoggingInterceptor:I NetworkModule:I MainViewModel:I
 
 
+
+
+
