@@ -23,10 +23,10 @@ private const val POPULAR_DOMAIN_TTL = 172800L // 48 hours for popular domains
 private const val DYNAMIC_DOMAIN_TTL = 86400L // 24 hours for dynamic domains (CDN, etc.)
 private const val MIN_TTL = 3600L // 1 hour minimum
 private const val MAX_TTL = 172800L // 48 hours maximum
-private const val MAX_ENTRIES = 10000
+private const val MAX_ENTRIES = 1_000_000
 private const val MAX_MEMORY_BYTES = 500 * 1024 * 1024L // 500MB limit (yüksek tutulacak)
 private const val CACHE_VERSION = 2 // Increment version for new format
-private const val BATCH_WRITE_DEBOUNCE_MS = 1000L // 1 second debounce for batch writes
+    private const val BATCH_WRITE_DEBOUNCE_MS = 100L // 100ms debounce for faster writes
 private const val CLEANUP_INTERVAL_MS = 30 * 60 * 1000L // 30 minutes
 private const val NEGATIVE_CACHE_TTL = 300L // 5 minutes for negative cache (NXDOMAIN)
 
@@ -68,22 +68,14 @@ object DnsCacheManager {
     private val cacheLock = ReentrantReadWriteLock()
     
     // LRU Cache: LinkedHashMap with access order (true = access-ordered, false = insertion-ordered)
-    // Memory-based eviction: removes eldest entries when memory limit is exceeded
+    // LRU-based eviction: removes eldest (least recently used) entries when entry limit is exceeded
     private val cache: LinkedHashMap<String, DnsCacheEntry> = object : LinkedHashMap<String, DnsCacheEntry>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, DnsCacheEntry>?): Boolean {
             if (eldest == null) return false
             
-            // Check both entry count and memory usage
-            if (size <= MAX_ENTRIES) {
-                // Check memory usage
-                val currentMemory = calculateTotalMemoryUsage()
-                if (currentMemory <= MAX_MEMORY_BYTES) {
-                    return false
-                }
-            }
-            
-            // Remove eldest entry (LRU eviction)
-            return true
+            // LRU eviction: Remove eldest entry only when entry count exceeds MAX_ENTRIES
+            // Access order is maintained: recently used entries stay at the end, eldest at the beginning
+            return size > MAX_ENTRIES
         }
     }
     
@@ -116,7 +108,7 @@ object DnsCacheManager {
     
     // Prefetching job
     private var prefetchJob: Job? = null
-    private val PREFETCH_INTERVAL_MS = 10 * 60 * 1000L // 10 minutes
+    private val PREFETCH_INTERVAL_MS = 5 * 60 * 1000L // 5 minutes (more aggressive prefetching)
 
     /**
      * Domain statistics for hit rate tracking and smart TTL
@@ -372,6 +364,26 @@ object DnsCacheManager {
             stats.hits + stats.misses >= 3 && stats.hitRate >= 0.8
         }.keys.take(50).toList()
     }
+    
+    /**
+     * Get domains that are expiring soon (TTL-aware prefetching)
+     * @param hoursThreshold: Threshold in hours for "expiring soon" (default: 1 hour)
+     * @return List of domain names that will expire within the threshold
+     */
+    fun getExpiringSoonDomains(hoursThreshold: Long = 1): List<String> {
+        if (!isInitialized) return emptyList()
+        
+        return cacheLock.read {
+            val currentTime = System.currentTimeMillis() / 1000
+            val thresholdSeconds = hoursThreshold * 3600
+            
+            cache.filter { (_, entry) ->
+                val age = currentTime - entry.timestamp
+                val remainingTTL = entry.ttl - age
+                remainingTTL > 0 && remainingTTL < thresholdSeconds && !entry.isExpired()
+            }.keys.toList()
+        }
+    }
 
     /**
      * Get DNS resolution from cache if available
@@ -624,51 +636,28 @@ object DnsCacheManager {
             )
 
             cacheLock.write {
-                // LRU: LinkedHashMap automatically removes eldest entry when size > MAX_ENTRIES or memory > MAX_MEMORY_BYTES
-                // Access order is maintained: recently used entries stay at the end
-                cache[lowerHostname] = entry // This moves entry to end if exists, or adds new
-                
-                // Check memory usage and evict if necessary
-                evictIfNeeded()
+                // LRU: LinkedHashMap automatically removes eldest (least recently used) entry when size > MAX_ENTRIES
+                // Access order is maintained: recently used entries stay at the end, eldest at the beginning
+                // This operation automatically triggers LRU eviction via removeEldestEntry()
+                cache[lowerHostname] = entry // This moves entry to end if exists, or adds new (LRU update)
                 
                 val ipStrings = addresses.mapNotNull { it.hostAddress }
                 Log.i(TAG, "💾 DNS cache SAVED: $hostname -> $ipStrings (TTL: ${entry.ttl}s, entries: ${cache.size}, memory: ${calculateTotalMemoryUsage() / 1024}KB)")
             }
 
-            // Batch write: debounce file writes (1 second)
+            // Batch write: debounce file writes (100ms for faster persistence)
             scheduleBatchWrite()
         } catch (e: Exception) {
             Log.w(TAG, "Failed to save DNS cache entry for $hostname", e)
         }
     }
     
-    /**
-     * Evict entries if memory limit is exceeded
-     */
-    private fun evictIfNeeded() {
-        var currentMemory = calculateTotalMemoryUsage()
-        var evictedCount = 0
-        
-        while (currentMemory > MAX_MEMORY_BYTES && cache.isNotEmpty()) {
-            // Remove eldest entry (LRU)
-            val eldest = cache.entries.firstOrNull()
-            if (eldest != null) {
-                cache.remove(eldest.key)
-                currentMemory = calculateTotalMemoryUsage()
-                evictedCount++
-            } else {
-                break
-            }
-        }
-        
-        if (evictedCount > 0) {
-            Log.d(TAG, "Evicted $evictedCount entries due to memory limit (current: ${currentMemory / 1024}KB, limit: ${MAX_MEMORY_BYTES / 1024}KB)")
-        }
-    }
+    // Note: LRU eviction is handled automatically by LinkedHashMap.removeEldestEntry()
+    // when entry count exceeds MAX_ENTRIES (eldest entries are removed automatically)
     
     /**
-     * Schedule batch write with 1 second debounce
-     * Multiple saves within 1 second will result in a single file write
+     * Schedule batch write with 100ms debounce (optimized for faster persistence)
+     * Multiple saves within 100ms will result in a single file write
      */
     private fun scheduleBatchWrite() {
         if (pendingWrite.compareAndSet(false, true)) {

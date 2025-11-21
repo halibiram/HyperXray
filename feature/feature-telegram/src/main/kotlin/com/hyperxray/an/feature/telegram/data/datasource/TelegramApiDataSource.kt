@@ -13,10 +13,12 @@ import com.hyperxray.an.feature.telegram.domain.repository.TelegramUpdate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -28,10 +30,128 @@ private const val ANSWER_CALLBACK_QUERY_URL = "/answerCallbackQuery"
 
 /**
  * Telegram Bot API data source
+ * Uses optimized HTTP client with retry mechanism and proper timeout management
  */
 class TelegramApiDataSource {
-    private val httpClient: OkHttpClient = HttpClientFactory.createHttpClient()
+    private val httpClient: OkHttpClient = createTelegramHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
+    
+    /**
+     * Create optimized HTTP client specifically for Telegram API
+     * Features:
+     * - Retry mechanism for transient failures
+     * - Optimized timeouts for Telegram API
+     * - Connection pooling for better performance
+     * - Proper error handling
+     */
+    private fun createTelegramHttpClient(): OkHttpClient {
+        val baseClient = HttpClientFactory.createHttpClient()
+        
+        return baseClient.newBuilder()
+            // Telegram API specific timeouts
+            .connectTimeout(15, TimeUnit.SECONDS) // Telegram API can be slow sometimes
+            .readTimeout(45, TimeUnit.SECONDS) // Long polling for getUpdates can take up to 30s
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .callTimeout(60, TimeUnit.SECONDS) // Overall timeout for the entire call
+            
+            // Add Telegram-specific retry interceptor
+            .addInterceptor(TelegramRetryInterceptor())
+            
+            // Connection pool optimized for Telegram API
+            .connectionPool(
+                okhttp3.ConnectionPool(
+                    maxIdleConnections = 5, // Telegram doesn't need many connections
+                    keepAliveDuration = 5, // 5 minutes keep-alive
+                    timeUnit = TimeUnit.MINUTES
+                )
+            )
+            .build()
+    }
+    
+    /**
+     * Retry interceptor specifically for Telegram API
+     * Handles rate limiting and transient errors
+     */
+    private class TelegramRetryInterceptor : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val request = chain.request()
+            var response: Response? = null
+            var lastException: IOException? = null
+            
+            // Retry up to 3 times for specific error conditions
+            for (attempt in 0..3) {
+                try {
+                    if (attempt > 0) {
+                        // Exponential backoff: 1s, 2s, 4s
+                        val delayMs = (1000L * (1 shl (attempt - 1))).coerceAtMost(5000L)
+                        Log.d(TAG, "Retrying Telegram API request (attempt $attempt/$3) after ${delayMs}ms")
+                        Thread.sleep(delayMs)
+                    }
+                    
+                    response = chain.proceed(request)
+                    
+                    // Check if we should retry based on response code
+                    if (shouldRetry(response, attempt)) {
+                        response.body?.close()
+                        response.close()
+                        continue
+                    }
+                    
+                    // Success or non-retryable error
+                    return response
+                    
+                } catch (e: IOException) {
+                    lastException = e
+                    Log.w(TAG, "Telegram API request failed (attempt ${attempt + 1}/4): ${e.message}")
+                    
+                    // Retry on network errors (connection timeout, etc.)
+                    if (attempt < 3 && isRetryableException(e)) {
+                        continue
+                    }
+                    
+                    // Don't retry on last attempt or non-retryable errors
+                    throw e
+                }
+            }
+            
+            // If we get here, all retries failed
+            response?.body?.close()
+            response?.close()
+            throw lastException ?: IOException("Failed to get response after retries")
+        }
+        
+        private fun shouldRetry(response: Response, attempt: Int): Boolean {
+            if (attempt >= 3) return false // Max retries reached
+            
+            return when (response.code) {
+                // Rate limiting - retry with exponential backoff
+                429 -> {
+                    val retryAfter = response.header("Retry-After")?.toLongOrNull() ?: 1L
+                    Log.w(TAG, "Telegram API rate limited, retry after ${retryAfter}s")
+                    Thread.sleep(retryAfter * 1000)
+                    true
+                }
+                // Server errors - retry
+                500, 502, 503, 504 -> {
+                    Log.w(TAG, "Telegram API server error ${response.code}, retrying")
+                    true
+                }
+                // Client errors - don't retry (4xx except 429)
+                in 400..499 -> false
+                // Other errors - retry
+                else -> false
+            }
+        }
+        
+        private fun isRetryableException(e: IOException): Boolean {
+            return when {
+                e.message?.contains("timeout", ignoreCase = true) == true -> true
+                e.message?.contains("connection", ignoreCase = true) == true -> true
+                e.message?.contains("network", ignoreCase = true) == true -> true
+                else -> false
+            }
+        }
+    }
 
     suspend fun sendMessage(
         config: TelegramConfig,

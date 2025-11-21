@@ -203,16 +203,24 @@ class TelegramNotificationManager private constructor(context: Context) {
      */
     private fun startCommandPolling() {
         commandPollingJob?.cancel()
+        Log.d(TAG, "Starting command polling (interval: ${COMMAND_POLLING_INTERVAL_MS}ms)")
         commandPollingJob = scope.launch {
             while (isActive) {
                 try {
                     val config = getConfig()
-                    if (config != null && config.enabled) {
+                    if (config == null) {
+                        Log.d(TAG, "Telegram config is null, skipping polling")
+                    } else if (!config.enabled) {
+                        Log.d(TAG, "Telegram notifications are disabled, skipping polling")
+                    } else if (!config.isValid) {
+                        Log.w(TAG, "Telegram config is invalid (botToken: ${config.botToken.take(10)}..., chatId: ${config.chatId.take(10)}...), skipping polling")
+                    } else {
+                        Log.d(TAG, "Config is valid and enabled, processing commands")
                         processCommands(config)
                     }
                     delay(COMMAND_POLLING_INTERVAL_MS)
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error in command polling", e)
+                    Log.e(TAG, "Error in command polling: ${e.message}", e)
                     delay(COMMAND_POLLING_INTERVAL_MS * 2) // Wait longer on error
                 }
             }
@@ -224,12 +232,19 @@ class TelegramNotificationManager private constructor(context: Context) {
      */
     private suspend fun processCommands(config: TelegramConfig) {
         try {
+            Log.d(TAG, "Polling for updates (lastUpdateId: $lastUpdateId)")
             val updates = repository.getUpdates(config, lastUpdateId)
             updates.fold(
                 onSuccess = { updateList ->
+                    Log.d(TAG, "Received ${updateList.size} updates")
+                    if (updateList.isEmpty()) {
+                        Log.d(TAG, "No new updates")
+                    }
                     updateList.forEach { update ->
+                        Log.d(TAG, "Processing update ${update.updateId}")
                         // Handle callback queries (button clicks)
                         update.callbackQuery?.let { callbackQuery ->
+                            Log.d(TAG, "Handling callback query: ${callbackQuery.data}")
                             handleCallbackQuery(callbackQuery, config, callbackQuery.chatId ?: config.chatId)
                             lastUpdateId = update.updateId + 1
                             return@forEach
@@ -238,19 +253,27 @@ class TelegramNotificationManager private constructor(context: Context) {
                         // Handle regular commands
                         val message = update.message
                         message?.text?.let { text ->
+                            Log.d(TAG, "Received message: $text from chat: ${message.chatId}")
                             if (text.startsWith("/")) {
+                                Log.d(TAG, "Detected command: $text")
                                 handleCommand(text, config, message.chatId)
+                            } else {
+                                Log.d(TAG, "Message is not a command, ignoring")
                             }
+                        } ?: run {
+                            Log.d(TAG, "Update has no message text")
                         }
                         lastUpdateId = update.updateId + 1
                     }
                 },
                 onFailure = { error ->
-                    Log.e(TAG, "Failed to get updates", error)
+                    Log.e(TAG, "Failed to get updates: ${error.message}", error)
+                    Log.e(TAG, "Error type: ${error.javaClass.simpleName}")
                 }
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Error processing commands", e)
+            Log.e(TAG, "Error processing commands: ${e.message}", e)
+            Log.e(TAG, "Exception type: ${e.javaClass.simpleName}")
         }
     }
 

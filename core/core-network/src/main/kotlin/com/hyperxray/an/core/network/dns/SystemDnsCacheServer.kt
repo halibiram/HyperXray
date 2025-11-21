@@ -35,6 +35,7 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     private var socket: DatagramSocket? = null
     private val isRunning = AtomicBoolean(false)
     private var serverJob: Job? = null
+    private var warmUpJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     
     private val _serverStatus = MutableStateFlow<ServerStatus>(ServerStatus.Stopped)
@@ -55,7 +56,17 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
         InetAddress.getByName("208.67.220.220"),
         // AdGuard DNS (privacy-focused, fast)
         InetAddress.getByName("94.140.14.14"),
-        InetAddress.getByName("94.140.15.15")
+        InetAddress.getByName("94.140.15.15"),
+        // Additional DNS servers for better redundancy and performance
+        // NextDNS (privacy-focused, fast)
+        InetAddress.getByName("45.90.28.0"),
+        InetAddress.getByName("45.90.30.0"),
+        // Yandex DNS (fast in some regions)
+        InetAddress.getByName("77.88.8.8"),
+        InetAddress.getByName("77.88.8.1"),
+        // Comodo Secure DNS (security-focused)
+        InetAddress.getByName("8.26.56.26"),
+        InetAddress.getByName("8.20.247.20")
     )
     
     // DNS server performance tracking for faster resolution
@@ -80,6 +91,18 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     private val MAX_FAILURES_BEFORE_UNHEALTHY = 5 // More tolerant (was 3)
     private val MIN_SUCCESS_RATE = 0.3 // 30% success rate minimum (more tolerant, was 50%)
     
+    // Warm-up statistics tracking for monitoring
+    data class WarmUpStats(
+        var totalWarmUps: Int = 0,
+        var totalSuccess: Int = 0,
+        var totalFailed: Int = 0,
+        var totalElapsed: Long = 0L,
+        var lastWarmUpTime: Long = 0L,
+        var averageSuccessRate: Double = 0.0,
+        var averageElapsed: Long = 0L
+    )
+    private val warmUpStats = WarmUpStats()
+    
     // Socket connection pooling for faster DNS resolution
     private data class PooledSocket(
         val socket: DatagramSocket,
@@ -90,24 +113,54 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     private val socketPool = ConcurrentHashMap<String, PooledSocket>()
     private val SOCKET_POOL_TIMEOUT_MS = 10000L // 10 seconds - sockets expire after 10s of inactivity
     private val SOCKET_POOL_CLEANUP_INTERVAL_MS = 30000L // Cleanup every 30 seconds
+    private val WARM_UP_INTERVAL_MS = 6 * 60 * 60 * 1000L // 6 hours - periodic warm-up for cache refresh
     
-    // DNS cache warm-up: Popular domains to pre-resolve
+    // DNS cache warm-up: Popular domains to pre-resolve (expanded for faster first-time access)
     private val popularDomains = listOf(
-        "google.com", "www.google.com",
-        "facebook.com", "www.facebook.com",
-        "youtube.com", "www.youtube.com",
+        // Top tier domains (most visited)
+        "google.com", "www.google.com", "googleapis.com", "gstatic.com",
+        "facebook.com", "www.facebook.com", "graph.facebook.com",
+        "youtube.com", "www.youtube.com", "youtu.be",
         "instagram.com", "www.instagram.com",
-        "twitter.com", "www.twitter.com",
+        "twitter.com", "www.twitter.com", "x.com",
         "amazon.com", "www.amazon.com",
-        "microsoft.com", "www.microsoft.com",
-        "apple.com", "www.apple.com",
-        "cloudflare.com", "dns.google"
+        "microsoft.com", "www.microsoft.com", "microsoftonline.com",
+        "apple.com", "www.apple.com", "icloud.com",
+        "cloudflare.com", "dns.google",
+        // Common services
+        "github.com", "githubusercontent.com",
+        "stackoverflow.com",
+        "reddit.com", "www.reddit.com",
+        "linkedin.com", "www.linkedin.com",
+        "netflix.com", "nflxvideo.net",
+        "spotify.com",
+        "discord.com", "discordapp.com",
+        // CDN and common subdomains
+        "cdnjs.cloudflare.com", "cdn.jsdelivr.net",
+        "fonts.googleapis.com", "fonts.gstatic.com",
+        // Analytics and tracking (commonly used)
+        "google-analytics.com", "googletagmanager.com",
+        "doubleclick.net", "googlesyndication.com",
+        // TikTok domains (frequently timeout, added for faster resolution)
+        "tiktok.com", "www.tiktok.com", "tiktokcdn.com", "tiktokv.com",
+        "musical.ly", "tiktokads.com", "bytedance.com",
+        // TikTok common subdomains (CDN, API, logging)
+        "log-normal-alisg.tiktokv.com", "log16-normal-alisg.tiktokv.com",
+        "log22-normal-alisg.tiktokv.com", "log32-normal-alisg.tiktokv.com",
+        "aggr-normal-alisg.tiktokv.com", "aggr16-normal-alisg.tiktokv.com",
+        "aggr22-normal-alisg.tiktokv.com", "aggr32-normal-alisg.tiktokv.com",
+        "bsync-normal-alisg.tiktokv.com", "bsync16-normal-alisg.tiktokv.com",
+        "bsync22-normal-alisg.tiktokv.com", "bsync32-normal-alisg.tiktokv.com",
+        "api16-normal-alisg.tiktokv.com", "api-normal-alisg.tiktokv.com",
+        "hotapi16-normal-alisg.tiktokv.com", "hotapi-normal-alisg.tiktokv.com",
+        "v16.tiktokcdn.com", "v16m-us.tiktokcdn.com", "v19-us.tiktokcdn.com",
+        "sf16-ies-music-va.tiktokcdn.com", "sf16-ies-music-tt.tiktokcdn.com"
     )
     
-    // Adaptive timeout tracking per server
+    // Adaptive timeout tracking per server (optimized for faster first-time access)
     private val adaptiveTimeouts = ConcurrentHashMap<String, Long>()
-    private val BASE_TIMEOUT_MS = 300L
-    private val MAX_TIMEOUT_MS = 1000L
+    private val BASE_TIMEOUT_MS = 200L // Reduced for faster responses
+    private val MAX_TIMEOUT_MS = 800L // Reduced maximum timeout
     
     // Query deduplication: track pending queries to avoid duplicate upstream requests
     private data class PendingQuery(
@@ -221,7 +274,8 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     }
     
     /**
-     * Warm up DNS cache with popular domains
+     * Warm up DNS cache with popular domains (enhanced with adaptive prioritization and TTL-aware prefetching)
+     * Uses tiered approach: critical domains first, then others in parallel
      */
     fun warmUpCache() {
         if (!isRunning.get()) {
@@ -230,32 +284,347 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
         }
         
         scope.launch {
-            Log.i(TAG, "🔥 Starting DNS cache warm-up for ${popularDomains.size} popular domains...")
-            var successCount = 0
+            val startTime = System.currentTimeMillis()
+            Log.i(TAG, "🔥 Starting ENHANCED DNS cache warm-up with adaptive prioritization...")
             
-            popularDomains.chunked(5).forEach { domainBatch ->
-                // Resolve domains in parallel batches
-                val deferredResults = domainBatch.map { domain ->
-                    async {
-                        try {
-                            val addresses = resolveDomain(domain)
-                            if (addresses.isNotEmpty()) {
-                                successCount++
-                                Log.d(TAG, "✅ Warm-up: $domain -> ${addresses.map { it.hostAddress ?: "unknown" }}")
-                            }
-                        } catch (e: Exception) {
-                            Log.d(TAG, "⚠️ Warm-up failed for $domain: ${e.message}")
-                        }
-                    }
-                }
-                
-                deferredResults.awaitAll()
-                delay(100) // Small delay between batches
+            // Step 1: Get adaptive domain list (prioritized by hit rate and TTL expiration)
+            val adaptiveDomains = getAdaptiveWarmUpDomains()
+            Log.i(TAG, "📊 Adaptive warm-up: ${adaptiveDomains.size} domains (${adaptiveDomains.size - popularDomains.size} dynamically added)")
+            
+            // Step 2: Tier 1 - Critical domains first (top priority: frequently accessed + about to expire)
+            val tier1Domains = adaptiveDomains.filter { it.priority == DomainPriority.CRITICAL }
+            var tier1Results: WarmUpResult? = null
+            if (tier1Domains.isNotEmpty()) {
+                Log.i(TAG, "🚀 Tier 1 warm-up: ${tier1Domains.size} critical domains...")
+                tier1Results = warmUpDomainsTiered(tier1Domains.map { it.domain }, tier = 1)
+                Log.i(TAG, "✅ Tier 1 completed: ${tier1Results.success}/${tier1Results.total} domains resolved in ${tier1Results.elapsed}ms")
             }
             
-            Log.i(TAG, "✅ DNS cache warm-up completed: $successCount/${popularDomains.size} domains resolved")
+            // Step 3: Tier 2 - High priority domains (parallel with Tier 3)
+            val tier2Domains = adaptiveDomains.filter { it.priority == DomainPriority.HIGH }
+            val tier3Domains = adaptiveDomains.filter { it.priority == DomainPriority.NORMAL }
+            
+            // Tier 2 and 3 can resolve in parallel (they're less critical)
+            val deferredTier2 = if (tier2Domains.isNotEmpty()) {
+                async {
+                    Log.i(TAG, "⚡ Tier 2 warm-up: ${tier2Domains.size} high priority domains...")
+                    warmUpDomainsTiered(tier2Domains.map { it.domain }, tier = 2)
+                }
+            } else null
+            
+            val deferredTier3 = if (tier3Domains.isNotEmpty()) {
+                async {
+                    Log.i(TAG, "📦 Tier 3 warm-up: ${tier3Domains.size} normal priority domains...")
+                    warmUpDomainsTiered(tier3Domains.map { it.domain }, tier = 3)
+                }
+            } else null
+            
+            // Wait for Tier 2 and 3 to complete
+            val tier2Result = deferredTier2?.await()
+            val tier3Result = deferredTier3?.await()
+            
+            // Log Tier 2 and 3 completion (INFO level for visibility)
+            if (tier2Result != null) {
+                val tier2SuccessRate = if (tier2Result.total > 0) {
+                    (tier2Result.success * 100.0 / tier2Result.total).toInt()
+                } else 0
+                Log.i(TAG, "✅ Tier 2 completed: ${tier2Result.success}/${tier2Result.total} domains resolved in ${tier2Result.elapsed}ms (${tier2SuccessRate}% success rate)")
+            }
+            
+            if (tier3Result != null) {
+                val tier3SuccessRate = if (tier3Result.total > 0) {
+                    (tier3Result.success * 100.0 / tier3Result.total).toInt()
+                } else 0
+                Log.i(TAG, "✅ Tier 3 completed: ${tier3Result.success}/${tier3Result.total} domains resolved in ${tier3Result.elapsed}ms (${tier3SuccessRate}% success rate)")
+            }
+            
+            // Calculate comprehensive statistics
+            val totalSuccess = (tier1Results?.success ?: 0) + (tier2Result?.success ?: 0) + (tier3Result?.success ?: 0)
+            val totalFailed = (tier1Results?.failed ?: 0) + (tier2Result?.failed ?: 0) + (tier3Result?.failed ?: 0)
+            val totalDomains = adaptiveDomains.size
+            val totalSuccessRate = if (totalDomains > 0) {
+                (totalSuccess * 100.0 / totalDomains).toInt()
+            } else 0
+            val totalElapsed = System.currentTimeMillis() - startTime
+            
+            // Enhanced completion log with detailed statistics (INFO level)
+            Log.i(TAG, "✅ Enhanced DNS cache warm-up completed: $totalSuccess/$totalDomains domains resolved in ${totalElapsed}ms (${totalSuccessRate}% success rate)")
+            Log.i(TAG, "📊 Warm-up statistics - Tier 1: ${tier1Results?.success ?: 0}/${tier1Domains.size} (${tier1Results?.elapsed ?: 0}ms), Tier 2: ${tier2Result?.success ?: 0}/${tier2Domains.size} (${tier2Result?.elapsed ?: 0}ms), Tier 3: ${tier3Result?.success ?: 0}/${tier3Domains.size} (${tier3Result?.elapsed ?: 0}ms)")
+            Log.i(TAG, "📈 Warm-up performance: ${totalSuccess} successes, ${totalFailed} failures, average ${if (totalSuccess > 0) (totalElapsed / totalSuccess) else 0}ms per domain")
+            
+            // Track warm-up success rate for monitoring
+            trackWarmUpStats(totalSuccess, totalFailed, totalElapsed, totalSuccessRate)
         }
     }
+    
+    /**
+     * Track warm-up statistics for monitoring
+     * Updates global warm-up stats with latest results
+     */
+    private fun trackWarmUpStats(success: Int, failed: Int, elapsed: Long, successRate: Int) {
+        synchronized(warmUpStats) {
+            warmUpStats.totalWarmUps++
+            warmUpStats.totalSuccess += success
+            warmUpStats.totalFailed += failed
+            warmUpStats.totalElapsed += elapsed
+            warmUpStats.lastWarmUpTime = System.currentTimeMillis()
+            
+            // Calculate average success rate
+            val totalAttempts = warmUpStats.totalSuccess + warmUpStats.totalFailed
+            warmUpStats.averageSuccessRate = if (totalAttempts > 0) {
+                (warmUpStats.totalSuccess * 100.0 / totalAttempts)
+            } else 0.0
+            
+            // Calculate average elapsed time
+            warmUpStats.averageElapsed = if (warmUpStats.totalWarmUps > 0) {
+                warmUpStats.totalElapsed / warmUpStats.totalWarmUps
+            } else 0L
+            
+            // Log monitoring statistics periodically (every 5 warm-ups)
+            if (warmUpStats.totalWarmUps % 5 == 0) {
+                Log.i(TAG, "📈 Warm-up monitoring: ${warmUpStats.totalWarmUps} warm-ups, avg success rate: ${String.format("%.1f", warmUpStats.averageSuccessRate)}%, avg elapsed: ${warmUpStats.averageElapsed}ms, total: ${warmUpStats.totalSuccess}/${warmUpStats.totalSuccess + warmUpStats.totalFailed}")
+            }
+        }
+    }
+    
+    /**
+     * Get warm-up statistics for monitoring
+     * Returns current warm-up statistics snapshot
+     */
+    fun getWarmUpStats(): WarmUpStats {
+        return synchronized(warmUpStats) {
+            warmUpStats.copy()
+        }
+    }
+    
+    /**
+     * Domain priority for tiered warm-up strategy
+     */
+    private enum class DomainPriority {
+        CRITICAL,  // Frequently accessed + about to expire (TTL < 1 hour remaining)
+        HIGH,      // Frequently accessed (hit rate > 0.8)
+        NORMAL     // Standard popular domains
+    }
+    
+    /**
+     * Domain with priority information for adaptive warm-up
+     */
+    private data class PrioritizedDomain(
+        val domain: String,
+        val priority: DomainPriority,
+        val reason: String
+    )
+    
+    /**
+     * Get adaptive warm-up domain list (prioritized by hit rate, TTL expiration, and user behavior)
+     */
+    private fun getAdaptiveWarmUpDomains(): List<PrioritizedDomain> {
+        val result = mutableListOf<PrioritizedDomain>()
+        
+        // Get high hit rate domains from cache statistics (dynamically learned)
+        val highHitRateDomains = DnsCacheManager.getPrefetchCandidates()
+        val highHitRateSet = highHitRateDomains.toSet()
+        
+        // Get domains about to expire (TTL-aware prefetching)
+        val expiringSoonDomains = DnsCacheManager.getExpiringSoonDomains(hoursThreshold = 1)
+        val expiringSoonSet = expiringSoonDomains.toSet()
+        
+        // Categorize popular domains with priorities
+        popularDomains.forEach { domain ->
+            val priority = when {
+                // Critical: Frequently accessed AND about to expire
+                highHitRateSet.contains(domain) && expiringSoonSet.contains(domain) -> {
+                    DomainPriority.CRITICAL to "high hit rate + expiring soon"
+                }
+                // Critical: About to expire (needs refresh)
+                expiringSoonSet.contains(domain) -> {
+                    DomainPriority.CRITICAL to "expiring soon (TTL < 1h)"
+                }
+                // High: Frequently accessed (high hit rate)
+                highHitRateSet.contains(domain) -> {
+                    DomainPriority.HIGH to "high hit rate"
+                }
+                // Critical: Top tier domains (always prioritize)
+                domain in listOf("google.com", "www.google.com", "facebook.com", "www.facebook.com", 
+                                "youtube.com", "www.youtube.com", "instagram.com", "www.instagram.com") -> {
+                    DomainPriority.CRITICAL to "top tier domain"
+                }
+                // Normal: Standard popular domains
+                else -> {
+                    DomainPriority.NORMAL to "popular domain"
+                }
+            }
+            result.add(PrioritizedDomain(domain, priority.first, priority.second))
+        }
+        
+        // Add dynamically learned domains (not in popular list) with high priority
+        highHitRateDomains.filterNot { it in popularDomains }.take(20).forEach { domain ->
+            result.add(PrioritizedDomain(domain, DomainPriority.HIGH, "dynamically learned (high hit rate)"))
+        }
+        
+        // Sort by priority (CRITICAL first, then HIGH, then NORMAL)
+        return result.sortedBy { 
+            when (it.priority) {
+                DomainPriority.CRITICAL -> 0
+                DomainPriority.HIGH -> 1
+                DomainPriority.NORMAL -> 2
+            }
+        }
+    }
+    
+    /**
+     * Warm-up domains in a specific tier (with retry mechanism, subdomain prefetching, and enhanced statistics)
+     */
+    private suspend fun warmUpDomainsTiered(
+        domains: List<String>,
+        tier: Int,
+        maxConcurrency: Int = 50, // Limit concurrent queries per tier to avoid overwhelming
+        prefetchSubdomains: Boolean = tier <= 2 // Only prefetch subdomains for critical and high priority tiers
+    ): WarmUpResult {
+        val startTime = System.currentTimeMillis()
+        var successCount = 0
+        var failedCount = 0
+        val subdomainSuccessCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val subdomainTotalCount = java.util.concurrent.atomic.AtomicInteger(0)
+        
+        // Process domains in batches to control concurrency
+        for (batch in domains.chunked(maxConcurrency)) {
+            val deferredResults = batch.map { domain ->
+                scope.async(Dispatchers.IO) {
+                    try {
+                        // Retry mechanism for warm-up reliability
+                        var lastError: Exception? = null
+                        
+                        for (attempt in 1..3) {
+                            try {
+                                val addresses = resolveDomain(domain)
+                                if (addresses.isNotEmpty()) {
+                                    Log.d(TAG, "✅ Warm-up [Tier $tier]: $domain -> ${addresses.map { it.hostAddress ?: "unknown" }}")
+                                    
+                                    // Prefetch related subdomains if enabled (background task, non-blocking)
+                                    if (prefetchSubdomains && tier <= 2) {
+                                        scope.launch {
+                                            try {
+                                                val relatedDomains = generateRelatedSubdomains(domain)
+                                                relatedDomains.forEach { subdomain ->
+                                                    subdomainTotalCount.incrementAndGet()
+                                                    try {
+                                                        val subdomainAddresses = resolveDomain(subdomain)
+                                                        if (subdomainAddresses.isNotEmpty()) {
+                                                            subdomainSuccessCount.incrementAndGet()
+                                                            Log.d(TAG, "✅ Warm-up [Tier $tier] subdomain: $subdomain -> ${subdomainAddresses.map { it.hostAddress ?: "unknown" }}")
+                                                        }
+                                                    } catch (e: Exception) {
+                                                        // Subdomain prefetch failures are not critical, just log
+                                                        Log.d(TAG, "⚠️ Warm-up [Tier $tier] subdomain failed: $subdomain (${e.message})")
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                Log.d(TAG, "⚠️ Error generating related subdomains for $domain: ${e.message}")
+                                            }
+                                        }
+                                    }
+                                    
+                                    return@async WarmUpDomainResult(domain, true, null)
+                                }
+                            } catch (e: Exception) {
+                                lastError = e
+                                if (attempt < 3) {
+                                    kotlinx.coroutines.delay(100L * attempt) // Exponential backoff
+                                }
+                            }
+                        }
+                        Log.d(TAG, "⚠️ Warm-up [Tier $tier] failed for $domain after 3 attempts: ${lastError?.message}")
+                        return@async WarmUpDomainResult(domain, false, lastError)
+                    } catch (e: Exception) {
+                        Log.d(TAG, "⚠️ Warm-up [Tier $tier] error for $domain: ${e.message}")
+                        return@async WarmUpDomainResult(domain, false, e)
+                    }
+                }
+            }
+            
+            val results = deferredResults.awaitAll()
+            successCount += results.count { result -> result.success }
+            failedCount += results.count { result -> !result.success }
+        }
+        
+        val elapsed = System.currentTimeMillis() - startTime
+        
+        // Log enhanced statistics (wait a bit for subdomain prefetching to complete)
+        if (prefetchSubdomains) {
+            kotlinx.coroutines.delay(2000) // Wait 2 seconds for subdomain prefetching to complete
+            val subdomainSuccess = subdomainSuccessCount.get()
+            val subdomainTotal = subdomainTotalCount.get()
+            if (subdomainTotal > 0) {
+                val subdomainSuccessRate = if (subdomainTotal > 0) {
+                    (subdomainSuccess * 100.0 / subdomainTotal).toInt()
+                } else 0
+                Log.i(TAG, "📊 Warm-up [Tier $tier] stats: ${successCount}/${domains.size} domains, ${subdomainSuccess}/${subdomainTotal} subdomains (${subdomainSuccessRate}% success), ${elapsed}ms")
+            }
+        }
+        
+        // Log tier statistics at INFO level for visibility (if not logged above)
+        if (!prefetchSubdomains || subdomainTotalCount.get() == 0) {
+            val tierSuccessRate = if ((successCount + failedCount) > 0) {
+                (successCount * 100.0 / (successCount + failedCount)).toInt()
+            } else 0
+            Log.i(TAG, "📊 Warm-up [Tier $tier] stats: ${successCount}/${domains.size} domains resolved in ${elapsed}ms (${tierSuccessRate}% success rate)")
+        }
+        
+        return WarmUpResult(successCount, failedCount, successCount + failedCount, elapsed)
+    }
+    
+    /**
+     * Generate related subdomains for a domain (www, cdn, api, static, etc.)
+     * Enhanced with common patterns for popular domains
+     */
+    private fun generateRelatedSubdomains(domain: String): List<String> {
+        val parts = domain.split(".")
+        if (parts.size < 2) return emptyList()
+        
+        val baseDomain = parts.takeLast(2).joinToString(".")
+        val currentSubdomain = if (parts.size > 2) parts.dropLast(2).joinToString(".") else null
+        
+        val commonSubdomains = listOf(
+            "www", "cdn", "api", "static", "assets", "media", "img", "images",
+            "js", "css", "fonts", "blog", "mail", "ftp", "admin", "secure"
+        )
+        
+        val related = mutableListOf<String>()
+        
+        // Only generate subdomains if current domain doesn't already have a common subdomain
+        if (currentSubdomain == null || currentSubdomain !in commonSubdomains) {
+            // Generate top 5 most common subdomains (limit to avoid too many queries)
+            commonSubdomains.take(5).forEach { prefix ->
+                val relatedDomain = "$prefix.$baseDomain"
+                // Skip if it's the same as current domain
+                if (relatedDomain != domain) {
+                    related.add(relatedDomain)
+                }
+            }
+        }
+        
+        return related
+    }
+    
+    /**
+     * Result of tiered warm-up operation
+     */
+    private data class WarmUpResult(
+        val success: Int,
+        val failed: Int,
+        val total: Int,
+        val elapsed: Long
+    )
+    
+    /**
+     * Result of single domain warm-up attempt
+     */
+    private data class WarmUpDomainResult(
+        val domain: String,
+        val success: Boolean,
+        val error: Exception?
+    )
     
     /**
      * Get DNS servers sorted by performance and geographic proximity (fastest and closest first)
@@ -409,8 +778,19 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
             isRunning.set(true)
             _serverStatus.value = ServerStatus.Running
             
-            // Warm up DNS cache with popular domains
+            // Warm up DNS cache with popular domains (initial warm-up)
             warmUpCache()
+            
+            // Start periodic warm-up job (every 6 hours)
+            warmUpJob = scope.launch {
+                while (isRunning.get()) {
+                    delay(WARM_UP_INTERVAL_MS)
+                    if (isRunning.get()) {
+                        Log.i(TAG, "🔄 Periodic DNS cache warm-up triggered (6 hours interval)...")
+                        warmUpCache()
+                    }
+                }
+            }
             
             // Start server loop in coroutine
             serverJob = scope.launch {
@@ -561,6 +941,8 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
             Log.i(TAG, "🛑 Stopping system DNS cache server...")
             
             isRunning.set(false)
+            warmUpJob?.cancel()
+            warmUpJob = null
             serverJob?.cancel()
             serverJob = null
             
@@ -774,9 +1156,24 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
         pendingQueries[lowerHostname] = PendingQuery(deferred)
         
         try {
-            // Ultra-fast timeouts: very aggressive for maximum speed
-            val timeouts = listOf(300L, 500L, 800L) // Ultra-fast timeouts for maximum performance
+            // Adaptive timeouts: longer timeouts for problematic domains (TikTok, etc.)
+            // Check if domain needs extended timeout (TikTok domains often timeout)
+            val needsExtendedTimeout = hostname.contains("tiktok", ignoreCase = true) ||
+                    hostname.contains("sentry.io", ignoreCase = true) ||
+                    hostname.contains("firebaseremoteconfig", ignoreCase = true)
+            
+            val timeouts = if (needsExtendedTimeout) {
+                // Extended timeouts for problematic domains
+                listOf(500L, 1000L, 2000L)
+            } else {
+                // Ultra-fast timeouts: very aggressive for maximum speed (optimized for first-time access)
+                listOf(200L, 350L, 600L) // Reduced timeouts for faster first-time DNS resolution
+            }
             var lastError: Exception? = null
+            
+            if (needsExtendedTimeout) {
+                Log.d(TAG, "⏱️ Using extended timeout strategy for $hostname (problematic domain)")
+            }
             
             for ((attempt, timeoutMs) in timeouts.withIndex()) {
                 try {
@@ -800,7 +1197,7 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                     lastError = e
                     if (attempt < timeouts.size - 1) {
                         Log.d(TAG, "⚠️ DNS query attempt ${attempt + 1} failed for $hostname, retrying with timeout ${timeouts[attempt + 1]}ms...")
-                        delay(20) // Ultra-fast retry delay (20ms for maximum speed)
+                        delay(10) // Ultra-fast retry delay (10ms for faster first-time access)
                     }
                 }
             }
@@ -830,23 +1227,53 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     
     /**
      * DNS over HTTPS (DoH) fallback when UDP DNS fails
-     * Uses system DNS resolver as fallback
+     * Uses system DNS resolver as fallback with retry mechanism (faster for first-time access)
      */
     private suspend fun tryDoHFallback(hostname: String): ByteArray? {
         return withContext(Dispatchers.IO) {
-            try {
-                Log.d(TAG, "🔄 Trying DoH fallback for $hostname...")
-                // Use system DNS resolver as fallback (Android's built-in DNS)
-                val addresses = InetAddress.getAllByName(hostname)
-                if (addresses.isNotEmpty()) {
-                    // Build DNS response packet from resolved addresses
-                    val queryData = buildDnsQuery(hostname) ?: return@withContext null
-                    val responseData = buildDnsResponse(queryData, addresses.toList())
-                    Log.i(TAG, "✅ DoH fallback successful for $hostname -> ${addresses.map { it.hostAddress ?: "unknown" }}")
-                    return@withContext responseData
+            // Enhanced fallback: retry system DNS resolver with increasing timeouts
+            val fallbackTimeouts = listOf(2000L, 3000L, 5000L) // Increased timeouts for problematic domains
+            var lastError: Exception? = null
+            
+            for ((attempt, timeoutMs) in fallbackTimeouts.withIndex()) {
+                try {
+                    if (attempt > 0) {
+                        Log.d(TAG, "🔄 Retrying system DNS fallback (attempt ${attempt + 1}/${fallbackTimeouts.size}) for $hostname with timeout ${timeoutMs}ms...")
+                        delay(50) // Brief delay between retries
+                    } else {
+                        Log.d(TAG, "🔄 Trying system DNS fallback for $hostname (faster first-time access)...")
+                    }
+                    
+                    // Use system DNS resolver as fallback (Android's built-in DNS - faster for first-time access)
+                    val startTime = System.currentTimeMillis()
+                    val addresses = withTimeoutOrNull(timeoutMs) {
+                        InetAddress.getAllByName(hostname)
+                    }
+                    val elapsed = System.currentTimeMillis() - startTime
+                    
+                    if (addresses != null && addresses.isNotEmpty()) {
+                        // Build DNS response packet from resolved addresses
+                        val queryData = buildDnsQuery(hostname) ?: return@withContext null
+                        val responseData = buildDnsResponse(queryData, addresses.toList())
+                        
+                        // Cache the result immediately for faster subsequent access
+                        DnsCacheManager.saveToCache(hostname, addresses.toList(), ttl = 3600L)
+                        
+                        if (attempt > 0) {
+                            Log.i(TAG, "✅ System DNS fallback successful (retry ${attempt + 1}) for $hostname -> ${addresses.map { it.hostAddress ?: "unknown" }} (${elapsed}ms)")
+                        } else {
+                            Log.i(TAG, "✅ System DNS fallback successful for $hostname -> ${addresses.map { it.hostAddress ?: "unknown" }} (${elapsed}ms)")
+                        }
+                        return@withContext responseData
+                    }
+                } catch (e: Exception) {
+                    lastError = e
+                    if (attempt < fallbackTimeouts.size - 1) {
+                        Log.d(TAG, "⚠️ System DNS fallback attempt ${attempt + 1} failed for $hostname: ${e.message}, retrying...")
+                    } else {
+                        Log.w(TAG, "❌ System DNS fallback failed after ${fallbackTimeouts.size} attempts for $hostname: ${e.message}")
+                    }
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "DoH fallback failed for $hostname: ${e.message}")
             }
             null
         }
@@ -1119,7 +1546,12 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                 
                 // Parse name (may use compression)
                 try {
-                    skipDnsName(buffer)
+                    val nameEndPos = skipDnsName(buffer)
+                    // Ensure we're at the correct position after skipping name
+                    if (nameEndPos != buffer.position()) {
+                        Log.w(TAG, "DNS name skip mismatch: expected position $nameEndPos, actual ${buffer.position()}, correcting...")
+                        buffer.position(nameEndPos)
+                    }
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to skip DNS name at position $answerOffset: ${e.message}")
                     break
@@ -1229,39 +1661,82 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     
     /**
      * Skip DNS name in packet (handles compression pointers)
+     * Returns the final buffer position after skipping the name
+     * 
+     * DNS name format:
+     * - Normal label: [length byte][label bytes]...
+     * - Compression pointer: [0xC0 | high 6 bits of offset][low 8 bits of offset]
+     * - End: [0x00]
+     * 
+     * When a compression pointer is encountered, we follow it to read the name,
+     * but then return to the position AFTER the compression pointer (2 bytes consumed)
      */
-    private fun skipDnsName(buffer: ByteBuffer) {
-        var jumped = false
+    private fun skipDnsName(buffer: ByteBuffer): Int {
+        val startPos = buffer.position()
         var maxJumps = 10 // Prevent infinite loops
         var jumps = 0
+        var encounteredCompression = false
+        var compressionEndPos = startPos + 2 // Default: if compression, consume 2 bytes
         
         while (buffer.hasRemaining() && jumps < maxJumps) {
+            // Check if we have at least 1 byte
+            if (buffer.remaining() < 1) {
+                break
+            }
+            
             val length = buffer.get().toInt() and 0xFF
             
             if (length == 0) {
-                // End of name
-                break
-            } else if ((length and 0xC0) == 0xC0) {
-                // Compression pointer
-                val offset = ((length and 0x3F) shl 8) or (buffer.get().toInt() and 0xFF)
-                if (!jumped) {
-                    // Save current position for return
-                    val currentPos = buffer.position()
-                    buffer.position(offset)
-                    jumped = true
-                    jumps++
+                // End of name - normal termination
+                if (!encounteredCompression) {
+                    return buffer.position()
                 } else {
-                    // Already jumped, just skip
+                    // We encountered compression, return to position after compression pointer
+                    return compressionEndPos
+                }
+            } else if ((length and 0xC0) == 0xC0) {
+                // Compression pointer - read the second byte
+                if (buffer.remaining() < 1) {
                     break
                 }
+                val secondByte = buffer.get().toInt() and 0xFF
+                val offset = ((length and 0x3F) shl 8) or secondByte
+                
+                // Compression pointer: we've consumed 2 bytes total
+                compressionEndPos = buffer.position() // Position after reading compression pointer (2 bytes consumed)
+                encounteredCompression = true
+                
+                // Validate offset is within buffer bounds
+                if (offset >= 0 && offset < buffer.limit() && offset < startPos) {
+                    // Follow compression pointer (offset must be before current position to avoid loops)
+                    val savedPos = buffer.position()
+                    buffer.position(offset)
+                    jumps++
+                    
+                    // Recursively skip the name at the compression target
+                    // This will read the name but we'll return to compressionEndPos
+                    skipDnsName(buffer)
+                    
+                    // Return to position after compression pointer
+                    return compressionEndPos
+                } else {
+                    Log.w(TAG, "Invalid compression pointer offset: $offset (buffer limit: ${buffer.limit()}, start: $startPos)")
+                    return compressionEndPos
+                }
             } else if (length <= 63) {
-                // Normal label
+                // Normal label - skip length bytes
+                if (buffer.remaining() < length) {
+                    break
+                }
                 buffer.position(buffer.position() + length)
             } else {
                 // Invalid length
-                break
+                Log.w(TAG, "Invalid DNS name length: $length at position ${buffer.position() - 1}")
+                return if (encounteredCompression) compressionEndPos else buffer.position()
             }
         }
+        
+        return if (encounteredCompression) compressionEndPos else buffer.position()
     }
     
     /**

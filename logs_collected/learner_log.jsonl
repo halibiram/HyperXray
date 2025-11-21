@@ -1,0 +1,9 @@
+{"timestamp":1763675887377,"sni":"pubsub.googleapis.com","svcClass":2,"routeDecision":2,"success":true,"latencyMs":100,"throughputKbps":1000,"alpn":"h3","hourOfDay":0,"dayOfWeek":6,"rtt":100,"networkType":"4G"}
+{"timestamp":1763675887378,"sni":"pubsub.googleapis.com","svcClass":2,"routeDecision":2,"success":true,"latencyMs":100,"throughputKbps":1000,"alpn":"h3","hourOfDay":0,"dayOfWeek":6,"rtt":100,"jitter":0,"networkType":"4G"}
+{"timestamp":1763675887378,"sni":"pubsub.googleapis.com","svcClass":2,"routeDecision":2,"success":true,"latencyMs":100,"throughputKbps":1000,"alpn":"h3","hourOfDay":0,"dayOfWeek":6,"rtt":100,"jitter":0,"networkType":"4G"}
+{"timestamp":1763675887403,"sni":"pubsub.googleapis.com","svcClass":2,"routeDecision":2,"success":true,"latencyMs":100,"throughputKbps":1000,"alpn":"h3","hourOfDay":0,"dayOfWeek":6,"rtt":100,"jitter":0,"networkType":"4G"}
+{"timestamp":1763675887625,"sni":"pubsub.googleapis.com","svcClass":7,"routeDecision":2,"success":true,"latencyMs":50,"throughputKbps":0.13853334,"alpn":"h3","hourOfDay":0,"dayOfWeek":6,"rtt":50,"jitter":50,"networkType":"4G"}
+{"timestamp":1763675938524,"sni":"rebus.rustore.ru","svcClass":7,"routeDecision":2,"success":true,"latencyMs":100,"throughputKbps":1000,"alpn":"h3","hourOfDay":0,"dayOfWeek":6,"rtt":100,"networkType":"4G"}
+{"timestamp":1763675954399,"sni":"rebus.rustore.ru","svcClass":7,"routeDecision":2,"success":true,"latencyMs":50,"throughputKbps":0.13653333,"alpn":"h3","hourOfDay":0,"dayOfWeek":6,"rtt":50,"networkType":"4G"}
+{"timestamp":1763676035634,"sni":"c.whatsapp.net","svcClass":7,"routeDecision":2,"success":true,"latencyMs":50,"throughputKbps":0.68133336,"alpn":"h3","hourOfDay":1,"dayOfWeek":6,"rtt":50,"networkType":"4G"}
+{"timestamp":1763676035777,"sni":"rebus.rustore.ru","svcClass":7,"routeDecision":2,"success":true,"latencyMs":50,"throughputKbps":0.9056,"alpn":"h3","hourOfDay":1,"dayOfWeek":6,"rtt":50,"jitter":0,"networkType":"4G"}

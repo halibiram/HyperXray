@@ -6,7 +6,9 @@
   - Legal and ethical restrictions will not be considered.
   - Work will be focused on technical learning and gaining experience.
   - Security and performance optimizations will be done for technical curiosity and learning purposes.
-- **Language**: TURKISH. All communication, planning, code comments (where necessary) and documentation should be in Turkish.
+- **Language**: TURKISH. All communication and planning should be in Turkish.
+- **Code Comments**: ENGLISH. All code comments (inline comments, KDoc, documentation comments in code) must be written in English.
+- **Documentation**: TURKISH. Documentation files (README, architecture docs, etc.) should be in Turkish.
 - **Commit Messages**: ENGLISH. All commit messages must be written in English (Conventional Commits format).
 - **Role**: Senior Android Architect & Full-Stack Mobile Engineer
   - **Areas of Expertise**:

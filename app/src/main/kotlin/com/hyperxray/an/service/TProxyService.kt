@@ -48,6 +48,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -615,6 +617,46 @@ class TProxyService : VpnService() {
                         }
                     }
                     return
+                }
+                
+                // Pre-resolve server address BEFORE starting Xray (using system DNS, not VPN DNS)
+                // This ensures server IP is available even if only YouTube package exists
+                val serverAddress = extractServerAddressFromConfig(configContent)
+                if (serverAddress != null && !isValidIpAddress(serverAddress)) {
+                    // Server address is a domain name, resolve it using system DNS (not VPN DNS)
+                    Log.d(TAG, "Pre-resolving server address: $serverAddress (using system DNS before VPN start)")
+                    try {
+                        val resolvedAddresses = withContext(Dispatchers.IO) {
+                            // Use system DNS (InetAddress) - works before VPN starts
+                            InetAddress.getAllByName(serverAddress)
+                        }
+                        if (resolvedAddresses.isNotEmpty()) {
+                            Log.i(TAG, "✅ Server address resolved: $serverAddress -> ${resolvedAddresses.map { it.hostAddress }}")
+                            // Cache resolved IPs in SystemDnsCacheServer if it's already started
+                            // (It may not be started yet, but that's OK - Xray will resolve it too)
+                            if (systemDnsCacheServer != null && systemDnsCacheServer!!.isRunning()) {
+                                try {
+                                    DnsCacheManager.saveToCache(serverAddress, resolvedAddresses.toList())
+                                    Log.d(TAG, "💾 Cached server address resolution in DNS cache")
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "Failed to cache server address: ${e.message}")
+                                }
+                            }
+                        } else {
+                            Log.w(TAG, "⚠️ Server address resolved but no IPs found: $serverAddress")
+                        }
+                    } catch (e: Exception) {
+                        val errorMessage = "Failed to resolve server address: $serverAddress (${e.message})"
+                        Log.e(TProxyService.TAG, errorMessage, e)
+                        // Broadcast error to UI but don't stop - Xray might still work
+                        val errorIntent = Intent(TProxyService.ACTION_ERROR)
+                        errorIntent.setPackage(application.packageName)
+                        errorIntent.putExtra(TProxyService.EXTRA_ERROR_MESSAGE, "DNS resolution failed for server. Xray will try to resolve it.")
+                        sendBroadcast(errorIntent)
+                        // Continue anyway - Xray-core can resolve DNS itself
+                    }
+                } else if (serverAddress != null && isValidIpAddress(serverAddress)) {
+                    Log.d(TAG, "Server address is already an IP: $serverAddress (no DNS resolution needed)")
                 }
                 
                 // SOCKS5 readiness check should happen AFTER Xray-core starts, not before.
@@ -1985,6 +2027,69 @@ class TProxyService : VpnService() {
      * Optimized with timeout control to prevent packet loss during DNS resolution.
      * DNS resolution is prioritized - connection establishment waits for DNS resolution to complete.
      */
+    /**
+     * Extract server address from Xray config JSON (outbounds[0].settings.vnext[0].address)
+     * Supports VLESS, VMess, Trojan, Shadowsocks protocols
+     */
+    private fun extractServerAddressFromConfig(configContent: String): String? {
+        return try {
+            val jsonObject = org.json.JSONObject(configContent)
+            val outbounds = jsonObject.optJSONArray("outbounds") ?: return null
+            if (outbounds.length() == 0) return null
+            
+            val outbound = outbounds.getJSONObject(0)
+            val protocol = outbound.optString("protocol", "").lowercase()
+            val settings = outbound.optJSONObject("settings") ?: return null
+            
+            // VLESS/VMess: settings.vnext[0].address
+            if (protocol == "vless" || protocol == "vmess") {
+                val vnext = settings.optJSONArray("vnext")
+                if (vnext != null && vnext.length() > 0) {
+                    val vnextServer = vnext.getJSONObject(0)
+                    return vnextServer.optString("address", "").takeIf { it.isNotEmpty() }
+                }
+            }
+            
+            // Trojan: settings.servers[0].address
+            if (protocol == "trojan") {
+                val servers = settings.optJSONArray("servers")
+                if (servers != null && servers.length() > 0) {
+                    val server = servers.getJSONObject(0)
+                    return server.optString("address", "").takeIf { it.isNotEmpty() }
+                }
+            }
+            
+            // Shadowsocks: settings.servers[0].address
+            if (protocol == "shadowsocks" || protocol == "shadowsocks2022") {
+                val servers = settings.optJSONArray("servers")
+                if (servers != null && servers.length() > 0) {
+                    val server = servers.getJSONObject(0)
+                    return server.optString("address", "").takeIf { it.isNotEmpty() }
+                }
+            }
+            
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to extract server address from config: ${e.message}")
+            null
+        }
+    }
+    
+    /**
+     * Check if a string is a valid IP address (IPv4 or IPv6)
+     */
+    private fun isValidIpAddress(address: String): Boolean {
+        return try {
+            // Try to parse as InetAddress - if it throws exception, it's not an IP
+            val addr = InetAddress.getByName(address)
+            // Simple heuristic: IPv4 has 4 octets, IPv6 has colons
+            address.split(".").size == 4 && address.split(".").all { it.toIntOrNull() in 0..255 } ||
+            address.contains(":") // IPv6 contains colons
+        } catch (e: Exception) {
+            false
+        }
+    }
+    
     /**
      * ALWAYS use SystemDnsCacheServer for DNS resolution.
      * SystemDnsCacheServer has built-in retry mechanism and DoH fallback,
