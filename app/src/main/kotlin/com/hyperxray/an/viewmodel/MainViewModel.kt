@@ -202,7 +202,8 @@ class MainViewModel(application: Application) :
                 )
             ),
             bypassDomains = prefs.bypassDomains,
-            bypassIps = prefs.bypassIps
+            bypassIps = prefs.bypassIps,
+            xrayCoreInstanceCount = prefs.xrayCoreInstanceCount
         )
     )
     val settingsState: StateFlow<SettingsState> = _settingsState.asStateFlow()
@@ -359,17 +360,66 @@ class MainViewModel(application: Application) :
             val hasRunning = intent.getBooleanExtra("has_running", false)
             Log.d(TAG, "Instance status update: count=$instanceCount, hasRunning=$hasRunning")
             
-            // Build status map from intent extras
+            // Build status map from intent extras with proper status type parsing
             val statusMap = mutableMapOf<Int, com.hyperxray.an.xray.runtime.XrayRuntimeStatus>()
+            
+            // Parse all instance statuses from intent extras
+            // Try to get status by index first (new format with status_type)
+            // If not found, try legacy format (just PID/port)
             for (i in 0 until instanceCount) {
-                val pid = intent.getIntExtra("instance_${i}_pid", -1)
-                val port = intent.getIntExtra("instance_${i}_port", -1)
-                if (pid > 0 && port > 0) {
-                    statusMap[i] = com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Running(pid.toLong(), port)
-                } else {
-                    statusMap[i] = com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Stopped
+                val statusType = intent.getStringExtra("instance_${i}_status_type")
+                
+                val status = when (statusType) {
+                    "Running" -> {
+                        val pid = intent.getLongExtra("instance_${i}_pid", -1L)
+                        val port = intent.getIntExtra("instance_${i}_port", -1)
+                        if (pid > 0 && port > 0) {
+                            com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Running(pid, port)
+                        } else {
+                            // Invalid Running status, fallback to Stopped
+                            Log.w(TAG, "Instance $i: Running status but invalid PID/port (pid=$pid, port=$port), using Stopped")
+                            com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Stopped
+                        }
+                    }
+                    "Starting" -> {
+                        com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Starting
+                    }
+                    "Stopping" -> {
+                        com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Stopping
+                    }
+                    "Error" -> {
+                        val errorMessage = intent.getStringExtra("instance_${i}_error_message") ?: "Unknown error"
+                        com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Error(errorMessage)
+                    }
+                    "ProcessExited" -> {
+                        val exitCode = intent.getIntExtra("instance_${i}_exit_code", -1)
+                        val exitMessage = intent.getStringExtra("instance_${i}_exit_message")
+                        com.hyperxray.an.xray.runtime.XrayRuntimeStatus.ProcessExited(exitCode, exitMessage)
+                    }
+                    "Stopped" -> {
+                        com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Stopped
+                    }
+                    null, "" -> {
+                        // Legacy format: check PID and port
+                        val pid = intent.getLongExtra("instance_${i}_pid", -1L)
+                        val port = intent.getIntExtra("instance_${i}_port", -1)
+                        if (pid > 0 && port > 0) {
+                            Log.d(TAG, "Instance $i: Legacy format detected, using Running status")
+                            com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Running(pid, port)
+                        } else {
+                            com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Stopped
+                        }
+                    }
+                    else -> {
+                        Log.w(TAG, "Instance $i: Unknown status type '$statusType', using Stopped")
+                        com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Stopped
+                    }
                 }
+                
+                statusMap[i] = status
+                Log.d(TAG, "Instance $i status parsed: $status")
             }
+            
             _instancesStatus.value = statusMap
             
             // CRITICAL: Auto-update connection state to Connected if service is enabled and we have running instances
@@ -867,12 +917,8 @@ class MainViewModel(application: Application) :
         val stats = statsResult
         val traffic = trafficResult
 
-        // Validate that we got some data
-        if (stats == null && traffic == null) {
-            Log.w(TAG, "Both stats and traffic are null, closing client")
-            closeCoreStatsClient()
-            return
-        }
+        // Note: At this point, both stats and traffic are guaranteed to be non-null
+        // because null checks are done earlier with early returns (lines 817 and 876)
 
         // Preserve existing traffic values if new traffic data is null
         val currentState = _coreStatsState.value
@@ -2328,7 +2374,7 @@ class MainViewModel(application: Application) :
     private suspend fun Call.await(): Response = suspendCancellableCoroutine { continuation ->
         enqueue(object : Callback {
             override fun onResponse(call: Call, response: Response) {
-                continuation.resume(response, null)
+                continuation.resumeWith(Result.success(response))
             }
 
             override fun onFailure(call: Call, e: IOException) {

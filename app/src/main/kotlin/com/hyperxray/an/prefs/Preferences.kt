@@ -514,7 +514,19 @@ class Preferences(context: Context) {
         }
 
     var xrayCoreInstanceCount: Int
-        get() = 1 // Force 1 instance for stability
+        get() {
+            val value = getPrefData(XRAY_CORE_INSTANCE_COUNT).first
+            val count = value?.toIntOrNull()
+            // Return value from preferences, or default to 1 if not set or invalid
+            val result = when {
+                count == null -> 1
+                count < 1 -> 1
+                count > 4 -> 4
+                else -> count
+            }
+            Log.d(TAG, "xrayCoreInstanceCount get() returning: $result (from prefs: $value, parsed: $count)")
+            return result
+        }
         set(count) {
             // Clamp value between 1 and 4
             val clampedCount = when {
@@ -522,6 +534,7 @@ class Preferences(context: Context) {
                 count > 4 -> 4
                 else -> count
             }
+            Log.d(TAG, "xrayCoreInstanceCount set() called with: $count, clamping to: $clampedCount")
             setValueInProvider(XRAY_CORE_INSTANCE_COUNT, clampedCount.toString())
         }
 

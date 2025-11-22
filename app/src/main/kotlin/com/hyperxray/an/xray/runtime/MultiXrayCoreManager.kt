@@ -111,32 +111,45 @@ class MultiXrayCoreManager(private val context: Context) {
         configPath: String,
         configContent: String?,
         excludedPorts: Set<Int> = emptySet()
-    ): Map<Int, Int> = mutex.withLock {
-        // Prevent concurrent start calls
-        if (isStarting) {
-            val stackTrace = Exception("Duplicate startInstances call")
-            Log.w(TAG, "Start already in progress, ignoring duplicate call", stackTrace)
-            return emptyMap()
-        }
-        
-        if (count < 1 || count > 4) {
-            Log.e(TAG, "Invalid instance count: $count (must be 1-4)")
-            return emptyMap()
-        }
-        
-        isStarting = true
-        try {
-            // Check if we have any running instances - if yes, log warning but continue
-            val runningCount = instances.values.count { it.isRunning() }
-            if (runningCount > 0) {
-                Log.w(TAG, "Starting new instances while $runningCount instances are still running. Stopping existing instances first.")
+    ): Map<Int, Int> {
+        // Use mutex only for initial check, then release it to avoid deadlock
+        // when async jobs try to acquire the same mutex
+        val shouldProceed = mutex.withLock {
+            // Prevent concurrent start calls
+            if (isStarting) {
+                val stackTrace = Exception("Duplicate startInstances call")
+                Log.w(TAG, "Start already in progress, ignoring duplicate call", stackTrace)
+                return@withLock false
             }
             
-            // Stop existing instances first (stopAllInstances already uses mutex internally)
-            // Note: We're already holding mutex, so we need to call stopAllInstances without mutex
-            stopAllInstancesInternal()
+            if (count < 1 || count > 4) {
+                Log.e(TAG, "❌ Invalid instance count: $count (must be 1-4)")
+                return@withLock false
+            }
             
-            Log.i(TAG, "Starting $count Xray-core instances in parallel")
+            Log.i(TAG, "🚀 MultiXrayCoreManager.startInstances() called with count=$count")
+            isStarting = true
+            true
+        }
+        
+        if (!shouldProceed) {
+            return emptyMap()
+        }
+        
+        try {
+            // Check if we have any running instances - if yes, log warning but continue
+            val runningCount = mutex.withLock {
+                instances.values.count { it.isRunning() }
+            }
+            if (runningCount > 0) {
+                Log.w(TAG, "⚠️ Starting new instances while $runningCount instances are still running. Stopping existing instances first.")
+            }
+            
+            // Stop existing instances first (mutex dışında olduğumuz için stopAllInstances kullanıyoruz)
+            stopAllInstances()
+            
+            Log.i(TAG, "▶️ Starting $count Xray-core instances sequentially")
+            Log.d(TAG, "Instance startup configuration: count=$count, configPath=$configPath, excludedPortsCount=${excludedPorts.size}")
         
             // OPTIMIZATION: Inject common config once (without API port)
             // Then each instance only needs lightweight port injection
@@ -149,166 +162,208 @@ class MultiXrayCoreManager(private val context: Context) {
             
             val startedInstances = mutableMapOf<Int, Int>()
             val allExcludedPorts = excludedPorts.toMutableSet()
-            val portMutex = Mutex()
             
-            // Phase 1: Parallel port allocation and instance creation
-            val instanceStartupJobs = (0 until count).map { i ->
-                serviceScope.async {
-                    try {
-                        // Check if cancelled or if start was cancelled before starting
-                        ensureActive()
-                        
-                        // Double-check isStarting flag (defensive check)
-                        if (!isStarting) {
-                            Log.w(TAG, "Instance $i startup cancelled - isStarting flag is false")
-                            return@async null
-                        }
-                        
-                        // Allocate port with mutex to avoid conflicts
-                        val apiPort: Int? = portMutex.withLock {
-                            ensureActive()
-                            this@MultiXrayCoreManager.findAvailablePort(allExcludedPorts)
-                        }
-                        
-                        if (apiPort == null) {
-                            Log.e(TAG, "Failed to find available port for instance $i")
-                            return@async null
-                        }
-                        
-                        portMutex.withLock {
-                            allExcludedPorts.add(apiPort)
-                        }
-                        
-                        // Check cancellation before config injection
-                        ensureActive()
-                        
-                        // Check isStarting flag again (defensive check)
-                        if (!isStarting) {
-                            Log.w(TAG, "Instance $i startup cancelled during config injection - isStarting flag is false")
-                            return@async null
-                        }
-                        
-                        // OPTIMIZATION: Only inject API port into pre-processed common config
-                        // This is much faster than full config injection for each instance
-                        val injectedConfigContent = try {
-                            ConfigUtils.injectApiPort(commonConfigContent, apiPort)
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Error injecting API port for instance $i", e)
-                            // Fallback to old method if port injection fails
-                            try {
-                                ConfigUtils.injectStatsServiceWithPort(prefs, configContent ?: "", apiPort)
-                            } catch (e2: Exception) {
-                                Log.e(TAG, "Error in fallback config injection for instance $i", e2)
-                                configContent ?: ""
-                            }
-                        }
-                        
-                        // Check cancellation before creating service
-                        ensureActive()
-                        
-                        // Check isStarting flag again (defensive check)
-                        if (!isStarting) {
-                            Log.w(TAG, "Instance $i startup cancelled before service creation - isStarting flag is false")
-                            return@async null
-                        }
-                        
-                        val service = XrayRuntimeServiceFactory.create(context)
-                        
-                        mutex.withLock {
-                            ensureActive()
-                            instances[i] = service
-                            instancePorts[i] = apiPort
-                        }
-                        
-                        // Set log callback with instance tag if available
-                        logLineCallback?.let { baseCallback ->
-                            val port = apiPort
-                            service.setLogLineCallback(LogLineCallback { line ->
-                                val taggedLine = "[Instance-$i:Port-$port] $line"
-                                baseCallback.onLogLine(taggedLine)
-                            })
-                        }
-                        
-                        // Observe status changes in background
-                        serviceScope.launch {
-                            service.status.collect { status ->
-                                mutex.withLock {
-                                    this@MultiXrayCoreManager.updateInstanceStatus(i, status)
-                                }
-                                when (status) {
-                                    is XrayRuntimeStatus.Running -> {
-                                        Log.i(TAG, "Instance $i is now running on port ${status.apiPort}")
-                                    }
-                                    is XrayRuntimeStatus.Error -> {
-                                        Log.e(TAG, "Instance $i error: ${status.message}", status.throwable)
-                                    }
-                                    is XrayRuntimeStatus.ProcessExited -> {
-                                        Log.e(TAG, "Instance $i exited with code ${status.exitCode}: ${status.message}")
-                                    }
-                                    else -> {}
-                                }
-                            }
-                        }
-                        
-                        // Check cancellation before starting service
-                        ensureActive()
-                        
-                        // Final check isStarting flag before actually starting
-                        if (!isStarting) {
-                            Log.w(TAG, "Instance $i startup cancelled before start() call - isStarting flag is false")
-                            mutex.withLock {
-                                instances.remove(i)
-                                instancePorts.remove(i)
-                            }
-                            return@async null
-                        }
-                        
-                        // Start the instance with injected config
-                        Log.i(TAG, "Starting instance $i on port $apiPort")
-                        val startTime = System.currentTimeMillis()
-                        val startedPort = service.start(configPath, injectedConfigContent, apiPort)
-                        val startDuration = System.currentTimeMillis() - startTime
-                        
-                        if (startedPort == null) {
-                            Log.e(TAG, "Failed to start instance $i - service.start() returned null after ${startDuration}ms")
-                            // Check current status for more details
-                            val currentStatus = service.status.value
-                            Log.e(TAG, "Instance $i current status: $currentStatus")
-                            mutex.withLock {
-                                instances.remove(i)
-                                instancePorts.remove(i)
-                            }
-                            return@async null
-                        }
-                        
-                        Log.i(TAG, "Instance $i start() returned port $startedPort after ${startDuration}ms (expected: $apiPort)")
-                        
-                        Pair(i, service)
-                    } catch (e: CancellationException) {
-                        // Expected cancellation - clean up and re-throw
-                        Log.d(TAG, "Instance $i startup cancelled", e)
-                        mutex.withLock {
-                            instances.remove(i)
-                            instancePorts.remove(i)
-                        }
-                        throw e // Re-throw to propagate cancellation
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error starting instance $i", e)
-                        mutex.withLock {
-                            instances.remove(i)
-                            instancePorts.remove(i)
-                        }
-                        null
+            // SYNC: Start instances sequentially, each waits for the previous to complete
+            Log.i(TAG, "Starting ${count} instances sequentially (sync mode)")
+            val servicesToWait = mutableListOf<Pair<Int, XrayRuntimeServiceApi>>()
+            
+            // Start each instance sequentially (SYNC MODE)
+            for (i in 0 until count) {
+                try {
+                    Log.i(TAG, "📋 Starting instance $i (${i + 1}/$count) sequentially...")
+                    
+                    // Check cancellation
+                    coroutineContext.ensureActive()
+                    
+                    // Check isStarting flag
+                    if (!isStarting) {
+                        Log.w(TAG, "⚠️ Instance $i: Startup cancelled - isStarting flag is false")
+                        break
                     }
+                    
+                    // Allocate port
+                    Log.d(TAG, "Instance $i: Allocating port...")
+                    val apiPort: Int? = this@MultiXrayCoreManager.findAvailablePort(allExcludedPorts)
+                    
+                    if (apiPort == null) {
+                        Log.e(TAG, "❌ Instance $i: Failed to find available port")
+                        break
+                    }
+                    Log.d(TAG, "Instance $i: Port allocated: $apiPort")
+                    allExcludedPorts.add(apiPort)
+                    
+                    // Inject API port into config
+                    Log.d(TAG, "Instance $i: Injecting API port $apiPort into config...")
+                    val injectedConfigContent = try {
+                        ConfigUtils.injectApiPort(commonConfigContent, apiPort)
+                            .also { Log.d(TAG, "Instance $i: Config injection completed (config size: ${it.length} bytes)") }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ Instance $i: Error injecting API port", e)
+                        try {
+                            ConfigUtils.injectStatsServiceWithPort(prefs, configContent ?: "", apiPort)
+                                .also { Log.d(TAG, "Instance $i: Fallback config injection completed") }
+                        } catch (e2: Exception) {
+                            Log.e(TAG, "❌ Instance $i: Error in fallback config injection", e2)
+                            configContent ?: ""
+                        }
+                    }
+                    
+                    // Create service
+                    Log.d(TAG, "Instance $i: Creating XrayRuntimeService...")
+                    val service = XrayRuntimeServiceFactory.create(context)
+                    Log.d(TAG, "Instance $i: XrayRuntimeService created successfully")
+                    
+                    // Store in instances map
+                    mutex.withLock {
+                        coroutineContext.ensureActive()
+                        instances[i] = service
+                        instancePorts[i] = apiPort
+                        Log.d(TAG, "Instance $i: Service and port stored in instances map")
+                    }
+                    
+                    // Set log callback
+                    logLineCallback?.let { baseCallback ->
+                        val port = apiPort
+                        service.setLogLineCallback(LogLineCallback { line ->
+                            val taggedLine = "[Instance-$i:Port-$port] $line"
+                            baseCallback.onLogLine(taggedLine)
+                        })
+                        Log.d(TAG, "Instance $i: Log callback set successfully")
+                    }
+                    
+                    // Observe status changes in background
+                    serviceScope.launch {
+                        service.status.collect { status ->
+                            mutex.withLock {
+                                this@MultiXrayCoreManager.updateInstanceStatus(i, status)
+                            }
+                            when (status) {
+                                is XrayRuntimeStatus.Running -> {
+                                    Log.i(TAG, "Instance $i is now running on port ${status.apiPort}")
+                                }
+                                is XrayRuntimeStatus.Error -> {
+                                    Log.e(TAG, "Instance $i error: ${status.message}", status.throwable)
+                                }
+                                is XrayRuntimeStatus.ProcessExited -> {
+                                    Log.e(TAG, "Instance $i exited with code ${status.exitCode}: ${status.message}")
+                                }
+                                else -> {}
+                            }
+                        }
+                    }
+                    
+                    // Start service
+                    Log.i(TAG, "🚀 Instance $i: Starting on port $apiPort (configPath: $configPath)")
+                    val startTime = System.currentTimeMillis()
+                    val startedPort = try {
+                        service.start(configPath, injectedConfigContent, apiPort)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ Instance $i: Exception during service.start() call", e)
+                        mutex.withLock {
+                            instances.remove(i)
+                            instancePorts.remove(i)
+                        }
+                        continue
+                    }
+                    val startDuration = System.currentTimeMillis() - startTime
+                    
+                    if (startedPort == null) {
+                        Log.e(TAG, "❌ Instance $i: service.start() returned null after ${startDuration}ms")
+                        mutex.withLock {
+                            instances.remove(i)
+                            instancePorts.remove(i)
+                        }
+                        continue
+                    }
+                    
+                    Log.i(TAG, "✅ Instance $i: start() returned port $startedPort after ${startDuration}ms (expected: $apiPort)")
+                    
+                    // Wait for instance to reach Running state (SYNC - blocks until running)
+                    Log.i(TAG, "⏳ Instance $i: Waiting for Running state (timeout: ${INSTANCE_STARTUP_TIMEOUT_MS}ms)...")
+                    val waitStartTime = System.currentTimeMillis()
+                    try {
+                        withTimeout(INSTANCE_STARTUP_TIMEOUT_MS) {
+                            val runningStatus = service.status.first { status ->
+                                coroutineContext.ensureActive()
+                                status is XrayRuntimeStatus.Running || 
+                                status is XrayRuntimeStatus.Error ||
+                                status is XrayRuntimeStatus.ProcessExited
+                            }
+                            
+                            val waitDuration = System.currentTimeMillis() - waitStartTime
+                            when (runningStatus) {
+                                is XrayRuntimeStatus.Running -> {
+                                    mutex.withLock {
+                                        startedInstances[i] = apiPort
+                                    }
+                                    Log.i(TAG, "✅ Instance $i: Running state reached on port $apiPort (PID: ${runningStatus.processId}) after ${waitDuration}ms")
+                                    servicesToWait.add(Pair(i, service))
+                                }
+                                is XrayRuntimeStatus.Error -> {
+                                    Log.e(TAG, "❌ Instance $i failed to start: ${runningStatus.message}", runningStatus.throwable)
+                                    mutex.withLock {
+                                        instances.remove(i)
+                                        instancePorts.remove(i)
+                                    }
+                                }
+                                is XrayRuntimeStatus.ProcessExited -> {
+                                    Log.e(TAG, "❌ Instance $i exited during startup with code ${runningStatus.exitCode}: ${runningStatus.message}")
+                                    mutex.withLock {
+                                        instances.remove(i)
+                                        instancePorts.remove(i)
+                                    }
+                                }
+                                else -> {
+                                    Log.w(TAG, "⚠️ Instance $i reached unexpected status: $runningStatus")
+                                    mutex.withLock {
+                                        instances.remove(i)
+                                        instancePorts.remove(i)
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e: TimeoutCancellationException) {
+                        val waitDuration = System.currentTimeMillis() - waitStartTime
+                        val currentStatus = service.status.value
+                        Log.e(TAG, "❌ Instance $i: Timeout! Did not reach Running state within ${INSTANCE_STARTUP_TIMEOUT_MS}ms (waited ${waitDuration}ms, current status: $currentStatus)")
+                        try {
+                            service.stop()
+                        } catch (stopException: Exception) {
+                            Log.e(TAG, "Error stopping failed instance $i", stopException)
+                        }
+                        mutex.withLock {
+                            instances.remove(i)
+                            instancePorts.remove(i)
+                        }
+                        continue
+                    } catch (e: CancellationException) {
+                        Log.d(TAG, "Instance $i startup cancelled", e)
+                        try {
+                            service.stop()
+                        } catch (stopException: Exception) {
+                            Log.e(TAG, "Error stopping cancelled instance $i", stopException)
+                        }
+                        mutex.withLock {
+                            instances.remove(i)
+                            instancePorts.remove(i)
+                        }
+                        throw e
+                    }
+                    
+                    Log.i(TAG, "✅ Instance $i started successfully, proceeding to next instance...")
+                    
+                } catch (e: CancellationException) {
+                    Log.d(TAG, "Instance $i startup cancelled", e)
+                    throw e
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Error starting instance $i", e)
+                    // Continue with next instance
                 }
             }
             
-            // Wait for all instances to start (parallel)
-            val servicesToWait = instanceStartupJobs.awaitAll().filterNotNull()
-            
-            // Check if start was cancelled during async operations
+            // Check if start was cancelled
             if (!isStarting) {
-                Log.w(TAG, "Start operation was cancelled during instance creation, cleaning up...")
+                Log.w(TAG, "⚠️ Start operation was cancelled during instance creation, cleaning up...")
                 servicesToWait.forEach { (i, service) ->
                     try {
                         service.stop()
@@ -325,7 +380,7 @@ class MultiXrayCoreManager(private val context: Context) {
             }
             
             if (servicesToWait.isEmpty()) {
-                Log.e(TAG, "No instances started successfully")
+                Log.e(TAG, "❌ No instances started successfully")
                 mutex.withLock {
                     instances.clear()
                     instancePorts.clear()
@@ -334,170 +389,7 @@ class MultiXrayCoreManager(private val context: Context) {
                 return emptyMap()
             }
             
-            // Phase 2: Wait for first instance to reach Running state, then continue in background
-            // This allows early return for faster startup while other instances continue in background
-            Log.i(TAG, "Phase 2: Waiting for ${servicesToWait.size} instances to reach Running state")
-            val waitJobs = servicesToWait.map { (i, service) ->
-                serviceScope.async {
-                    val waitStartTime = System.currentTimeMillis()
-                    try {
-                        ensureActive()
-                        val initialStatus = service.status.value
-                        Log.d(TAG, "Instance $i: Initial status=$initialStatus, waiting for Running state (timeout: ${INSTANCE_STARTUP_TIMEOUT_MS}ms)")
-                        withTimeout(INSTANCE_STARTUP_TIMEOUT_MS) {
-                            // Wait for Running status
-                            val runningStatus = service.status.first { status ->
-                                ensureActive()
-                                status is XrayRuntimeStatus.Running || 
-                                status is XrayRuntimeStatus.Error ||
-                                status is XrayRuntimeStatus.ProcessExited
-                            }
-                            
-                            val waitDuration = System.currentTimeMillis() - waitStartTime
-                            when (runningStatus) {
-                                is XrayRuntimeStatus.Running -> {
-                                    val port = mutex.withLock {
-                                        instancePorts[i]
-                                    }
-                                    if (port != null) {
-                                        mutex.withLock {
-                                            startedInstances[i] = port
-                                        }
-                                        Log.i(TAG, "Instance $i started successfully and reached Running state on port $port (PID: ${runningStatus.processId}) after ${waitDuration}ms")
-                                        Pair(i, true)
-                                    } else {
-                                        Log.e(TAG, "Instance $i reached Running state but port is null in instancePorts map")
-                                        Pair(i, false)
-                                    }
-                                }
-                                is XrayRuntimeStatus.Error -> {
-                                    Log.e(TAG, "Instance $i failed to start: ${runningStatus.message}", runningStatus.throwable)
-                                    mutex.withLock {
-                                        instances.remove(i)
-                                        instancePorts.remove(i)
-                                    }
-                                    Pair(i, false)
-                                }
-                                is XrayRuntimeStatus.ProcessExited -> {
-                                    Log.e(TAG, "Instance $i exited during startup with code ${runningStatus.exitCode}: ${runningStatus.message}")
-                                    mutex.withLock {
-                                        instances.remove(i)
-                                        instancePorts.remove(i)
-                                    }
-                                    Pair(i, false)
-                                }
-                                else -> {
-                                    Log.w(TAG, "Instance $i reached unexpected status: $runningStatus")
-                                    mutex.withLock {
-                                        instances.remove(i)
-                                        instancePorts.remove(i)
-                                    }
-                                    Pair(i, false)
-                                }
-                            }
-                        }
-                    } catch (e: TimeoutCancellationException) {
-                        val waitDuration = System.currentTimeMillis() - waitStartTime
-                        val currentStatus = service.status.value
-                        Log.e(TAG, "Instance $i did not reach Running state within ${INSTANCE_STARTUP_TIMEOUT_MS}ms timeout (waited ${waitDuration}ms, current status: $currentStatus)")
-                        
-                        // Log process info if available
-                        val processId = service.getProcessId()
-                        if (processId != null) {
-                            Log.e(TAG, "Instance $i process ID: $processId")
-                        } else {
-                            Log.e(TAG, "Instance $i process ID: null (process may have exited)")
-                        }
-                        
-                        try {
-                            service.stop()
-                        } catch (stopException: Exception) {
-                            Log.e(TAG, "Error stopping failed instance $i", stopException)
-                        }
-                        mutex.withLock {
-                            instances.remove(i)
-                            instancePorts.remove(i)
-                        }
-                        Pair(i, false)
-                    } catch (e: CancellationException) {
-                        // Expected cancellation - clean up and re-throw
-                        Log.d(TAG, "Instance $i wait cancelled", e)
-                        try {
-                            service.stop()
-                        } catch (stopException: Exception) {
-                            Log.e(TAG, "Error stopping cancelled instance $i", stopException)
-                        }
-                        mutex.withLock {
-                            instances.remove(i)
-                            instancePorts.remove(i)
-                        }
-                        throw e // Re-throw to propagate cancellation
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error waiting for instance $i to start", e)
-                        try {
-                            service.stop()
-                        } catch (stopException: Exception) {
-                            Log.e(TAG, "Error stopping failed instance $i", stopException)
-                        }
-                        mutex.withLock {
-                            instances.remove(i)
-                            instancePorts.remove(i)
-                        }
-                        Pair(i, false)
-                    }
-                }
-            }
-            
-            // Wait for first instance to become Running, then return immediately
-            // Other instances continue in background
-            var firstRunningFound = false
-            try {
-                for (job in waitJobs) {
-                    coroutineContext.ensureActive()
-                    val (index, success) = job.await()
-                    if (success && !firstRunningFound) {
-                        firstRunningFound = true
-                        Log.i(TAG, "First instance ($index) is Running, returning early. Other instances continue in background.")
-                        // Continue waiting for other instances in background
-                        serviceScope.launch {
-                            waitJobs.filter { it != job }.forEach { remainingJob ->
-                                try {
-                                    remainingJob.await()
-                                } catch (e: CancellationException) {
-                                    Log.d(TAG, "Background instance startup cancelled: ${e.message}")
-                                    throw e // Re-throw cancellation
-                                } catch (e: Exception) {
-                                    Log.w(TAG, "Background instance startup error: ${e.message}")
-                                }
-                            }
-                        }
-                        break
-                    }
-                }
-                
-                // If no instance became Running, wait for all to complete
-                if (!firstRunningFound) {
-                    coroutineContext.ensureActive()
-                    waitJobs.awaitAll()
-                }
-            } catch (e: CancellationException) {
-                // Cleanup on cancellation
-                Log.d(TAG, "Instance startup wait cancelled, cleaning up...")
-                // Stop any instances that were created
-                servicesToWait.forEach { (i, service) ->
-                    try {
-                        service.stop()
-                    } catch (stopException: Exception) {
-                        Log.e(TAG, "Error stopping instance $i during cancellation cleanup", stopException)
-                    }
-                }
-                mutex.withLock {
-                    instances.clear()
-                    instancePorts.clear()
-                    _instancesStatus.value = emptyMap()
-                }
-                throw e // Re-throw to propagate cancellation
-            }
+            Log.i(TAG, "✅ All ${servicesToWait.size} instances started successfully (requested: $count)")
             
             // Final check and status update
             return mutex.withLock {
@@ -506,7 +398,14 @@ class MultiXrayCoreManager(private val context: Context) {
                     _instancesStatus.value = emptyMap()
                     emptyMap()
                 } else {
-                    Log.i(TAG, "Successfully started ${startedInstances.size} out of $count instances")
+                    val startedCount = startedInstances.size
+                    val failedCount = count - startedCount
+                    if (failedCount > 0) {
+                        Log.w(TAG, "⚠️ Partially successful: Started $startedCount out of $count instances ($failedCount failed)")
+                    } else {
+                        Log.i(TAG, "✅ Successfully started all $startedCount instances")
+                    }
+                    Log.d(TAG, "Instance status map: ${instances.mapValues { (_, service) -> service.status.value }}")
                     _instancesStatus.value = instances.mapValues { (_, service) ->
                         service.status.value
                     }
@@ -514,7 +413,9 @@ class MultiXrayCoreManager(private val context: Context) {
                 }
             }
         } finally {
-            isStarting = false
+            mutex.withLock {
+                isStarting = false
+            }
         }
     }
     

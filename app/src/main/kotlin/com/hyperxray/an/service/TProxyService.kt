@@ -636,6 +636,7 @@ class TProxyService : VpnService() {
             Log.d(TAG, "Attempting to start xray process(es).")
                 val prefs = Preferences(applicationContext)
                 val instanceCount = prefs.xrayCoreInstanceCount
+                Log.i(TAG, "📊 Xray Core Instance Count from Preferences: $instanceCount (will start ${if (instanceCount > 1) "$instanceCount instances" else "1 instance"})")
                 
                 // Validate config path is within app's private directory
                 val selectedConfigPath = prefs.selectedConfigPath
@@ -744,7 +745,8 @@ class TProxyService : VpnService() {
                 
                 // Use MultiXrayCoreManager for multiple instances, or fallback to single process
                 if (instanceCount > 1) {
-                    Log.d(TProxyService.TAG, "Starting $instanceCount xray-core instances using MultiXrayCoreManager")
+                    Log.i(TProxyService.TAG, "🚀 Starting $instanceCount xray-core instances using MultiXrayCoreManager")
+                    Log.d(TProxyService.TAG, "Instance count details: requested=$instanceCount, will start multiple instances for load balancing")
                     
                     // Initialize MultiXrayCoreManager if not already initialized
                     if (multiXrayCoreManager == null) {
@@ -774,17 +776,43 @@ class TProxyService : VpnService() {
                                 statusIntent.putExtra("instance_count", statusMap.size)
                                 statusIntent.putExtra("has_running", statusMap.values.any { it is XrayRuntimeStatus.Running })
                                 
-                                // Add PID and port info for each instance
+                                // Add PID, port, and status type info for each instance
                                 statusMap.forEach { (index, status) ->
                                     when (status) {
                                         is XrayRuntimeStatus.Running -> {
                                             statusIntent.putExtra("instance_${index}_pid", status.processId)
                                             statusIntent.putExtra("instance_${index}_port", status.apiPort)
+                                            statusIntent.putExtra("instance_${index}_status_type", "Running")
                                         }
-                                        else -> {
-                                            // For non-running statuses, set pid and port to 0
+                                        is XrayRuntimeStatus.Starting -> {
                                             statusIntent.putExtra("instance_${index}_pid", 0L)
                                             statusIntent.putExtra("instance_${index}_port", 0)
+                                            statusIntent.putExtra("instance_${index}_status_type", "Starting")
+                                        }
+                                        is XrayRuntimeStatus.Stopping -> {
+                                            statusIntent.putExtra("instance_${index}_pid", 0L)
+                                            statusIntent.putExtra("instance_${index}_port", 0)
+                                            statusIntent.putExtra("instance_${index}_status_type", "Stopping")
+                                        }
+                                        is XrayRuntimeStatus.Error -> {
+                                            statusIntent.putExtra("instance_${index}_pid", 0L)
+                                            statusIntent.putExtra("instance_${index}_port", 0)
+                                            statusIntent.putExtra("instance_${index}_status_type", "Error")
+                                            statusIntent.putExtra("instance_${index}_error_message", status.message)
+                                        }
+                                        is XrayRuntimeStatus.ProcessExited -> {
+                                            statusIntent.putExtra("instance_${index}_pid", 0L)
+                                            statusIntent.putExtra("instance_${index}_port", 0)
+                                            statusIntent.putExtra("instance_${index}_status_type", "ProcessExited")
+                                            statusIntent.putExtra("instance_${index}_exit_code", status.exitCode)
+                                            status.message?.let { 
+                                                statusIntent.putExtra("instance_${index}_exit_message", it)
+                                            }
+                                        }
+                                        is XrayRuntimeStatus.Stopped -> {
+                                            statusIntent.putExtra("instance_${index}_pid", 0L)
+                                            statusIntent.putExtra("instance_${index}_port", 0)
+                                            statusIntent.putExtra("instance_${index}_status_type", "Stopped")
                                         }
                                     }
                                 }
@@ -827,15 +855,16 @@ class TProxyService : VpnService() {
                     }
                     
                     val excludedPorts = extractPortsFromJson(configContent)
-                    Log.d(TProxyService.TAG, "Starting $instanceCount xray-core instances with excluded ports: $excludedPorts")
+                    Log.i(TProxyService.TAG, "🔧 Starting $instanceCount xray-core instances with excluded ports: $excludedPorts")
+                    Log.d(TProxyService.TAG, "Instance startup parameters: count=$instanceCount, configPath=$selectedConfigPath, excludedPortsCount=${excludedPorts.size}")
                     
                     // Check service lifecycle before starting instances
                     if (isStopping) {
-                        Log.w(TProxyService.TAG, "Service is stopping, aborting instance startup")
+                        Log.w(TProxyService.TAG, "⚠️ Service is stopping, aborting instance startup")
                         return
                     }
                     
-                    Log.d(TProxyService.TAG, "Calling startInstances() with count=$instanceCount, configPath=$selectedConfigPath")
+                    Log.i(TProxyService.TAG, "▶️ Calling startInstances() with count=$instanceCount, configPath=$selectedConfigPath")
                     val startedInstances = try {
                         val result = multiXrayCoreManager!!.startInstances(
                             count = instanceCount,
@@ -843,19 +872,23 @@ class TProxyService : VpnService() {
                             configContent = configContent,
                             excludedPorts = excludedPorts
                         )
-                        Log.d(TProxyService.TAG, "startInstances() completed, returned ${result.size} instances")
+                        val completedCount = result.size
+                        Log.i(TProxyService.TAG, "✅ startInstances() completed: requested=$instanceCount, started=$completedCount instances")
+                        if (completedCount < instanceCount) {
+                            Log.w(TProxyService.TAG, "⚠️ Warning: Only $completedCount out of $instanceCount instances started successfully")
+                        }
                         result
                     } catch (e: CancellationException) {
-                        Log.d(TProxyService.TAG, "Instance startup cancelled (expected during shutdown)", e)
+                        Log.w(TProxyService.TAG, "🛑 Instance startup cancelled (expected during shutdown)", e)
                         emptyMap()
                     } catch (e: Exception) {
-                        Log.e(TProxyService.TAG, "Exception during startInstances() call", e)
+                        Log.e(TProxyService.TAG, "❌ Exception during startInstances() call", e)
                         emptyMap()
                     }
                     
                     // Check service lifecycle after starting instances
                     if (isStopping) {
-                        Log.w(TProxyService.TAG, "Service is stopping after instance startup, cleaning up")
+                        Log.w(TProxyService.TAG, "⚠️ Service is stopping after instance startup, cleaning up")
                         if (startedInstances.isNotEmpty()) {
                             serviceScope.launch {
                                 multiXrayCoreManager?.stopAllInstances()
@@ -864,7 +897,12 @@ class TProxyService : VpnService() {
                         return
                     }
                     
-                    Log.d(TProxyService.TAG, "startInstances() returned ${startedInstances.size} instances: $startedInstances")
+                    Log.i(TProxyService.TAG, "📋 startInstances() result: ${startedInstances.size} instances started successfully out of $instanceCount requested")
+                    if (startedInstances.isNotEmpty()) {
+                        Log.d(TProxyService.TAG, "Instance details: $startedInstances")
+                    } else {
+                        Log.e(TProxyService.TAG, "❌ No instances started! Check logs above for errors.")
+                    }
                     
                     // Check service lifecycle again before proceeding
                     if (isStopping) {
@@ -3621,25 +3659,57 @@ class TProxyService : VpnService() {
      */
     private fun broadcastInstanceStatus() {
         multiXrayCoreManager?.let { manager ->
-            val instances = manager.getActiveInstances()
             val statusMap = manager.instancesStatus.value
+            val hasRunning = statusMap.values.any { it is XrayRuntimeStatus.Running }
             
             val intent = Intent(ACTION_INSTANCE_STATUS_UPDATE)
             intent.setPackage(application.packageName)
             intent.putExtra("instance_count", statusMap.size)
-            intent.putExtra("has_running", instances.isNotEmpty())
+            intent.putExtra("has_running", hasRunning)
             
-            // Add detailed instance information
-            instances.entries.forEachIndexed { index: Int, entry: Map.Entry<Int, Int> ->
-                val instanceIndex = entry.key
-                val port = entry.value
-                intent.putExtra("instance_${index}_index", instanceIndex)
-                intent.putExtra("instance_${index}_port", port)
-                intent.putExtra("instance_${index}_status", statusMap[instanceIndex]?.toString() ?: "UNKNOWN")
+            // Add detailed instance information for all instances in statusMap
+            statusMap.forEach { (instanceIndex, status) ->
+                when (status) {
+                    is XrayRuntimeStatus.Running -> {
+                        intent.putExtra("instance_${instanceIndex}_pid", status.processId)
+                        intent.putExtra("instance_${instanceIndex}_port", status.apiPort)
+                        intent.putExtra("instance_${instanceIndex}_status_type", "Running")
+                    }
+                    is XrayRuntimeStatus.Starting -> {
+                        intent.putExtra("instance_${instanceIndex}_pid", 0L)
+                        intent.putExtra("instance_${instanceIndex}_port", 0)
+                        intent.putExtra("instance_${instanceIndex}_status_type", "Starting")
+                    }
+                    is XrayRuntimeStatus.Stopping -> {
+                        intent.putExtra("instance_${instanceIndex}_pid", 0L)
+                        intent.putExtra("instance_${instanceIndex}_port", 0)
+                        intent.putExtra("instance_${instanceIndex}_status_type", "Stopping")
+                    }
+                    is XrayRuntimeStatus.Error -> {
+                        intent.putExtra("instance_${instanceIndex}_pid", 0L)
+                        intent.putExtra("instance_${instanceIndex}_port", 0)
+                        intent.putExtra("instance_${instanceIndex}_status_type", "Error")
+                        intent.putExtra("instance_${instanceIndex}_error_message", status.message)
+                    }
+                    is XrayRuntimeStatus.ProcessExited -> {
+                        intent.putExtra("instance_${instanceIndex}_pid", 0L)
+                        intent.putExtra("instance_${instanceIndex}_port", 0)
+                        intent.putExtra("instance_${instanceIndex}_status_type", "ProcessExited")
+                        intent.putExtra("instance_${instanceIndex}_exit_code", status.exitCode)
+                        status.message?.let { 
+                            intent.putExtra("instance_${instanceIndex}_exit_message", it)
+                        }
+                    }
+                    is XrayRuntimeStatus.Stopped -> {
+                        intent.putExtra("instance_${instanceIndex}_pid", 0L)
+                        intent.putExtra("instance_${instanceIndex}_port", 0)
+                        intent.putExtra("instance_${instanceIndex}_status_type", "Stopped")
+                    }
+                }
             }
             
             sendBroadcast(intent)
-            Log.v(TAG, "Broadcasted instance status: ${instances.size} active instances")
+            Log.v(TAG, "Broadcasted instance status: ${statusMap.size} total instances (Running: ${statusMap.values.count { it is XrayRuntimeStatus.Running }})")
         }
     }
     

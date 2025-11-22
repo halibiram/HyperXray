@@ -43,16 +43,20 @@ class TelegramApiDataSource {
      * - Optimized timeouts for Telegram API
      * - Connection pooling for better performance
      * - Proper error handling
+     * - Uses VPN connection (api.telegram.org will go through VPN)
+     * - YouTube and other bypass domains will be handled by VPN routing rules
      */
     private fun createTelegramHttpClient(): OkHttpClient {
+        // Use default HTTP client which will route through VPN
+        // VPN routing rules will handle bypass domains (like YouTube)
         val baseClient = HttpClientFactory.createHttpClient()
         
         return baseClient.newBuilder()
-            // Telegram API specific timeouts
-            .connectTimeout(15, TimeUnit.SECONDS) // Telegram API can be slow sometimes
-            .readTimeout(45, TimeUnit.SECONDS) // Long polling for getUpdates can take up to 30s
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .callTimeout(60, TimeUnit.SECONDS) // Overall timeout for the entire call
+            // Telegram API specific timeouts (longer for VPN routing)
+            .connectTimeout(20, TimeUnit.SECONDS) // Increased for VPN routing
+            .readTimeout(60, TimeUnit.SECONDS) // Long polling for getUpdates can take up to 30s, plus VPN overhead
+            .writeTimeout(40, TimeUnit.SECONDS) // Increased for VPN routing
+            .callTimeout(90, TimeUnit.SECONDS) // Overall timeout for the entire call with VPN overhead
             
             // Add Telegram-specific retry interceptor
             .addInterceptor(TelegramRetryInterceptor())
@@ -70,7 +74,7 @@ class TelegramApiDataSource {
     
     /**
      * Retry interceptor specifically for Telegram API
-     * Handles rate limiting and transient errors
+     * Handles rate limiting, transient errors, and VPN connection issues
      */
     private class TelegramRetryInterceptor : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response {
@@ -78,13 +82,13 @@ class TelegramApiDataSource {
             var response: Response? = null
             var lastException: IOException? = null
             
-            // Retry up to 3 times for specific error conditions
-            for (attempt in 0..3) {
+            // Retry up to 5 times for VPN connection issues (increased from 3)
+            for (attempt in 0..5) {
                 try {
                     if (attempt > 0) {
-                        // Exponential backoff: 1s, 2s, 4s
-                        val delayMs = (1000L * (1 shl (attempt - 1))).coerceAtMost(5000L)
-                        Log.d(TAG, "Retrying Telegram API request (attempt $attempt/$3) after ${delayMs}ms")
+                        // Exponential backoff: 1s, 2s, 4s, 8s, 16s (capped at 10s)
+                        val delayMs = (1000L * (1 shl (attempt - 1))).coerceAtMost(10000L)
+                        Log.d(TAG, "Retrying Telegram API request (attempt $attempt/5) after ${delayMs}ms")
                         Thread.sleep(delayMs)
                     }
                     
@@ -102,10 +106,10 @@ class TelegramApiDataSource {
                     
                 } catch (e: IOException) {
                     lastException = e
-                    Log.w(TAG, "Telegram API request failed (attempt ${attempt + 1}/4): ${e.message}")
+                    Log.w(TAG, "Telegram API request failed (attempt ${attempt + 1}/6): ${e.message}")
                     
-                    // Retry on network errors (connection timeout, etc.)
-                    if (attempt < 3 && isRetryableException(e)) {
+                    // Retry on network errors (connection timeout, connection reset, etc.)
+                    if (attempt < 5 && isRetryableException(e)) {
                         continue
                     }
                     
@@ -121,7 +125,7 @@ class TelegramApiDataSource {
         }
         
         private fun shouldRetry(response: Response, attempt: Int): Boolean {
-            if (attempt >= 3) return false // Max retries reached
+            if (attempt >= 5) return false // Max retries reached
             
             return when (response.code) {
                 // Rate limiting - retry with exponential backoff
@@ -144,10 +148,17 @@ class TelegramApiDataSource {
         }
         
         private fun isRetryableException(e: IOException): Boolean {
+            val message = e.message ?: ""
             return when {
-                e.message?.contains("timeout", ignoreCase = true) == true -> true
-                e.message?.contains("connection", ignoreCase = true) == true -> true
-                e.message?.contains("network", ignoreCase = true) == true -> true
+                // Connection reset is common with VPN, should retry
+                message.contains("Connection reset", ignoreCase = true) -> true
+                message.contains("timeout", ignoreCase = true) -> true
+                message.contains("connection", ignoreCase = true) -> true
+                message.contains("network", ignoreCase = true) -> true
+                message.contains("broken pipe", ignoreCase = true) -> true
+                message.contains("socket", ignoreCase = true) -> true
+                // SSL/TLS handshake errors with VPN
+                message.contains("handshake", ignoreCase = true) -> true
                 else -> false
             }
         }
