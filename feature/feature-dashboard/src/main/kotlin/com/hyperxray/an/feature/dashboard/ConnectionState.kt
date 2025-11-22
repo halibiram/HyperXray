@@ -37,7 +37,8 @@ sealed class ConnectionState {
      * Connection failed with an error message
      */
     data class Failed(
-        val error: String
+        val error: String,
+        val retryCountdownSeconds: Int? = null // null = countdown yok, Int = kalan saniye
     ) : ConnectionState()
 }
 

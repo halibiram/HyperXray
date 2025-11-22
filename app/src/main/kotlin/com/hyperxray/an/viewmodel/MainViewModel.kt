@@ -9,6 +9,8 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.net.VpnService
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.util.Log
 import androidx.activity.result.ActivityResultLauncher
@@ -20,6 +22,7 @@ import androidx.lifecycle.viewModelScope
 import com.hyperxray.an.BuildConfig
 import com.hyperxray.an.R
 import com.hyperxray.an.xray.runtime.stats.CoreStatsClient
+import com.hyperxray.an.xray.runtime.stats.model.TrafficState
 import com.hyperxray.an.common.ROUTE_AI_INSIGHTS
 import com.hyperxray.an.common.ROUTE_APP_LIST
 import com.hyperxray.an.common.formatBytes
@@ -295,8 +298,14 @@ class MainViewModel(application: Application) :
                     delay(300) // Brief delay to show final stage
                 }
                 
-                // Update connection state to Disconnected
-                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+                // Update connection state to Disconnected ONLY if not in Failed state
+                // Failed state should remain Failed, not change to Disconnected
+                val finalState = _connectionState.value
+                if (finalState !is com.hyperxray.an.feature.dashboard.ConnectionState.Failed) {
+                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+                } else {
+                    Log.d(TAG, "Service stopped but connection state is Failed, keeping Failed state")
+                }
             }
             
             // Reset instance status and SOCKS5 readiness
@@ -339,16 +348,19 @@ class MainViewModel(application: Application) :
             // This prevents skipping connection stages
             if (_isServiceEnabled.value && isReady) {
                 val currentState = _connectionState.value
-                // Only auto-update if we're in Disconnected or Failed state (not Connecting)
+                // Only auto-update if we're in Disconnected state (not Connecting or Failed)
+                // Failed state should remain Failed until user manually retries
                 // This allows startConnectionProcess() to properly go through all stages
-                if (currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected ||
-                    currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Failed) {
+                if (currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected) {
                     Log.d(TAG, "Auto-updating connection state to Connected (service enabled, SOCKS5 ready)")
                     _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connected
                 } else if (currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Connecting) {
                     // If in Connecting state, let startConnectionProcess() handle the state transitions
                     // Don't interrupt the connection process flow
                     Log.d(TAG, "SOCKS5 ready but in Connecting state, letting startConnectionProcess() handle state transition")
+                } else if (currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Failed) {
+                    // Failed state should remain Failed, don't auto-update to Connected
+                    Log.d(TAG, "SOCKS5 ready but connection state is Failed, keeping Failed state (user must manually retry)")
                 }
             }
         }
@@ -427,16 +439,19 @@ class MainViewModel(application: Application) :
             // This prevents skipping connection stages
             if (_isServiceEnabled.value && hasRunning) {
                 val currentState = _connectionState.value
-                // Only auto-update if we're in Disconnected or Failed state (not Connecting)
+                // Only auto-update if we're in Disconnected state (not Connecting or Failed)
+                // Failed state should remain Failed until user manually retries
                 // This allows startConnectionProcess() to properly go through all stages
-                if (currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected ||
-                    currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Failed) {
+                if (currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected) {
                     Log.d(TAG, "Auto-updating connection state to Connected (service enabled, instances running)")
                     _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connected
                 } else if (currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Connecting) {
                     // If in Connecting state, let startConnectionProcess() handle the state transitions
                     // Don't interrupt the connection process flow
                     Log.d(TAG, "Instances running but in Connecting state, letting startConnectionProcess() handle state transition")
+                } else if (currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Failed) {
+                    // Failed state should remain Failed, don't auto-update to Connected
+                    Log.d(TAG, "Instances running but connection state is Failed, keeping Failed state (user must manually retry)")
                 }
             }
         }
@@ -1605,6 +1620,24 @@ class MainViewModel(application: Application) :
                 setControlMenuClickable(true)
                 return@launch
             }
+            
+            // Check internet connectivity before starting service (only for CONNECT action)
+            if (action == TProxyService.ACTION_CONNECT || action == TProxyService.ACTION_START) {
+                Log.i(TAG, "Checking internet connectivity before starting service...")
+                val internetCheck = hasActiveInternetConnection()
+                if (!internetCheck) {
+                    Log.e(TAG, "Cannot start service: no internet connection available")
+                    _connectionState.value = ConnectionState.Failed(
+                        error = "No internet connection available",
+                        retryCountdownSeconds = null
+                    )
+                    _uiEvent.trySend(MainViewUiEvent.ShowSnackbar("No internet connection available"))
+                    setControlMenuClickable(true)
+                    return@launch
+                }
+                Log.i(TAG, "Internet connection verified - starting service")
+            }
+            
             val intent = Intent(application, TProxyService::class.java).setAction(action)
             _uiEvent.trySend(MainViewUiEvent.StartService(intent))
         }
@@ -1654,6 +1687,22 @@ class MainViewModel(application: Application) :
                 setControlMenuClickable(true)
                 return@launch
             }
+            
+            // Check internet connectivity before preparing VPN
+            Log.i(TAG, "Checking internet connectivity before preparing VPN...")
+            val internetCheck = hasActiveInternetConnection()
+            if (!internetCheck) {
+                Log.e(TAG, "Cannot prepare VPN: no internet connection available")
+                _connectionState.value = ConnectionState.Failed(
+                    error = "No internet connection available",
+                    retryCountdownSeconds = null
+                )
+                _uiEvent.trySend(MainViewUiEvent.ShowSnackbar("No internet connection available"))
+                setControlMenuClickable(true)
+                return@launch
+            }
+            Log.i(TAG, "Internet connection verified - preparing VPN")
+            
             val vpnIntent = VpnService.prepare(application)
             if (vpnIntent != null) {
                 vpnPrepareLauncher.launch(vpnIntent)
@@ -1663,18 +1712,345 @@ class MainViewModel(application: Application) :
         }
     }
 
+    /**
+     * Checks if device has active internet connection (not just VPN).
+     * 
+     * This function verifies:
+     * 1. Network has INTERNET capability
+     * 2. Network is VALIDATED (actually working)
+     * 3. Network has real transport (WiFi/Cellular/Ethernet, not just VPN)
+     * 
+     * @return true if device has active internet connection, false otherwise
+     */
+    private fun hasActiveInternetConnection(): Boolean {
+        return try {
+            // Get ConnectivityManager service
+            val connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            if (connectivityManager == null) {
+                Log.w(TAG, "ConnectivityManager is null")
+                return false
+            }
+            
+            // Get active network (the network currently used by the device)
+            val activeNetwork = connectivityManager.activeNetwork
+            if (activeNetwork == null) {
+                Log.w(TAG, "No active network found")
+                return false
+            }
+            
+            // Get network capabilities to check what the network can do
+            val networkCapabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
+            if (networkCapabilities == null) {
+                Log.w(TAG, "No network capabilities found for active network")
+                return false
+            }
+            
+            // Check 1: Network must have INTERNET capability
+            val hasInternetCapability = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            
+            // Check 2: Network must be VALIDATED (Android has verified it can reach internet)
+            // Note: VALIDATED might not be immediately available, so we'll use it as a preference but not requirement
+            val isValidated = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            
+            // Check 3: Network must have real transport (WiFi, Cellular, or Ethernet)
+            // This prevents VPN-only networks (VPN might be active but no real internet)
+            val hasRealTransport = networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                                  networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                                  networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+            
+            // Check if this is a VPN network (should not happen before VPN starts, but check anyway)
+            val isVpnNetwork = networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+            
+            // Result: Must have INTERNET capability AND real transport
+            // VALIDATED is preferred but not required (it might take time to validate)
+            // If it's a VPN network, we can't check real transport, so skip this check
+            val result = if (isVpnNetwork) {
+                // If VPN is active, just check INTERNET capability
+                hasInternetCapability
+            } else {
+                // Before VPN starts: must have INTERNET capability AND real transport
+                hasInternetCapability && hasRealTransport
+            }
+            
+            // Log detailed information for debugging
+            Log.d(TAG, "Internet check: hasInternet=$hasInternetCapability, validated=$isValidated, hasTransport=$hasRealTransport, isVpn=$isVpnNetwork, result=$result")
+            
+            result
+        } catch (e: Exception) {
+            // If any error occurs, assume no internet (fail-safe)
+            Log.w(TAG, "Error checking internet connectivity: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Verifies Xray server connection by making a real gRPC call.
+     * Tests both system stats and traffic stats to ensure real data flow.
+     * Returns true if connection is successful and data is available, false otherwise.
+     */
+    private suspend fun verifyXrayConnection(apiPort: Int): Boolean {
+        Log.d(TAG, "verifyXrayConnection: Starting verification for port $apiPort")
+        return try {
+            Log.d(TAG, "verifyXrayConnection: Creating CoreStatsClient...")
+            val client = CoreStatsClient.create("127.0.0.1", apiPort, maxRetries = 2, initialRetryDelayMs = 500L)
+            if (client == null) {
+                Log.e(TAG, "verifyXrayConnection FAILED: Failed to create CoreStatsClient for port $apiPort")
+                return false
+            }
+            Log.d(TAG, "verifyXrayConnection: CoreStatsClient created successfully")
+            
+            // Test 1: System stats connection
+            Log.d(TAG, "verifyXrayConnection: Testing system stats connection (timeout: 3000ms)...")
+            val systemStats = withTimeoutOrNull(3000L) {
+                client.getSystemStats()
+            }
+            if (systemStats == null) {
+                Log.e(TAG, "verifyXrayConnection FAILED: getSystemStats returned null (port: $apiPort) - connection may be down")
+                client.close()
+                return false
+            }
+            Log.i(TAG, "verifyXrayConnection: System stats check PASSED - uptime=${systemStats.uptime}s, numGoroutine=${systemStats.numGoroutine}, numGC=${systemStats.numGC}")
+            
+            // Test 2: Traffic stats - verify we can actually get traffic data with retry mechanism
+            // Check multiple times with longer intervals to ensure traffic is flowing
+            // If all retries show 0 traffic, connection is considered failed
+            Log.d(TAG, "verifyXrayConnection: Testing traffic stats connection with retries (500ms intervals)...")
+            var hasTraffic = false
+            var lastTrafficStats: TrafficState? = null
+            val maxRetries = 6 // 6 retries with 500ms intervals = up to 3 seconds wait
+            val retryDelay = 500L // 500ms between retries
+            
+            for (retry in 1..maxRetries) {
+                Log.d(TAG, "verifyXrayConnection: Traffic stats retry $retry/$maxRetries...")
+                val trafficStats = withTimeoutOrNull(3000L) {
+                    client.getTraffic()
+                }
+                
+                if (trafficStats == null) {
+                    Log.w(TAG, "verifyXrayConnection: getTraffic returned null on retry $retry/$maxRetries")
+                    if (retry < maxRetries) {
+                        delay(retryDelay)
+                        continue
+                    } else {
+                        Log.e(TAG, "verifyXrayConnection FAILED: getTraffic returned null on all retries (port: $apiPort) - connection may not be fully functional")
+                        client.close()
+                        return false
+                    }
+                }
+                
+                lastTrafficStats = trafficStats
+                val totalTraffic = trafficStats.uplink + trafficStats.downlink
+                Log.d(TAG, "verifyXrayConnection: Retry $retry/$maxRetries - uplink=${trafficStats.uplink} bytes, downlink=${trafficStats.downlink} bytes, total=$totalTraffic bytes")
+                
+                if (totalTraffic > 0) {
+                    hasTraffic = true
+                    Log.i(TAG, "verifyXrayConnection: Traffic detected on retry $retry/$maxRetries - connection is functional")
+                    break
+                }
+                
+                // Wait before next retry (except on last retry)
+                if (retry < maxRetries) {
+                    delay(retryDelay)
+                }
+            }
+            
+            client.close()
+            Log.d(TAG, "verifyXrayConnection: CoreStatsClient closed")
+            
+            // If all retries showed 0 traffic, connection is considered failed
+            if (!hasTraffic) {
+                val finalUplink = lastTrafficStats?.uplink ?: 0
+                val finalDownlink = lastTrafficStats?.downlink ?: 0
+                Log.e(TAG, "verifyXrayConnection FAILED: All $maxRetries retries showed 0 traffic (uplink=$finalUplink, downlink=$finalDownlink) - connection may not be functional")
+                return false
+            }
+            
+            Log.i(TAG, "verifyXrayConnection SUCCESS: All checks passed - System stats OK, Traffic stats available (uplink=${lastTrafficStats?.uplink} bytes, downlink=${lastTrafficStats?.downlink} bytes)")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "verifyXrayConnection EXCEPTION: Error verifying Xray connection on port $apiPort: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Handles disconnection process when connection fails.
+     * Performs all disconnection stages (stopping xray, closing tunnel, stopping VPN, cleaning up)
+     * and then sets state to Failed with retry countdown.
+     */
+    private fun stopConnectionProcessAndSetFailed(errorMessage: String) {
+        Log.i(TAG, "stopConnectionProcessAndSetFailed: Starting disconnection process due to failure: $errorMessage")
+        viewModelScope.launch {
+            try {
+                // STAGE 1: STOPPING_XRAY - Stopping Xray instances
+                Log.d(TAG, "stopConnectionProcessAndSetFailed: STAGE 1 - Stopping Xray instances")
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
+                    com.hyperxray.an.feature.dashboard.DisconnectionStage.STOPPING_XRAY,
+                    progress = 0.0f
+                )
+                delay(300) // Brief delay to show stage
+                
+                // Wait for instances to stop (with timeout)
+                val instancesStopped = withTimeoutOrNull(5000L) {
+                    _instancesStatus.filter { statusMap ->
+                        statusMap.values.none { it is com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Running }
+                    }.first()
+                }
+                
+                // STAGE 2: CLOSING_TUNNEL - Closing network tunnel
+                Log.d(TAG, "stopConnectionProcessAndSetFailed: STAGE 2 - Closing network tunnel")
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
+                    com.hyperxray.an.feature.dashboard.DisconnectionStage.CLOSING_TUNNEL,
+                    progress = 0.3f
+                )
+                delay(200)
+                
+                // STAGE 3: STOPPING_VPN - Stopping VPN service
+                Log.d(TAG, "stopConnectionProcessAndSetFailed: STAGE 3 - Stopping VPN service")
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
+                    com.hyperxray.an.feature.dashboard.DisconnectionStage.STOPPING_VPN,
+                    progress = 0.6f
+                )
+                
+                // Stop the service
+                val intent = Intent(application, TProxyService::class.java).apply {
+                    action = TProxyService.ACTION_DISCONNECT
+                }
+                application.startService(intent)
+                
+                // Wait for service to be disabled (with timeout)
+                val serviceDisabled = withTimeoutOrNull(5000L) {
+                    _isServiceEnabled.filter { !it }.first()
+                }
+                
+                // STAGE 4: CLEANING_UP - Final cleanup
+                Log.d(TAG, "stopConnectionProcessAndSetFailed: STAGE 4 - Cleaning up")
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
+                    com.hyperxray.an.feature.dashboard.DisconnectionStage.CLEANING_UP,
+                    progress = 0.9f
+                )
+                delay(200)
+                
+                // Reset state
+                _socks5Ready.value = false
+                if (instancesStopped != null) {
+                    _instancesStatus.value = emptyMap()
+                }
+                
+                // SUCCESS - Complete disconnection, then set to Failed
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
+                    com.hyperxray.an.feature.dashboard.DisconnectionStage.CLEANING_UP,
+                    progress = 1.0f
+                )
+                delay(200)
+                
+                // Set to Failed state with retry countdown (initially null, buton aktif)
+                Log.i(TAG, "stopConnectionProcessAndSetFailed: Disconnection complete, setting to Failed state")
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Failed(
+                    error = errorMessage,
+                    retryCountdownSeconds = null // Buton aktif, countdown henüz başlamadı
+                )
+                
+                // Start retry countdown after a brief delay (buton aktif kaldıktan sonra)
+                // Kullanıcı butonun aktif olduğunu görebilsin
+                delay(1000L) // 1 saniye gecikme, butonun aktif olduğunu görmek için
+                startRetryCountdown()
+                
+            } catch (e: TimeoutCancellationException) {
+                // Even if timeout, set to Failed
+                Log.w(TAG, "stopConnectionProcessAndSetFailed: Disconnection timed out, setting to Failed", e)
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Failed(
+                    error = errorMessage,
+                    retryCountdownSeconds = null
+                )
+                startRetryCountdown()
+            } catch (e: Exception) {
+                // Even if error, set to Failed
+                Log.e(TAG, "stopConnectionProcessAndSetFailed: Disconnection failed, setting to Failed", e)
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Failed(
+                    error = errorMessage,
+                    retryCountdownSeconds = null
+                )
+                startRetryCountdown()
+            }
+        }
+    }
+
+    /**
+     * Handles retry countdown when connection fails.
+     * Starts 3-second countdown and automatically retries connection.
+     * Buton aktif olduktan sonra countdown başlar.
+     */
+    private fun startRetryCountdown() {
+        Log.i(TAG, "startRetryCountdown: Starting 3-second retry countdown")
+        viewModelScope.launch {
+            var countdown = 3
+            while (countdown > 0) {
+                val currentState = _connectionState.value
+                if (currentState !is com.hyperxray.an.feature.dashboard.ConnectionState.Failed) {
+                    // State changed, stop countdown
+                    Log.d(TAG, "startRetryCountdown: State changed, stopping countdown")
+                    return@launch
+                }
+                
+                Log.d(TAG, "startRetryCountdown: Countdown: $countdown seconds remaining")
+                _connectionState.value = currentState.copy(retryCountdownSeconds = countdown)
+                delay(1000L)
+                countdown--
+            }
+            
+            // Countdown finished, retry connection
+            val finalState = _connectionState.value
+            if (finalState is com.hyperxray.an.feature.dashboard.ConnectionState.Failed) {
+                Log.i(TAG, "startRetryCountdown: Countdown finished, attempting to reconnect...")
+                _connectionState.value = finalState.copy(retryCountdownSeconds = null)
+                startConnectionProcess()
+            } else {
+                Log.d(TAG, "startRetryCountdown: State is no longer Failed, skipping retry")
+            }
+        }
+    }
+
     fun startConnectionProcess() {
         viewModelScope.launch {
             try {
+                // Cancel any existing retry countdown
+                val currentState = _connectionState.value
+                if (currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Failed) {
+                    // Reset countdown when manually retrying
+                    _connectionState.value = currentState.copy(retryCountdownSeconds = null)
+                }
+                
                 _connectionState.value = ConnectionState.Connecting(ConnectionStage.INITIALIZING, progress = 0.0f)
                 
                 // STAGE 1: INITIALIZING - Check prerequisites
                 if (_selectedConfigFile.value == null) {
                     _connectionState.value = ConnectionState.Failed(
-                        "No config file selected"
+                        error = "No config file selected",
+                        retryCountdownSeconds = null
                     )
                     return@launch
                 }
+                
+                // Check internet connectivity before starting VPN
+                Log.i(TAG, "INITIALIZING: Checking internet connectivity...")
+                val internetCheck = hasActiveInternetConnection()
+                if (!internetCheck) {
+                    Log.e(TAG, "INITIALIZING FAILED: device has no active internet connection - stopping entire connection process")
+                    _connectionState.value = ConnectionState.Failed(
+                        error = "No internet connection available",
+                        retryCountdownSeconds = null
+                    )
+                    // Stop service if it was already started (defensive check)
+                    if (_isServiceEnabled.value) {
+                        Log.w(TAG, "INITIALIZING: Service was already enabled, stopping it due to no internet")
+                        stopTProxyService()
+                    }
+                    // Cancel this coroutine completely - stop all further processing
+                    return@launch
+                }
+                Log.i(TAG, "INITIALIZING: Internet connection verified - proceeding to VPN start")
+                
                 delay(200) // Brief delay to show initializing stage
                 
                 // STAGE 2: STARTING_VPN - VPN service starting
@@ -1687,7 +2063,8 @@ class MainViewModel(application: Application) :
                 
                 if (serviceEnabled == null) {
                     _connectionState.value = ConnectionState.Failed(
-                        "Service did not start within timeout"
+                        error = "Service did not start within timeout",
+                        retryCountdownSeconds = null
                     )
                     return@launch
                 }
@@ -1742,6 +2119,8 @@ class MainViewModel(application: Application) :
                 }
                 
                 // STAGE 5: VERIFYING - Final connection verification
+                Log.i(TAG, "VERIFYING: Starting final connection verification")
+                // Set verification state once and keep it stable during traffic checks
                 _connectionState.value = ConnectionState.Connecting(ConnectionStage.VERIFYING, progress = 0.8f)
                 
                 val finalServiceCheck = _isServiceEnabled.value
@@ -1749,20 +2128,53 @@ class MainViewModel(application: Application) :
                 val finalInstancesCheck = _instancesStatus.value.values.any { it is com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Running }
                 val readinessSatisfied = finalSocks5Check || finalInstancesCheck
 
+                Log.d(TAG, "VERIFYING: Service check=$finalServiceCheck, SOCKS5=$finalSocks5Check, Instances=$finalInstancesCheck, Readiness=$readinessSatisfied")
+
                 if (!finalServiceCheck) {
-                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Failed(
-                        "Connection verification failed: service=$finalServiceCheck"
-                    )
+                    Log.e(TAG, "VERIFYING FAILED: Service is not enabled (service=$finalServiceCheck)")
+                    val errorMessage = "Connection verification failed: service=$finalServiceCheck"
+                    _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(errorMessage))
+                    stopConnectionProcessAndSetFailed(errorMessage)
                     return@launch
                 }
                 if (!readinessSatisfied) {
-                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Failed(
-                        "Connection verification failed: socks5=$finalSocks5Check, instances=$finalInstancesCheck"
-                    )
+                    Log.e(TAG, "VERIFYING FAILED: Readiness not satisfied (socks5=$finalSocks5Check, instances=$finalInstancesCheck)")
+                    val errorMessage = "Connection verification failed: socks5=$finalSocks5Check, instances=$finalInstancesCheck"
+                    _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(errorMessage))
+                    stopConnectionProcessAndSetFailed(errorMessage)
                     return@launch
                 }
                 
+                // Running instance bul ve gRPC bağlantı testi yap
+                Log.d(TAG, "VERIFYING: Searching for running Xray instances...")
+                val runningInstance = _instancesStatus.value.values
+                    .filterIsInstance<com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Running>()
+                    .firstOrNull()
+
+                if (runningInstance != null) {
+                    Log.i(TAG, "VERIFYING: Found running instance - PID=${runningInstance.processId}, API Port=${runningInstance.apiPort}")
+                    Log.d(TAG, "VERIFYING: Starting gRPC connection verification...")
+                    // gRPC bağlantı testi - state güncellemesi yapmadan, sadece kontrol yap
+                    // State'i sabit tutmak için verification state'ini değiştirmiyoruz
+                    // Traffic kontrolü IO dispatcher'da çalışır, UI thread'i bloke etmez
+                    val connectionVerified = withContext(Dispatchers.IO) {
+                        verifyXrayConnection(runningInstance.apiPort)
+                    }
+                    if (!connectionVerified) {
+                        Log.e(TAG, "VERIFYING FAILED: gRPC connection verification unsuccessful (port=${runningInstance.apiPort})")
+                        val errorMessage = "Xray server connection verification failed - gRPC test unsuccessful"
+                        _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(errorMessage))
+                        stopConnectionProcessAndSetFailed(errorMessage)
+                        return@launch // Tüm süreci durdur
+                    }
+                    Log.i(TAG, "VERIFYING SUCCESS: Xray server connection verified successfully via gRPC")
+                } else {
+                    Log.w(TAG, "VERIFYING WARNING: No running Xray instance found for connection verification")
+                    Log.d(TAG, "VERIFYING: Available instances: ${_instancesStatus.value}")
+                }
+                
                 // SUCCESS - Show 100% progress briefly before switching to Connected
+                // State güncellemesini sadece burada yap, traffic kontrolü sırasında yapma
                 _connectionState.value = ConnectionState.Connecting(ConnectionStage.VERIFYING, progress = 1.0f)
                 delay(300)
                 
@@ -1770,15 +2182,11 @@ class MainViewModel(application: Application) :
                 Log.d(TAG, "Connection process completed successfully")
                 
             } catch (e: TimeoutCancellationException) {
-                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Failed(
-                    "Connection timed out: ${e.message}"
-                )
                 Log.e(TAG, "Connection process timed out", e)
+                stopConnectionProcessAndSetFailed("Connection timed out: ${e.message}")
             } catch (e: Exception) {
-                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Failed(
-                    "Connection failed: ${e.message}"
-                )
                 Log.e(TAG, "Connection process failed", e)
+                stopConnectionProcessAndSetFailed("Connection failed: ${e.message}")
             }
         }
     }
@@ -1795,8 +2203,13 @@ class MainViewModel(application: Application) :
                 // Only start disconnection process if we're currently connected or connecting
                 if (currentState !is com.hyperxray.an.feature.dashboard.ConnectionState.Connected &&
                     currentState !is com.hyperxray.an.feature.dashboard.ConnectionState.Connecting) {
-                    // Already disconnected or in another state, just set to Disconnected
-                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+                    // Already disconnected or in another state
+                    // If Failed, keep it Failed. Otherwise set to Disconnected
+                    if (currentState !is com.hyperxray.an.feature.dashboard.ConnectionState.Failed) {
+                        _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+                    } else {
+                        Log.d(TAG, "stopConnectionProcess: Connection state is Failed, keeping Failed state")
+                    }
                     return@launch
                 }
                 

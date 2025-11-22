@@ -127,13 +127,17 @@ fun ConnectionStatusCard(
         listOf(Color(0xFFFF00E5), Color(0xFFAA00FF), Color(0xFF4A148C)) // Neon Magenta/Purple
     }
     
+    val failedGradient = remember {
+        listOf(Color(0xFFF97316), Color(0xFFEA580C), Color(0xFFC2410C)) // Orange gradient for failed
+    }
+    
     val statusGradient = remember(connectionState) {
         when (connectionState) {
             is ConnectionState.Connected -> connectedGradient
             is ConnectionState.Connecting -> connectingGradient
             is ConnectionState.Disconnecting -> disconnectingGradient
             is ConnectionState.Disconnected -> disconnectedGradient
-            is ConnectionState.Failed -> listOf(Color(0xFFEF4444), Color(0xFFDC2626), Color(0xFFB91C1C)) // Red
+            is ConnectionState.Failed -> failedGradient // Turuncu renk
         }
     }
     
@@ -287,7 +291,7 @@ fun ConnectionStatusCard(
                                 is ConnectionState.Connecting -> connectingStage?.displayName ?: "Connecting"
                                 is ConnectionState.Disconnecting -> disconnectingStage?.displayName ?: "Disconnecting"
                                 is ConnectionState.Disconnected -> "Disconnected"
-                                is ConnectionState.Failed -> "Connection Failed"
+                                is ConnectionState.Failed -> "Failed" // Failed durumunda "Failed" göster
                             },
                             style = MaterialTheme.typography.headlineMedium.copy(
                                 fontWeight = FontWeight.Bold,
@@ -326,7 +330,7 @@ fun ConnectionStatusCard(
                                                 letterSpacing = 0.2.sp,
                                                 fontWeight = FontWeight.Medium
                                             ),
-                                            color = Color(0xFFEF4444), // Red error text
+                                            color = Color(0xFFF97316), // Turuncu renk (failed durumuyla uyumlu)
                                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                         )
                                     }
@@ -445,7 +449,9 @@ fun ConnectionStatusCard(
                 // Toggle Button with enhanced styling
                 Button(
                     onClick = onToggleConnection,
-                    enabled = isClickable && !isConnecting && !isDisconnecting,
+                    enabled = isClickable && !isConnecting && !isDisconnecting && 
+                              !(isFailed && (connectionState as? ConnectionState.Failed)?.retryCountdownSeconds != null && 
+                                (connectionState as? ConnectionState.Failed)?.retryCountdownSeconds!! > 0),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(58.dp),
@@ -453,7 +459,7 @@ fun ConnectionStatusCard(
                         containerColor = when (connectionState) {
                             is ConnectionState.Connected -> Color(0xFFEF4444)
                             is ConnectionState.Disconnecting -> Color(0xFFF59E0B)
-                            is ConnectionState.Failed -> Color(0xFFF97316) // Orange for retry
+                            is ConnectionState.Failed -> Color(0xFFF97316) // Turuncu renk
                             else -> Color(0xFF10B981)
                         },
                         contentColor = Color.White,
@@ -480,7 +486,14 @@ fun ConnectionStatusCard(
                             is ConnectionState.Connecting -> "Connecting..."
                             is ConnectionState.Disconnecting -> "Disconnecting..."
                             is ConnectionState.Disconnected -> "Connect"
-                            is ConnectionState.Failed -> "Retry Connection"
+                            is ConnectionState.Failed -> {
+                                val countdown = connectionState.retryCountdownSeconds
+                                if (countdown != null && countdown > 0) {
+                                    "Retrying in $countdown..."
+                                } else {
+                                    "Retry Connection"
+                                }
+                            }
                         },
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold
