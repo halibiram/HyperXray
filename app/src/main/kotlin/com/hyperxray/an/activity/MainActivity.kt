@@ -22,6 +22,7 @@ import com.hyperxray.an.ui.navigation.AppNavHost
 import com.hyperxray.an.ui.theme.ExpressiveMaterialTheme
 import com.hyperxray.an.viewmodel.MainViewModel
 import com.hyperxray.an.viewmodel.MainViewModelFactory
+import kotlinx.coroutines.launch
 
 /**
  * Main activity for HyperXray VPN application.

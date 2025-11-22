@@ -1,0 +1,17 @@
+HyperXray VPN Bağlantı Diagnostik Raporu
+Tarih: Sat, Nov 22, 2025 10:30:15 PM
+Paket: com.hyperxray.an
+
+=== Tespit Edilen Sorunlar ===
+1. TProxyService bulunamadı (servis henüz başlatılmamış olabilir)
+2. dumpsys vpn komutu çalıştırılamadı
+3. tun0 interface bulunamadı (diğer TUN interface'ler mevcut olabilir)
+4. Port 10808 dinlenmiyor
+
+=== Çözüm Önerileri ===
+1. VPN'i uygulamadan başlatın. TProxyService otomatik başlayacaktır.
+2. SOCKS5 portu dinlenmiyor. Xray başlatma loglarını kontrol edin.
+
+=== Detaylı Loglar ===
+Tam log analizi için: adb logcat | grep -iE 'TProxyService|ERROR|VPN'
+Xray logları için: adb logcat | grep -i xray

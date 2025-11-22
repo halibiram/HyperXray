@@ -35,6 +35,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -88,15 +89,43 @@ fun DashboardScreen(
     val instancesStatus by viewModel.instancesStatus.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
 
+    val isRecentlyConnected = remember { mutableStateOf(false) }
+
+    // Trigger fast polling when connected
+    LaunchedEffect(connectionState) {
+        if (connectionState is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
+            isRecentlyConnected.value = true
+            // Immediately update stats when connection state changes to Connected
+            viewModel.updateCoreStats()
+            // Fast poll for 10 seconds to ensure immediate stats
+            delay(10000L)
+            isRecentlyConnected.value = false
+        } else {
+            isRecentlyConnected.value = false
+        }
+    }
+
     LaunchedEffect(Unit) {
-        // Poll stats every second while screen is resumed
+        // Poll stats with dynamic interval based on traffic
+        // High traffic -> fast polling (500ms), idle -> slow polling (2s)
         // Loop is safe: repeatOnLifecycle cancels when lifecycle state changes
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (true) {
                 viewModel.updateCoreStats()
                 viewModel.updateTelemetryStats()
                 viewModel.updateDnsCacheStats()
-                delay(1000)
+                
+                // Dynamic interval based on current throughput
+                val currentStats = viewModel.coreStatsState.value
+                val totalThroughput = currentStats.uplinkThroughput + currentStats.downlinkThroughput
+                val interval = when {
+                    isRecentlyConnected.value -> 100L     // Initial connection: 100ms (very fast for immediate updates)
+                    totalThroughput > 1_000_000 -> 500L   // > 1MB/s: 500ms (high traffic)
+                    totalThroughput > 100_000 -> 1000L    // > 100KB/s: 1s (medium traffic)
+                    totalThroughput > 0 -> 1500L          // Active but low: 1.5s
+                    else -> 2000L                         // Idle: 2s (battery saving)
+                }
+                delay(interval)
             }
         }
     }
@@ -1011,16 +1040,25 @@ fun DashboardScreen(
     // DNS Cache Card
     item(key = "dns_cache") {
         AnimatedVisibility(
-            visible = dnsCacheStats != null,
+            visible = isServiceEnabled,
             enter = fadeIn() + expandVertically(),
             exit = fadeOut() + shrinkVertically()
         ) {
-            if (dnsCacheStats != null) {
-                DnsCacheCard(
-                    stats = dnsCacheStats!!,
-                    gradientColors = dnsCacheGradient
-                )
-            }
+            DnsCacheCard(
+                stats = dnsCacheStats ?: DnsCacheStats(
+                    entryCount = 0,
+                    memoryUsageMB = 0,
+                    memoryLimitMB = 500,
+                    memoryUsagePercent = 0,
+                    hits = 0,
+                    misses = 0,
+                    hitRate = 0,
+                    avgDomainHitRate = 0,
+                    avgHitLatencyMs = 0.0,
+                    avgMissLatencyMs = 0.0
+                ),
+                gradientColors = dnsCacheGradient
+            )
         }
     }
     }

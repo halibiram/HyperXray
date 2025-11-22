@@ -151,16 +151,23 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
     }
 
     suspend fun getSystemStats(): SysStatsResponse? = withContext(Dispatchers.IO) {
+        Log.d("CoreStatsClient", "getSystemStats() called")
+        
         if (!ensureChannelReady()) {
-            Log.w("CoreStatsClient", "Channel not ready for getSystemStats, returning null")
+            val channelState = channel.getState(false)
+            Log.w("CoreStatsClient", "Channel not ready for getSystemStats (state: $channelState), returning null")
             return@withContext null
         }
+        
+        Log.d("CoreStatsClient", "Channel ready, making getSystemStats RPC call")
         
         runCatching {
             val request = SysStatsRequest.newBuilder().build()
             suspendCancellableCoroutine<SysStatsResponse?> { continuation ->
+                Log.d("CoreStatsClient", "Starting getSystemStats RPC call with deadline")
                 getStubWithDeadline().getSysStats(request, object : io.grpc.stub.StreamObserver<SysStatsResponse> {
                     override fun onNext(value: SysStatsResponse) {
+                        Log.d("CoreStatsClient", "getSystemStats received response: uptime=${value.uptime}s, numGoroutine=${value.numGoroutine}")
                         continuation.resume(value)
                     }
                     
@@ -169,17 +176,34 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
                             is StatusException -> t.status
                             else -> Status.fromThrowable(t)
                         }
-                        Log.e("CoreStatsClient", "getSystemStats failed: ${status.code} - ${status.description}", t)
+                        val channelState = channel.getState(false)
+                        Log.e("CoreStatsClient", "getSystemStats failed: ${status.code} - ${status.description}, channel state: $channelState", t)
                         
                         // If channel is in bad state, mark it for recreation and invalidate cache
                         if (status.code == Status.Code.UNAVAILABLE || 
                             status.code == Status.Code.DEADLINE_EXCEEDED ||
-                            status.code == Status.Code.CANCELLED) {
-                            val channelState = channel.getState(false)
+                            status.code == Status.Code.CANCELLED ||
+                            status.code == Status.Code.UNIMPLEMENTED) {
                             if (channelState == ConnectivityState.SHUTDOWN || 
                                 channelState == ConnectivityState.TRANSIENT_FAILURE) {
                                 Log.w("CoreStatsClient", "Channel in bad state (${channelState}), will need recreation")
                                 invalidateCache()
+                            }
+                            
+                            // Log specific error codes
+                            when (status.code) {
+                                Status.Code.UNIMPLEMENTED -> {
+                                    Log.w("CoreStatsClient", "GetSysStats RPC not implemented by Xray-core - this endpoint may not be available")
+                                }
+                                Status.Code.DEADLINE_EXCEEDED -> {
+                                    Log.w("CoreStatsClient", "GetSysStats RPC deadline exceeded - Xray-core may be slow to respond")
+                                }
+                                Status.Code.UNAVAILABLE -> {
+                                    Log.w("CoreStatsClient", "GetSysStats RPC unavailable - Xray-core may not be ready")
+                                }
+                                else -> {
+                                    // Other error codes
+                                }
                             }
                         }
                         continuation.resume(null)
@@ -187,10 +211,20 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
                     
                     override fun onCompleted() {
                         // Already handled in onNext or onError
+                        Log.d("CoreStatsClient", "getSystemStats RPC completed")
                     }
                 })
             }
-        }.getOrNull()
+        }.onFailure { e ->
+            Log.e("CoreStatsClient", "getSystemStats runCatching failed: ${e.message}", e)
+        }.getOrNull().let { result ->
+            if (result != null) {
+                Log.d("CoreStatsClient", "getSystemStats successful: returning response with uptime=${result.uptime}s")
+            } else {
+                Log.w("CoreStatsClient", "getSystemStats returned null")
+            }
+            result
+        }
     }
 
     suspend fun getTraffic(): TrafficState? = withContext(Dispatchers.IO) {
@@ -338,14 +372,20 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
             
             // Log summary
             if (totalUplink == 0L && totalDownlink == 0L && allStatNames.isNotEmpty()) {
-                Log.w("CoreStatsClient", "⚠ No traffic stats found! Processed ${allStatNames.size} unique stats, matched $matchedStatsCount. All stat names: ${allStatNames.joinToString(", ")}")
-            } else {
+                // Stats were found and processed but all values are 0 (normal at startup)
+                Log.d("CoreStatsClient", "✓ Traffic stats found but all zero (startup): Uplink=0, Downlink=0 (matched $matchedStatsCount/${allStatNames.size} stats)")
+            } else if (matchedStatsCount > 0) {
                 Log.i("CoreStatsClient", "✓ Traffic stats summary: Uplink=${totalUplink} bytes, Downlink=${totalDownlink} bytes (matched $matchedStatsCount/${allStatNames.size} stats)")
+            } else {
+                Log.w("CoreStatsClient", "⚠ No traffic stats matched! Processed ${allStatNames.size} unique stats, matched $matchedStatsCount. All stat names: ${allStatNames.joinToString(", ")}")
             }
             
-            if (totalUplink > 0 || totalDownlink > 0) {
+            // Return TrafficState if stats were matched (even if values are 0)
+            // Zero values are valid - they just mean no traffic yet (normal at startup)
+            if (matchedStatsCount > 0) {
                 TrafficState(totalUplink, totalDownlink)
             } else {
+                // No stats matched the traffic patterns
                 null
             }
         }.onFailure { e ->
@@ -498,14 +538,20 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
         
         // Log summary
         if (totalUplink == 0L && totalDownlink == 0L && allStatNames.isNotEmpty()) {
-            Log.w("CoreStatsClient", "⚠ Fallback: No traffic stats found! Processed ${allStatNames.size} unique stats, matched $matchedStatsCount. All stat names: ${allStatNames.joinToString(", ")}")
-        } else {
+            // Stats were found and processed but all values are 0 (normal at startup)
+            Log.d("CoreStatsClient", "✓ Fallback: Traffic stats found but all zero (startup): Uplink=0, Downlink=0 (matched $matchedStatsCount/${allStatNames.size} stats)")
+        } else if (matchedStatsCount > 0) {
             Log.i("CoreStatsClient", "✓ Fallback traffic stats summary: Uplink=${totalUplink} bytes, Downlink=${totalDownlink} bytes (matched $matchedStatsCount/${allStatNames.size} stats)")
+        } else {
+            Log.w("CoreStatsClient", "⚠ Fallback: No traffic stats matched! Processed ${allStatNames.size} unique stats, matched $matchedStatsCount. All stat names: ${allStatNames.joinToString(", ")}")
         }
         
-        return if (totalUplink > 0 || totalDownlink > 0) {
+        // Return TrafficState if stats were matched (even if values are 0)
+        // Zero values are valid - they just mean no traffic yet (normal at startup)
+        return if (matchedStatsCount > 0) {
             TrafficState(totalUplink, totalDownlink)
         } else {
+            // No stats matched the traffic patterns
             null
         }
     }

@@ -128,3 +128,5 @@ Cron job veya scheduled task ile düzenli olarak çalıştırabilirsiniz:
 - Log dosyaları cihazın internal storage'ında saklanır
 - Büyük log dosyaları için yeterli disk alanı olduğundan emin olun
 - Log rotation mekanizması log dosyalarını otomatik olarak temizler (10MB limit)
+
+

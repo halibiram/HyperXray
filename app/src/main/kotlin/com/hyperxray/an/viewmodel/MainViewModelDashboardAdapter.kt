@@ -71,70 +71,77 @@ fun DnsCacheManager.DnsCacheStats.toFeatureState(): FeatureDnsCacheStats {
 
 /**
  * MainViewModel implementation of DashboardViewModel
- * Uses viewModelScope for StateFlow conversion
+ * Uses cached StateFlow transformations to ensure stable state updates
+ */
+class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : DashboardViewModel {
+    // Cached transformed StateFlows - created once and reused
+    // Direct map transformation without stateIn to ensure all updates are propagated
+    override val coreStatsState: StateFlow<FeatureCoreStatsState> =
+        mainViewModel.coreStatsState
+            .map { it.toFeatureState() }
+            .stateIn(
+                scope = mainViewModel.viewModelScope,
+                started = SharingStarted.WhileSubscribed(0), // Start immediately when subscribed, stop when no subscribers
+                initialValue = mainViewModel.coreStatsState.value.toFeatureState()
+            )
+    
+    override val telemetryState: StateFlow<FeatureAggregatedTelemetry?> =
+        mainViewModel.telemetryState
+            .map { it?.toFeatureState() }
+            .stateIn(
+                scope = mainViewModel.viewModelScope,
+                started = SharingStarted.WhileSubscribed(0), // Start immediately when subscribed, stop when no subscribers
+                initialValue = mainViewModel.telemetryState.value?.toFeatureState()
+            )
+    
+    private val dnsCacheStatsFlow = MutableStateFlow<FeatureDnsCacheStats?>(null)
+    override val dnsCacheStats: StateFlow<FeatureDnsCacheStats?> =
+        dnsCacheStatsFlow.asStateFlow()
+    
+    override val isServiceEnabled: StateFlow<Boolean> =
+        mainViewModel.isServiceEnabled
+    
+    override val controlMenuClickable: StateFlow<Boolean> =
+        mainViewModel.controlMenuClickable
+    
+    override val connectionState: StateFlow<com.hyperxray.an.feature.dashboard.ConnectionState> =
+        mainViewModel.connectionState
+    
+    override val instancesStatus: StateFlow<Map<Int, XrayRuntimeStatus>> =
+        mainViewModel.instancesStatus
+    
+    override fun updateCoreStats() {
+        mainViewModel.viewModelScope.launch {
+            mainViewModel.updateCoreStats()
+        }
+    }
+    
+    override fun updateTelemetryStats() {
+        mainViewModel.viewModelScope.launch {
+            mainViewModel.updateTelemetryStats()
+        }
+    }
+    
+    override fun updateDnsCacheStats() {
+        mainViewModel.viewModelScope.launch {
+            try {
+                val stats = DnsCacheManager.getStatsData()
+                dnsCacheStatsFlow.value = stats.toFeatureState()
+            } catch (e: Exception) {
+                // DnsCacheManager might not be initialized yet
+                dnsCacheStatsFlow.value = null
+            }
+        }
+    }
+}
+
+/**
+ * Extension property that provides cached DashboardViewModel instance
  */
 val MainViewModel.dashboardViewModel: DashboardViewModel
     get() {
-        val mainViewModel = this
-        val dnsCacheStatsFlow = MutableStateFlow<FeatureDnsCacheStats?>(null)
-        
-        return object : DashboardViewModel {
-            override val coreStatsState: StateFlow<FeatureCoreStatsState> =
-                mainViewModel.coreStatsState
-                    .map { it.toFeatureState() }
-                    .stateIn(
-                        scope = mainViewModel.viewModelScope,
-                        started = SharingStarted.WhileSubscribed(5000),
-                        initialValue = mainViewModel.coreStatsState.value.toFeatureState()
-                    )
-            
-            override val telemetryState: StateFlow<FeatureAggregatedTelemetry?> =
-                mainViewModel.telemetryState
-                    .map { it?.toFeatureState() }
-                    .stateIn(
-                        scope = mainViewModel.viewModelScope,
-                        started = SharingStarted.WhileSubscribed(5000),
-                        initialValue = mainViewModel.telemetryState.value?.toFeatureState()
-                    )
-            
-            override val dnsCacheStats: StateFlow<FeatureDnsCacheStats?> =
-                dnsCacheStatsFlow.asStateFlow()
-            
-            override val isServiceEnabled: StateFlow<Boolean> =
-                mainViewModel.isServiceEnabled
-            
-            override val controlMenuClickable: StateFlow<Boolean> =
-                mainViewModel.controlMenuClickable
-            
-            override val connectionState: StateFlow<com.hyperxray.an.feature.dashboard.ConnectionState> =
-                mainViewModel.connectionState
-            
-            override val instancesStatus: StateFlow<Map<Int, XrayRuntimeStatus>> =
-                mainViewModel.instancesStatus
-            
-            override fun updateCoreStats() {
-                mainViewModel.viewModelScope.launch {
-                    mainViewModel.updateCoreStats()
-                }
-            }
-            
-            override fun updateTelemetryStats() {
-                mainViewModel.viewModelScope.launch {
-                    mainViewModel.updateTelemetryStats()
-                }
-            }
-            
-            override fun updateDnsCacheStats() {
-                mainViewModel.viewModelScope.launch {
-                    try {
-                        val stats = DnsCacheManager.getStatsData()
-                        dnsCacheStatsFlow.value = stats.toFeatureState()
-                    } catch (e: Exception) {
-                        // DnsCacheManager might not be initialized yet
-                        dnsCacheStatsFlow.value = null
-                    }
-                }
-            }
-        }
+        // Use a lazy cached property in MainViewModel to ensure same instance is always returned
+        // This will be initialized in MainViewModel class itself
+        return getOrCreateDashboardAdapter()
     }
 

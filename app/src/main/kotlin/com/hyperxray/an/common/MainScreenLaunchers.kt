@@ -55,8 +55,9 @@ fun rememberMainScreenLaunchers(mainViewModel: MainViewModel): MainScreenLaunche
     ) { result: ActivityResult ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             mainViewModel.setControlMenuClickable(true)
-            mainViewModel.setServiceEnabled(true)
-            mainViewModel.startTProxyService(TProxyService.ACTION_CONNECT)
+            // Start connection process to trigger connection status card
+            // This ensures dashboard connection status card works properly with auto start
+            mainViewModel.startConnectionProcess()
         } else {
             mainViewModel.setControlMenuClickable(true)
         }

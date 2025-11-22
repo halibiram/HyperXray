@@ -23,7 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -232,10 +232,14 @@ fun LogScreen(
                         contentPadding = PaddingValues(bottom = 80.dp, top = 8.dp), // Space for FAB
                         reverseLayout = true
                     ) {
-                        items(
+                        itemsIndexed(
                             items = filteredEntries,
-                            key = { it }
-                        ) { logEntry ->
+                            key = { index, logEntry -> 
+                                // Create unique key using index + hash of content
+                                // This ensures uniqueness even if log entries have identical content
+                                "${index}_${logEntry.hashCode()}"
+                            }
+                        ) { index, logEntry ->
                             LogEntryItem(
                                 logEntry = logEntry,
                                 onClick = {

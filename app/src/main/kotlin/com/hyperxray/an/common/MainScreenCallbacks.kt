@@ -116,12 +116,17 @@ fun rememberMainScreenCallbacks(
             logViewModel.clearLogs()
         }
         
+        // Check connection state - Failed state should retry connection, not disconnect
+        val connectionState = mainViewModel.connectionState.value
+        val isFailed = connectionState is com.hyperxray.an.feature.dashboard.ConnectionState.Failed
+        
         // Handle connect/disconnect immediately
-        if (mainViewModel.isServiceEnabled.value) {
-            mainViewModel.setConnectionStateDisconnecting()
+        if (mainViewModel.isServiceEnabled.value && !isFailed) {
+            // Only disconnect if service is enabled and not in Failed state
+            // stopTProxyService() will call stopConnectionProcess() which handles state transitions
             mainViewModel.stopTProxyService()
         } else {
-            // Start connection process with stages
+            // Start connection process (for both disconnected and failed states)
             mainViewModel.startConnectionProcess()
             if (mainViewModel.settingsState.value.switches.disableVpn) {
                 mainViewModel.startTProxyService(TProxyService.ACTION_START)

@@ -514,17 +514,7 @@ class Preferences(context: Context) {
         }
 
     var xrayCoreInstanceCount: Int
-        get() {
-            val value = getPrefData(XRAY_CORE_INSTANCE_COUNT).first
-            val count = value?.toIntOrNull()
-            // Ensure value is between 1 and 4
-            return when {
-                count == null -> 1
-                count < 1 -> 1
-                count > 4 -> 4
-                else -> count
-            }
-        }
+        get() = 1 // Force 1 instance for stability
         set(count) {
             // Clamp value between 1 and 4
             val clampedCount = when {
@@ -636,7 +626,14 @@ class Preferences(context: Context) {
         const val BYPASS_DOMAINS: String = "BypassDomains"
         const val BYPASS_IPS: String = "BypassIps"
         const val XRAY_CORE_INSTANCE_COUNT: String = "XrayCoreInstanceCount"
+        const val AUTO_START: String = "AutoStart"
         
         private const val TAG = "Preferences"
     }
+    
+    var autoStart: Boolean
+        get() = getBooleanPref(AUTO_START, true)
+        set(enable) {
+            setValueInProvider(AUTO_START, enable)
+        }
 }

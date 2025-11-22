@@ -33,10 +33,26 @@ object ConfigUtils {
 
     @Throws(JSONException::class)
     fun injectStatsServiceWithPort(prefs: Preferences, configContent: String, apiPort: Int): String {
-        Log.d(TAG, "=== Starting config injection ===")
+        // Use optimized two-phase injection for better performance
+        val commonConfig = injectCommonConfig(prefs, configContent)
+        return injectApiPort(commonConfig, apiPort)
+    }
+
+    /**
+     * Injects common configuration settings (without API port).
+     * This function performs all config transformations that are identical for all instances.
+     * Used for optimization when starting multiple instances - common config is injected once,
+     * then each instance only needs API port injection.
+     * 
+     * @param prefs Preferences instance
+     * @param configContent Original config content
+     * @return Config JSON string with all common injections applied (API port not included)
+     */
+    @Throws(JSONException::class)
+    fun injectCommonConfig(prefs: Preferences, configContent: String): String {
+        Log.d(TAG, "=== Starting common config injection ===")
         Log.d(TAG, "Aggressive optimizations: ${prefs.aggressiveSpeedOptimizations}")
         Log.d(TAG, "Extreme optimizations: ${prefs.extremeRamCpuOptimizations}")
-        Log.d(TAG, "API port: $apiPort")
         
         val jsonObject = JSONObject(configContent)
         
@@ -58,14 +74,7 @@ object ConfigUtils {
             }
         }
 
-        val apiObject = JSONObject()
-        apiObject.put("tag", "api")
-        apiObject.put("listen", "127.0.0.1:$apiPort")
-        val servicesArray = org.json.JSONArray()
-        servicesArray.put("StatsService")
-        apiObject.put("services", servicesArray)
-
-        jsonObject.put("api", apiObject)
+        // Stats object (API object will be added later with port-specific injection)
         jsonObject.put("stats", JSONObject())
 
         val policyObject = JSONObject()
@@ -117,7 +126,7 @@ object ConfigUtils {
         // removePort53DnsRoutingRule(jsonObject)
         
         val finalConfig = jsonObject.toString(2)
-        Log.d(TAG, "=== Config injection completed ===")
+        Log.d(TAG, "=== Common config injection completed ===")
         Log.d(TAG, "Final config size: ${finalConfig.length} bytes")
         
         // Log a sample of the final config to verify optimizations
@@ -141,6 +150,32 @@ object ConfigUtils {
         }
 
         return finalConfig
+    }
+
+    /**
+     * Injects API port configuration into a pre-processed config.
+     * This is a lightweight operation that only modifies the API listen address.
+     * Used for optimization when starting multiple instances - common config is injected once,
+     * then each instance only needs this quick port injection.
+     * 
+     * @param configContent Pre-processed config content (from injectCommonConfig)
+     * @param apiPort API port to inject
+     * @return Config JSON string with API port injected
+     */
+    @Throws(JSONException::class)
+    fun injectApiPort(configContent: String, apiPort: Int): String {
+        val jsonObject = JSONObject(configContent)
+        
+        val apiObject = JSONObject()
+        apiObject.put("tag", "api")
+        apiObject.put("listen", "127.0.0.1:$apiPort")
+        val servicesArray = org.json.JSONArray()
+        servicesArray.put("StatsService")
+        apiObject.put("services", servicesArray)
+
+        jsonObject.put("api", apiObject)
+
+        return jsonObject.toString(2)
     }
 
     /**

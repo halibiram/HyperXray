@@ -8,9 +8,13 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
+import java.net.Socket
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.*
@@ -19,6 +23,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CompletableDeferred
+import okhttp3.OkHttpClient
+import okhttp3.dnsoverhttps.DnsOverHttps
+import okhttp3.HttpUrl.Companion.toHttpUrl
 
 private const val TAG = "SystemDnsCacheServer"
 private const val DNS_PORT = 53
@@ -103,16 +110,6 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     )
     private val warmUpStats = WarmUpStats()
     
-    // Socket connection pooling for faster DNS resolution
-    private data class PooledSocket(
-        val socket: DatagramSocket,
-        val server: InetAddress,
-        val lastUsed: AtomicLong = AtomicLong(System.currentTimeMillis())
-    )
-    
-    private val socketPool = ConcurrentHashMap<String, PooledSocket>()
-    private val SOCKET_POOL_TIMEOUT_MS = 10000L // 10 seconds - sockets expire after 10s of inactivity
-    private val SOCKET_POOL_CLEANUP_INTERVAL_MS = 30000L // Cleanup every 30 seconds
     private val WARM_UP_INTERVAL_MS = 6 * 60 * 60 * 1000L // 6 hours - periodic warm-up for cache refresh
     
     // DNS cache warm-up: Popular domains to pre-resolve (expanded for faster first-time access)
@@ -170,6 +167,44 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     private val pendingQueries = ConcurrentHashMap<String, PendingQuery>()
     private val QUERY_DEDUP_TIMEOUT_MS = 5000L // 5 seconds max wait for duplicate queries
     
+    // DoH (DNS over HTTPS) providers for fallback when UDP DNS fails
+    private val dohProviders: List<DnsOverHttps> by lazy {
+        val dnsClient = OkHttpClient.Builder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .connectionPool(
+                okhttp3.ConnectionPool(
+                    maxIdleConnections = 10,
+                    keepAliveDuration = 5,
+                    timeUnit = TimeUnit.MINUTES
+                )
+            )
+            .build()
+        
+        listOf(
+            DnsOverHttps.Builder()
+                .client(dnsClient)
+                .url("https://cloudflare-dns.com/dns-query".toHttpUrl())
+                .includeIPv6(true)
+                .build(),
+            DnsOverHttps.Builder()
+                .client(dnsClient)
+                .url("https://dns.google/dns-query".toHttpUrl())
+                .includeIPv6(true)
+                .build(),
+            DnsOverHttps.Builder()
+                .client(dnsClient)
+                .url("https://dns.quad9.net/dns-query".toHttpUrl())
+                .includeIPv6(true)
+                .build(),
+            DnsOverHttps.Builder()
+                .client(dnsClient)
+                .url("https://doh.opendns.com/dns-query".toHttpUrl())
+                .includeIPv6(true)
+                .build()
+        )
+    }
+    
     init {
         // Initialize stats for all DNS servers
         upstreamDnsServers.forEach { server ->
@@ -177,82 +212,6 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
             dnsServerStats[hostAddress] = DnsServerStats(server)
             adaptiveTimeouts[hostAddress] = BASE_TIMEOUT_MS
         }
-        
-        // Start socket pool cleanup job
-        scope.launch {
-            while (isActive) {
-                delay(SOCKET_POOL_CLEANUP_INTERVAL_MS)
-                cleanupSocketPool()
-            }
-        }
-    }
-    
-    /**
-     * Cleanup expired sockets from pool
-     */
-    private fun cleanupSocketPool() {
-        val now = System.currentTimeMillis()
-        socketPool.entries.removeIf { (_, pooledSocket) ->
-            val age = now - pooledSocket.lastUsed.get()
-            if (age > SOCKET_POOL_TIMEOUT_MS) {
-                try {
-                    pooledSocket.socket.close()
-                } catch (e: Exception) {
-                    // Ignore close errors
-                }
-                true
-            } else {
-                false
-            }
-        }
-    }
-    
-    /**
-     * Get or create socket from pool
-     */
-    private fun getPooledSocket(server: InetAddress, timeoutMs: Long): DatagramSocket {
-        val serverKey = server.hostAddress ?: run {
-            // If hostAddress is null, create a new socket without pooling
-            return DatagramSocket().apply {
-                soTimeout = timeoutMs.toInt()
-                try {
-                    reuseAddress = true
-                } catch (e: Exception) {
-                    // Some platforms may not support this
-                }
-            }
-        }
-        val pooled = socketPool[serverKey]
-        
-        if (pooled != null) {
-            val age = System.currentTimeMillis() - pooled.lastUsed.get()
-            if (age < SOCKET_POOL_TIMEOUT_MS) {
-                pooled.lastUsed.set(System.currentTimeMillis())
-                return pooled.socket
-            } else {
-                // Socket expired, remove from pool
-                socketPool.remove(serverKey)
-                try {
-                    pooled.socket.close()
-                } catch (e: Exception) {
-                    // Ignore close errors
-                }
-            }
-        }
-        
-        // Create new socket
-        val newSocket = DatagramSocket().apply {
-            soTimeout = timeoutMs.toInt()
-            try {
-                reuseAddress = true
-            } catch (e: Exception) {
-                // Some platforms may not support this
-            }
-        }
-        
-        // Add to pool
-        socketPool[serverKey] = PooledSocket(newSocket, server)
-        return newSocket
     }
     
     /**
@@ -1156,53 +1115,36 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
         pendingQueries[lowerHostname] = PendingQuery(deferred)
         
         try {
-            // Adaptive timeouts: longer timeouts for problematic domains (TikTok, etc.)
-            // Check if domain needs extended timeout (TikTok domains often timeout)
-            val needsExtendedTimeout = hostname.contains("tiktok", ignoreCase = true) ||
-                    hostname.contains("sentry.io", ignoreCase = true) ||
-                    hostname.contains("firebaseremoteconfig", ignoreCase = true)
+            // Single attempt with short timeout - no retry mechanism
+            // Fast failure to quickly move to next method (DoH fallback)
+            val timeoutMs = 300L // Short timeout for fast fallback
             
-            val timeouts = if (needsExtendedTimeout) {
-                // Extended timeouts for problematic domains
-                listOf(500L, 1000L, 2000L)
-            } else {
-                // Ultra-fast timeouts: very aggressive for maximum speed (optimized for first-time access)
-                listOf(200L, 350L, 600L) // Reduced timeouts for faster first-time DNS resolution
-            }
-            var lastError: Exception? = null
-            
-            if (needsExtendedTimeout) {
-                Log.d(TAG, "⏱️ Using extended timeout strategy for $hostname (problematic domain)")
-            }
-            
-            for ((attempt, timeoutMs) in timeouts.withIndex()) {
-                try {
-                    val startTime = System.currentTimeMillis()
-                    val result = forwardToUpstreamDnsWithTimeout(queryData, hostname, timeoutMs)
-                    val elapsed = System.currentTimeMillis() - startTime
+            try {
+                val startTime = System.currentTimeMillis()
+                val result = forwardToUpstreamDnsWithTimeout(queryData, hostname, timeoutMs)
+                val elapsed = System.currentTimeMillis() - startTime
+                
+                if (result != null) {
+                    Log.d(TAG, "✅ DNS resolved via UDP for $hostname (${elapsed}ms)")
                     
-                    if (result != null) {
-                        if (attempt > 0) {
-                            Log.i(TAG, "✅ DNS resolved on retry attempt ${attempt + 1} for $hostname (${elapsed}ms)")
-                        } else {
-                            Log.d(TAG, "✅ DNS resolved on first attempt for $hostname (${elapsed}ms)")
-                        }
-                        
-                        // Complete deferred and notify waiting queries
-                        deferred.complete(result)
-                        pendingQueries.remove(lowerHostname)
-                        return result
-                    }
-                } catch (e: Exception) {
-                    lastError = e
-                    if (attempt < timeouts.size - 1) {
-                        Log.d(TAG, "⚠️ DNS query attempt ${attempt + 1} failed for $hostname, retrying with timeout ${timeouts[attempt + 1]}ms...")
-                        delay(10) // Ultra-fast retry delay (10ms for faster first-time access)
-                    }
+                    // Complete deferred and notify waiting queries
+                    deferred.complete(result)
+                    pendingQueries.remove(lowerHostname)
+                    return result
                 }
+            } catch (e: Exception) {
+                Log.d(TAG, "⚠️ UDP DNS query failed for $hostname: ${e.message}, trying DoT fallback...")
             }
             
-            // Try DoH fallback if UDP failed
+            // Try DoT fallback if UDP failed
+            val dotResult = tryDoTFallback(queryData, hostname)
+            if (dotResult != null) {
+                deferred.complete(dotResult)
+                pendingQueries.remove(lowerHostname)
+                return dotResult
+            }
+            
+            // Try DoH fallback if DoT failed
             val dohResult = tryDoHFallback(hostname)
             if (dohResult != null) {
                 deferred.complete(dohResult)
@@ -1210,8 +1152,12 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                 return dohResult
             }
             
-            if (lastError != null) {
-                Log.w(TAG, "❌ DNS query failed after ${timeouts.size} attempts for $hostname: ${lastError.message}")
+            // Try TCP DNS fallback if DoH failed
+            val tcpResult = tryTcpDnsFallback(queryData, hostname)
+            if (tcpResult != null) {
+                deferred.complete(tcpResult)
+                pendingQueries.remove(lowerHostname)
+                return tcpResult
             }
             
             // Complete with null on failure
@@ -1227,54 +1173,321 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     
     /**
      * DNS over HTTPS (DoH) fallback when UDP DNS fails
-     * Uses system DNS resolver as fallback with retry mechanism (faster for first-time access)
+     * Uses real DoH providers (Cloudflare, Google, Quad9, OpenDNS) with parallel queries
+     * Falls back to system DNS resolver as last resort
      */
     private suspend fun tryDoHFallback(hostname: String): ByteArray? {
         return withContext(Dispatchers.IO) {
-            // Enhanced fallback: retry system DNS resolver with increasing timeouts
-            val fallbackTimeouts = listOf(2000L, 3000L, 5000L) // Increased timeouts for problematic domains
-            var lastError: Exception? = null
+            val startTime = System.currentTimeMillis()
             
-            for ((attempt, timeoutMs) in fallbackTimeouts.withIndex()) {
-                try {
-                    if (attempt > 0) {
-                        Log.d(TAG, "🔄 Retrying system DNS fallback (attempt ${attempt + 1}/${fallbackTimeouts.size}) for $hostname with timeout ${timeoutMs}ms...")
-                        delay(50) // Brief delay between retries
-                    } else {
-                        Log.d(TAG, "🔄 Trying system DNS fallback for $hostname (faster first-time access)...")
-                    }
-                    
-                    // Use system DNS resolver as fallback (Android's built-in DNS - faster for first-time access)
-                    val startTime = System.currentTimeMillis()
-                    val addresses = withTimeoutOrNull(timeoutMs) {
-                        InetAddress.getAllByName(hostname)
-                    }
-                    val elapsed = System.currentTimeMillis() - startTime
-                    
-                    if (addresses != null && addresses.isNotEmpty()) {
-                        // Build DNS response packet from resolved addresses
-                        val queryData = buildDnsQuery(hostname) ?: return@withContext null
-                        val responseData = buildDnsResponse(queryData, addresses.toList())
-                        
-                        // Cache the result immediately for faster subsequent access
-                        DnsCacheManager.saveToCache(hostname, addresses.toList(), ttl = 3600L)
-                        
-                        if (attempt > 0) {
-                            Log.i(TAG, "✅ System DNS fallback successful (retry ${attempt + 1}) for $hostname -> ${addresses.map { it.hostAddress ?: "unknown" }} (${elapsed}ms)")
-                        } else {
-                            Log.i(TAG, "✅ System DNS fallback successful for $hostname -> ${addresses.map { it.hostAddress ?: "unknown" }} (${elapsed}ms)")
+            // Single attempt with short timeout - no retry mechanism
+            // Fast failure to quickly move to next method (system DNS)
+            val timeoutMs = 1000L // Short timeout for fast fallback
+            
+            Log.d(TAG, "🔄 Trying DoH fallback for $hostname (real DNS over HTTPS)...")
+            
+            try {
+                // Parallel DoH queries - try all providers simultaneously
+                val deferredResults = dohProviders.mapIndexed { index, dohProvider ->
+                    async(Dispatchers.IO) {
+                        withTimeoutOrNull(timeoutMs) {
+                            try {
+                                val result = dohProvider.lookup(hostname)
+                                if (result.isNotEmpty()) {
+                                    val providerName = when (index) {
+                                        0 -> "Cloudflare"
+                                        1 -> "Google"
+                                        2 -> "Quad9"
+                                        3 -> "OpenDNS"
+                                        else -> "Unknown"
+                                    }
+                                    val elapsed = System.currentTimeMillis() - startTime
+                                    Log.i(TAG, "✅ DNS resolved via DoH ($providerName): $hostname -> ${result.map { it.hostAddress ?: "unknown" }} (${elapsed}ms)")
+                                    result
+                                } else null
+                            } catch (e: Exception) {
+                                Log.d(TAG, "⚠️ DoH provider ${index + 1} failed for $hostname: ${e.message}")
+                                null
+                            }
                         }
-                        return@withContext responseData
                     }
-                } catch (e: Exception) {
-                    lastError = e
-                    if (attempt < fallbackTimeouts.size - 1) {
-                        Log.d(TAG, "⚠️ System DNS fallback attempt ${attempt + 1} failed for $hostname: ${e.message}, retrying...")
-                    } else {
-                        Log.w(TAG, "❌ System DNS fallback failed after ${fallbackTimeouts.size} attempts for $hostname: ${e.message}")
+                }
+                
+                // Get first successful result from parallel DoH queries
+                var selectedResult: List<InetAddress>? = null
+                val results = deferredResults.awaitAll()
+                for ((index, result) in results.withIndex()) {
+                    if (result != null && result.isNotEmpty()) {
+                        selectedResult = result
+                        // Cancel remaining queries
+                        deferredResults.forEachIndexed { idx, deferred ->
+                            if (idx > index) {
+                                deferred.cancel()
+                            }
+                        }
+                        break
+                    }
+                }
+                
+                if (selectedResult != null && selectedResult.isNotEmpty()) {
+                    // Build DNS response packet from resolved addresses
+                    val queryData = buildDnsQuery(hostname) ?: return@withContext null
+                    val responseData = buildDnsResponse(queryData, selectedResult)
+                    
+                    // Cache the result immediately for faster subsequent access
+                    DnsCacheManager.saveToCache(hostname, selectedResult, ttl = 3600L)
+                    
+                    val elapsed = System.currentTimeMillis() - startTime
+                    Log.i(TAG, "✅ DoH fallback successful for $hostname (${elapsed}ms)")
+                    return@withContext responseData
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "⚠️ DoH fallback failed for $hostname: ${e.message}, trying TCP DNS...")
+            }
+            
+            // All DoH providers failed - try TCP DNS
+            val queryData = buildDnsQuery(hostname) ?: return@withContext null
+            val tcpResult = tryTcpDnsFallback(queryData, hostname)
+            if (tcpResult != null) {
+                return@withContext tcpResult
+            }
+            
+            // Try system DNS as last resort
+            Log.d(TAG, "🔄 All methods failed, trying system DNS as last resort for $hostname...")
+            return@withContext trySystemDnsFallback(hostname)
+        }
+    }
+    
+    /**
+     * DNS over TLS (DoT) fallback when UDP DNS fails
+     * Uses TLS-encrypted DNS queries on port 853
+     * Faster than DoH, more secure than UDP DNS
+     */
+    private suspend fun tryDoTFallback(queryData: ByteArray, hostname: String): ByteArray? {
+        return withContext(Dispatchers.IO) {
+            val startTime = System.currentTimeMillis()
+            
+            // Single attempt with short timeout - no retry mechanism
+            val timeoutMs = 1000L // Short timeout for fast fallback
+            
+            Log.d(TAG, "🔄 Trying DoT fallback for $hostname (DNS over TLS)...")
+            
+            // DoT servers (port 853)
+            val dotServers = listOf(
+                Pair("1.1.1.1", 853),  // Cloudflare
+                Pair("8.8.8.8", 853),  // Google
+                Pair("9.9.9.9", 853)   // Quad9
+            )
+            
+            // Try DoT servers in parallel
+            val deferredResults = dotServers.mapIndexed { index, (serverHost, port) ->
+                async(Dispatchers.IO) {
+                    withTimeoutOrNull(timeoutMs) {
+                        try {
+                            val serverAddress = InetAddress.getByName(serverHost)
+                            val sslSocketFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
+                            
+                            val sslSocket = sslSocketFactory.createSocket(serverAddress, port) as SSLSocket
+                            sslSocket.soTimeout = timeoutMs.toInt()
+                            
+                            // Enable TLS
+                            sslSocket.startHandshake()
+                            
+                            // Send DNS query (prepend 2-byte length for TCP DNS)
+                            val lengthPrefix = ByteArray(2)
+                            ByteBuffer.wrap(lengthPrefix).order(ByteOrder.BIG_ENDIAN).putShort(queryData.size.toShort())
+                            
+                            val outputStream = sslSocket.getOutputStream()
+                            outputStream.write(lengthPrefix)
+                            outputStream.write(queryData)
+                            outputStream.flush()
+                            
+                            // Read DNS response (first 2 bytes = length)
+                            val inputStream = sslSocket.getInputStream()
+                            val lengthBytes = ByteArray(2)
+                            inputStream.read(lengthBytes)
+                            val responseLength = ByteBuffer.wrap(lengthBytes).order(ByteOrder.BIG_ENDIAN).short.toInt() and 0xFFFF
+                            
+                            val responseData = ByteArray(responseLength)
+                            var totalRead = 0
+                            while (totalRead < responseLength) {
+                                val read = inputStream.read(responseData, totalRead, responseLength - totalRead)
+                                if (read == -1) break
+                                totalRead += read
+                            }
+                            
+                            sslSocket.close()
+                            
+                            if (totalRead == responseLength && responseData.isNotEmpty()) {
+                                val providerName = when (index) {
+                                    0 -> "Cloudflare"
+                                    1 -> "Google"
+                                    2 -> "Quad9"
+                                    else -> "Unknown"
+                                }
+                                val elapsed = System.currentTimeMillis() - startTime
+                                Log.i(TAG, "✅ DNS resolved via DoT ($providerName): $hostname (${elapsed}ms)")
+                                
+                                // Parse and cache result
+                                val addresses = parseDnsResponse(responseData, hostname)
+                                if (addresses.isNotEmpty()) {
+                                    DnsCacheManager.saveToCache(hostname, addresses, ttl = 3600L)
+                                }
+                                
+                                return@withTimeoutOrNull responseData
+                            }
+                            null
+                        } catch (e: Exception) {
+                            Log.d(TAG, "⚠️ DoT server ${index + 1} ($serverHost:$port) failed for $hostname: ${e.message}")
+                            null
+                        }
                     }
                 }
             }
+            
+            // Get first successful result
+            val results = deferredResults.awaitAll()
+            for (result in results) {
+                if (result != null) {
+                    return@withContext result
+                }
+            }
+            
+            Log.d(TAG, "⚠️ DoT fallback failed for $hostname, trying DoH...")
+            null
+        }
+    }
+    
+    /**
+     * TCP DNS fallback when UDP and DoT fail
+     * Uses plain TCP connection on port 53
+     * Useful when UDP is blocked but TCP works
+     */
+    private suspend fun tryTcpDnsFallback(queryData: ByteArray, hostname: String): ByteArray? {
+        return withContext(Dispatchers.IO) {
+            val startTime = System.currentTimeMillis()
+            
+            // Single attempt with short timeout - no retry mechanism
+            val timeoutMs = 1000L // Short timeout for fast fallback
+            
+            Log.d(TAG, "🔄 Trying TCP DNS fallback for $hostname...")
+            
+            // Try primary DNS servers via TCP
+            val tcpDnsServers = listOf(
+                InetAddress.getByName("8.8.8.8"),
+                InetAddress.getByName("1.1.1.1"),
+                InetAddress.getByName("9.9.9.9")
+            )
+            
+            // Try TCP DNS servers in parallel
+            val deferredResults = tcpDnsServers.mapIndexed { index, serverAddress ->
+                async(Dispatchers.IO) {
+                    withTimeoutOrNull(timeoutMs) {
+                        try {
+                            val socket = Socket()
+                            socket.soTimeout = timeoutMs.toInt()
+                            socket.connect(InetSocketAddress(serverAddress, DNS_PORT), timeoutMs.toInt())
+                            
+                            // Send DNS query (prepend 2-byte length for TCP DNS)
+                            val lengthPrefix = ByteArray(2)
+                            ByteBuffer.wrap(lengthPrefix).order(ByteOrder.BIG_ENDIAN).putShort(queryData.size.toShort())
+                            
+                            val outputStream = socket.getOutputStream()
+                            outputStream.write(lengthPrefix)
+                            outputStream.write(queryData)
+                            outputStream.flush()
+                            
+                            // Read DNS response (first 2 bytes = length)
+                            val inputStream = socket.getInputStream()
+                            val lengthBytes = ByteArray(2)
+                            inputStream.read(lengthBytes)
+                            val responseLength = ByteBuffer.wrap(lengthBytes).order(ByteOrder.BIG_ENDIAN).short.toInt() and 0xFFFF
+                            
+                            val responseData = ByteArray(responseLength)
+                            var totalRead = 0
+                            while (totalRead < responseLength) {
+                                val read = inputStream.read(responseData, totalRead, responseLength - totalRead)
+                                if (read == -1) break
+                                totalRead += read
+                            }
+                            
+                            socket.close()
+                            
+                            if (totalRead == responseLength && responseData.isNotEmpty()) {
+                                val serverName = when (index) {
+                                    0 -> "Google"
+                                    1 -> "Cloudflare"
+                                    2 -> "Quad9"
+                                    else -> "Unknown"
+                                }
+                                val elapsed = System.currentTimeMillis() - startTime
+                                Log.i(TAG, "✅ DNS resolved via TCP DNS ($serverName): $hostname (${elapsed}ms)")
+                                
+                                // Parse and cache result
+                                val addresses = parseDnsResponse(responseData, hostname)
+                                if (addresses.isNotEmpty()) {
+                                    DnsCacheManager.saveToCache(hostname, addresses, ttl = 3600L)
+                                }
+                                
+                                return@withTimeoutOrNull responseData
+                            }
+                            null
+                        } catch (e: Exception) {
+                            Log.d(TAG, "⚠️ TCP DNS server ${index + 1} failed for $hostname: ${e.message}")
+                            null
+                        }
+                    }
+                }
+            }
+            
+            // Get first successful result
+            val results = deferredResults.awaitAll()
+            for (result in results) {
+                if (result != null) {
+                    return@withContext result
+                }
+            }
+            
+            Log.d(TAG, "⚠️ TCP DNS fallback failed for $hostname")
+            null
+        }
+    }
+    
+    /**
+     * System DNS fallback (last resort when all other methods fail)
+     * Uses Android's built-in DNS resolver
+     */
+    private suspend fun trySystemDnsFallback(hostname: String): ByteArray? {
+        return withContext(Dispatchers.IO) {
+            // Single attempt with short timeout - no retry mechanism
+            // Last resort fallback, fast failure if it doesn't work
+            val timeoutMs = 1000L // Short timeout for fast failure
+            
+            Log.d(TAG, "🔄 Trying system DNS fallback for $hostname...")
+            
+            try {
+                // Use system DNS resolver as last resort (Android's built-in DNS)
+                val startTime = System.currentTimeMillis()
+                val addresses = withTimeoutOrNull(timeoutMs) {
+                    InetAddress.getAllByName(hostname)
+                }
+                val elapsed = System.currentTimeMillis() - startTime
+                
+                if (addresses != null && addresses.isNotEmpty()) {
+                    // Build DNS response packet from resolved addresses
+                    val queryData = buildDnsQuery(hostname) ?: return@withContext null
+                    val responseData = buildDnsResponse(queryData, addresses.toList())
+                    
+                    // Cache the result immediately for faster subsequent access
+                    DnsCacheManager.saveToCache(hostname, addresses.toList(), ttl = 3600L)
+                    
+                    Log.i(TAG, "✅ System DNS fallback successful for $hostname -> ${addresses.map { it.hostAddress ?: "unknown" }} (${elapsed}ms)")
+                    return@withContext responseData
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "❌ System DNS fallback failed for $hostname: ${e.message}")
+            }
+            
             null
         }
     }
@@ -1376,10 +1589,16 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                         val adaptiveTimeout = getAdaptiveTimeout(dnsServer).coerceAtMost(timeoutMs)
                         
                         withTimeoutOrNull(adaptiveTimeout) {
-                            // Get socket from pool (reuse for faster connection)
-                            val socket = getPooledSocket(dnsServer, adaptiveTimeout)
-                            
-                            try {
+                            // Create per-query socket to avoid monitor contention
+                            // UDP sockets are lightweight, creation overhead is negligible compared to network latency
+                            DatagramSocket().use { socket ->
+                                socket.soTimeout = adaptiveTimeout.toInt()
+                                try {
+                                    socket.reuseAddress = true
+                                } catch (e: Exception) {
+                                    // Some platforms may not support this
+                                }
+                                
                                 // Compress DNS query if possible (reuse domain name compression)
                                 val compressedQuery = compressDnsQuery(queryData, hostname)
                                 
@@ -1415,15 +1634,6 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                                 
                                 Log.d(TAG, "✅ DNS response from ${dnsServer.hostAddress ?: "unknown"} for $hostname (${elapsed}ms, timeout: ${adaptiveTimeout}ms)")
                                 response
-                            } catch (e: Exception) {
-                                // Socket error - remove from pool and create new one (fast failover)
-                                socketPool.remove(hostAddress)
-                                try {
-                                    socket.close()
-                                } catch (closeError: Exception) {
-                                    // Ignore close errors
-                                }
-                                throw e
                             }
                         }
                     } catch (e: Exception) {

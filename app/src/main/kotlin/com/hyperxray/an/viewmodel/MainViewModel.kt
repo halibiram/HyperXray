@@ -20,8 +20,6 @@ import androidx.lifecycle.viewModelScope
 import com.hyperxray.an.BuildConfig
 import com.hyperxray.an.R
 import com.hyperxray.an.xray.runtime.stats.CoreStatsClient
-import com.hyperxray.an.xray.runtime.MultiXrayCoreManager
-import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
 import com.hyperxray.an.common.ROUTE_AI_INSIGHTS
 import com.hyperxray.an.common.ROUTE_APP_LIST
 import com.hyperxray.an.common.formatBytes
@@ -39,14 +37,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
+import com.hyperxray.an.feature.dashboard.ConnectionState
+import com.hyperxray.an.feature.dashboard.ConnectionStage
+import com.hyperxray.an.feature.dashboard.DisconnectionStage
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -122,15 +124,10 @@ class MainViewModel(application: Application) :
     // Lock object for synchronous operations (used in init and onCleared)
     private val receiversLock = Any()
     
-    // Throughput calculation state (Xray-core)
+    // Throughput calculation state
     private var lastUplink: Long = 0L
     private var lastDownlink: Long = 0L
     private var lastStatsTime: Long = 0L
-    
-    // Native tunnel stats state (TProxy layer - more accurate)
-    private var lastNativeUplink: Long = 0L
-    private var lastNativeDownlink: Long = 0L
-    private var lastNativeStatsTime: Long = 0L
 
     private val fileManager: FileManager = FileManager(application, prefs)
     
@@ -140,6 +137,16 @@ class MainViewModel(application: Application) :
 
     lateinit var appListViewModel: AppListViewModel
     lateinit var configEditViewModel: ConfigEditViewModel
+    
+    // Cached dashboard adapter instance
+    private var _dashboardAdapter: MainViewModelDashboardAdapter? = null
+    
+    fun getOrCreateDashboardAdapter(): MainViewModelDashboardAdapter {
+        if (_dashboardAdapter == null) {
+            _dashboardAdapter = MainViewModelDashboardAdapter(this)
+        }
+        return _dashboardAdapter!!
+    }
 
     private val _settingsState = MutableStateFlow(
         SettingsState(
@@ -152,7 +159,8 @@ class MainViewModel(application: Application) :
                 httpProxyEnabled = prefs.httpProxyEnabled,
                 bypassLanEnabled = prefs.bypassLan,
                 disableVpn = prefs.disableVpn,
-                themeMode = prefs.theme
+                themeMode = prefs.theme,
+                autoStart = prefs.autoStart
             ),
             info = InfoStates(
                 appVersion = BuildConfig.VERSION_NAME,
@@ -194,8 +202,7 @@ class MainViewModel(application: Application) :
                 )
             ),
             bypassDomains = prefs.bypassDomains,
-            bypassIps = prefs.bypassIps,
-            xrayCoreInstanceCount = prefs.xrayCoreInstanceCount
+            bypassIps = prefs.bypassIps
         )
     )
     val settingsState: StateFlow<SettingsState> = _settingsState.asStateFlow()
@@ -218,8 +225,12 @@ class MainViewModel(application: Application) :
     val connectionState: StateFlow<com.hyperxray.an.feature.dashboard.ConnectionState> = _connectionState.asStateFlow()
 
     // Instance status tracking (updated via broadcast from TProxyService)
-    private val _instancesStatus = MutableStateFlow<Map<Int, XrayRuntimeStatus>>(emptyMap())
-    val instancesStatus: StateFlow<Map<Int, XrayRuntimeStatus>> = _instancesStatus.asStateFlow()
+    private val _instancesStatus = MutableStateFlow<Map<Int, com.hyperxray.an.xray.runtime.XrayRuntimeStatus>>(emptyMap())
+    val instancesStatus: StateFlow<Map<Int, com.hyperxray.an.xray.runtime.XrayRuntimeStatus>> = _instancesStatus.asStateFlow()
+
+    // SOCKS5 readiness tracking
+    private val _socks5Ready = MutableStateFlow(false)
+    val socks5Ready: StateFlow<Boolean> = _socks5Ready.asStateFlow()
 
     private val _uiEvent = Channel<MainViewUiEvent>(Channel.BUFFERED)
     val uiEvent = _uiEvent.receiveAsFlow()
@@ -249,16 +260,16 @@ class MainViewModel(application: Application) :
             Log.d(TAG, "Service started")
             setServiceEnabled(true)
             setControlMenuClickable(true)
-            // Don't change connection state here - let startConnectionProcess handle it
-            // This prevents race conditions where startReceiver fires before startConnectionProcess
-            // or while startConnectionProcess is still in INITIALIZING stage
             
-            // When service starts, try to sync instance status
-            // Note: This is a workaround - ideally we'd share the same MultiXrayCoreManager instance
-            viewModelScope.launch(Dispatchers.IO) {
-                delay(1000) // Wait a bit for instances to start
-                // For now, we'll rely on our own manager's status
-                // In the future, we should share the same manager instance
+            // CRITICAL: Start connection process automatically when service starts
+            // This ensures StatusCard updates properly even if startConnectionProcess() wasn't called manually
+            viewModelScope.launch {
+                // Small delay to allow service to fully initialize
+                delay(500)
+                if (_isServiceEnabled.value && _connectionState.value !is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
+                    Log.d(TAG, "Service started, auto-starting connection process for StatusCard update")
+                    startConnectionProcess()
+                }
             }
         }
     }
@@ -269,22 +280,33 @@ class MainViewModel(application: Application) :
             setServiceEnabled(false)
             setControlMenuClickable(true)
             
-            // Only set to Disconnected if not already in Disconnecting state
-            // This allows the disconnection process to complete its stages
-            if (_connectionState.value !is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting) {
+            // CRITICAL: Complete disconnection process when service stops
+            // This ensures StatusCard shows proper disconnection stages
+            viewModelScope.launch {
+                // If we're in Disconnecting state, complete it
+                val currentState = _connectionState.value
+                if (currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting) {
+                    // Complete disconnection stages
+                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
+                        com.hyperxray.an.feature.dashboard.DisconnectionStage.CLEANING_UP,
+                        progress = 1.0f
+                    )
+                    delay(300) // Brief delay to show final stage
+                }
+                
+                // Update connection state to Disconnected
                 _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
             }
             
+            // Reset instance status and SOCKS5 readiness
+            _instancesStatus.value = emptyMap()
+            _socks5Ready.value = false
+            
             _coreStatsState.value = CoreStatsState()
-            _socks5Ready.value = false // Reset SOCKS5 ready state
-            // Reset throughput calculation state (Xray-core)
+            // Reset throughput calculation state
             lastUplink = 0L
             lastDownlink = 0L
             lastStatsTime = 0L
-            // Reset native tunnel stats state
-            lastNativeUplink = 0L
-            lastNativeDownlink = 0L
-            lastNativeStatsTime = 0L
             // Close client when service stops (non-blocking, uses helper function)
             viewModelScope.launch {
                 closeCoreStatsClient()
@@ -302,58 +324,70 @@ class MainViewModel(application: Application) :
             // Also stop the service state since it failed to start
             setServiceEnabled(false)
             setControlMenuClickable(true)
-            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
         }
     }
-
-    // Track connection stage states
-    private val _socks5Ready = MutableStateFlow(false)
-    private val socks5Ready: StateFlow<Boolean> = _socks5Ready.asStateFlow()
 
     private val socks5ReadyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            Log.d(TAG, "SOCKS5 ready")
-            _socks5Ready.value = true
+            val isReady = intent.getBooleanExtra("is_ready", false)
+            Log.d(TAG, "SOCKS5 readiness update: $isReady")
+            _socks5Ready.value = isReady
+            
+            // CRITICAL: Auto-update connection state to Connected if service is enabled and SOCKS5 is ready
+            // BUT: Only update if NOT currently in Connecting state (let startConnectionProcess handle that)
+            // This prevents skipping connection stages
+            if (_isServiceEnabled.value && isReady) {
+                val currentState = _connectionState.value
+                // Only auto-update if we're in Disconnected or Failed state (not Connecting)
+                // This allows startConnectionProcess() to properly go through all stages
+                if (currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected ||
+                    currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Failed) {
+                    Log.d(TAG, "Auto-updating connection state to Connected (service enabled, SOCKS5 ready)")
+                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connected
+                } else if (currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Connecting) {
+                    // If in Connecting state, let startConnectionProcess() handle the state transitions
+                    // Don't interrupt the connection process flow
+                    Log.d(TAG, "SOCKS5 ready but in Connecting state, letting startConnectionProcess() handle state transition")
+                }
+            }
         }
     }
 
-    private val instanceStatusUpdateReceiver = object : BroadcastReceiver() {
+    private val instanceStatusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            // When TProxyService updates instance status via broadcast
             val instanceCount = intent.getIntExtra("instance_count", 0)
             val hasRunning = intent.getBooleanExtra("has_running", false)
+            Log.d(TAG, "Instance status update: count=$instanceCount, hasRunning=$hasRunning")
             
-            Log.d(TAG, "Instance status update received: count=$instanceCount, hasRunning=$hasRunning")
+            // Build status map from intent extras
+            val statusMap = mutableMapOf<Int, com.hyperxray.an.xray.runtime.XrayRuntimeStatus>()
+            for (i in 0 until instanceCount) {
+                val pid = intent.getIntExtra("instance_${i}_pid", -1)
+                val port = intent.getIntExtra("instance_${i}_port", -1)
+                if (pid > 0 && port > 0) {
+                    statusMap[i] = com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Running(pid.toLong(), port)
+                } else {
+                    statusMap[i] = com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Stopped
+                }
+            }
+            _instancesStatus.value = statusMap
             
-            // Update status synchronously (no need for coroutine scope here)
-            if (instanceCount > 0) {
-                // Create status map from broadcast data with PID and port info
-                val statusMap = mutableMapOf<Int, XrayRuntimeStatus>()
-                for (i in 0 until instanceCount) {
-                    // Read PID and port info from broadcast
-                    val pid = intent.getLongExtra("instance_${i}_pid", 0L)
-                    val port = intent.getIntExtra("instance_${i}_port", 0)
-                    
-                    // Determine status based on PID and port
-                    if (pid > 0 && port > 0) {
-                        // Instance is running with valid PID and port
-                        statusMap[i] = XrayRuntimeStatus.Running(processId = pid, apiPort = port)
-                    } else if (hasRunning) {
-                        // Has running instances but this one might not be ready yet
-                        statusMap[i] = XrayRuntimeStatus.Starting
-                    } else {
-                        // No running instances yet
-                        statusMap[i] = XrayRuntimeStatus.Starting
-                    }
+            // CRITICAL: Auto-update connection state to Connected if service is enabled and we have running instances
+            // BUT: Only update if NOT currently in Connecting state (let startConnectionProcess handle that)
+            // This prevents skipping connection stages
+            if (_isServiceEnabled.value && hasRunning) {
+                val currentState = _connectionState.value
+                // Only auto-update if we're in Disconnected or Failed state (not Connecting)
+                // This allows startConnectionProcess() to properly go through all stages
+                if (currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected ||
+                    currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Failed) {
+                    Log.d(TAG, "Auto-updating connection state to Connected (service enabled, instances running)")
+                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connected
+                } else if (currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Connecting) {
+                    // If in Connecting state, let startConnectionProcess() handle the state transitions
+                    // Don't interrupt the connection process flow
+                    Log.d(TAG, "Instances running but in Connecting state, letting startConnectionProcess() handle state transition")
                 }
-                if (statusMap.isNotEmpty()) {
-                    _instancesStatus.value = statusMap
-                    Log.d(TAG, "Updated instancesStatus with ${statusMap.size} instances")
-                }
-            } else {
-                // No instances, clear status
-                _instancesStatus.value = emptyMap()
-                Log.d(TAG, "Cleared instancesStatus (no instances)")
             }
         }
     }
@@ -362,26 +396,8 @@ class MainViewModel(application: Application) :
         Log.d(TAG, "MainViewModel initialized.")
         // Register broadcast receivers in init to ensure they're always registered
         registerTProxyServiceReceivers()
-        
-        // Clear instance status when service stops
         viewModelScope.launch(Dispatchers.IO) {
-            isServiceEnabled.collect { enabled ->
-                if (!enabled) {
-                    // Clear instance status when service stops
-                    _instancesStatus.value = emptyMap()
-                }
-            }
-        }
-        
-        viewModelScope.launch(Dispatchers.IO) {
-            val isRunning = isServiceRunning(application, TProxyService::class.java)
-            _isServiceEnabled.value = isRunning
-            // Set initial connection state based on service status
-            _connectionState.value = if (isRunning) {
-                com.hyperxray.an.feature.dashboard.ConnectionState.Connected
-            } else {
-                com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
-            }
+            _isServiceEnabled.value = isServiceRunning(application, TProxyService::class.java)
 
             updateSettingsState()
             loadKernelVersion()
@@ -397,8 +413,6 @@ class MainViewModel(application: Application) :
         super.onCleared()
         Log.d(TAG, "MainViewModel cleared, unregistering receivers.")
         unregisterTProxyServiceReceivers()
-        // Note: MultiXrayCoreManager is a singleton managed by TProxyService
-        // We don't need to cleanup here as it's managed by the service lifecycle
     }
 
     private fun updateSettingsState() {
@@ -412,7 +426,8 @@ class MainViewModel(application: Application) :
                 httpProxyEnabled = prefs.httpProxyEnabled,
                 bypassLanEnabled = prefs.bypassLan,
                 disableVpn = prefs.disableVpn,
-                themeMode = prefs.theme
+                themeMode = prefs.theme,
+                autoStart = prefs.autoStart
             ),
             info = _settingsState.value.info.copy(
                 appVersion = BuildConfig.VERSION_NAME,
@@ -453,8 +468,7 @@ class MainViewModel(application: Application) :
                 )
             ),
             bypassDomains = prefs.bypassDomains,
-            bypassIps = prefs.bypassIps,
-            xrayCoreInstanceCount = prefs.xrayCoreInstanceCount
+            bypassIps = prefs.bypassIps
         )
     }
 
@@ -535,28 +549,6 @@ class MainViewModel(application: Application) :
         }
     }
 
-    /**
-     * Calculates adaptive polling interval based on traffic state.
-     * No traffic: 60 seconds
-     * Low traffic: 30 seconds
-     * High traffic: 10-15 seconds
-     */
-    private fun calculateAdaptivePollingInterval(stats: CoreStatsState?): Long {
-        if (stats == null) {
-            return 2000L // Default 2 seconds when no stats available
-        }
-        
-        val totalThroughput = stats.uplinkThroughput + stats.downlinkThroughput
-        val highTrafficThreshold = 100_000.0 // 100 KB/s
-        val lowTrafficThreshold = 10_000.0 // 10 KB/s
-        
-        return when {
-            totalThroughput > highTrafficThreshold -> 10000L // 10 seconds for high traffic
-            totalThroughput > lowTrafficThreshold -> 2000L // 2 seconds for low traffic (status polling needs to be frequent)
-            else -> 5000L // 5 seconds for no/low traffic
-        }
-    }
-    
     fun setControlMenuClickable(isClickable: Boolean) {
         _controlMenuClickable.value = isClickable
     }
@@ -564,414 +556,6 @@ class MainViewModel(application: Application) :
     fun setServiceEnabled(enabled: Boolean) {
         _isServiceEnabled.value = enabled
         prefs.enable = enabled
-    }
-    
-    fun setConnectionStateDisconnecting() {
-        // Start disconnection process with initial stage
-        startDisconnectionProcess()
-    }
-    
-    /**
-     * Starts the disconnection process with real-time stage checking.
-     * Each stage has a minimum display time so users can see the progress.
-     */
-    fun startDisconnectionProcess() {
-        viewModelScope.launch {
-            // Only start if we're not already disconnected
-            if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected) {
-                return@launch
-            }
-            
-            val minStageDisplayTime = 800L // Minimum time to show each stage (800ms)
-            val checkInterval = 100L // Check every 100ms
-            
-            // Stage 1: STOPPING_XRAY - Stopping Xray core
-            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
-                stage = com.hyperxray.an.feature.dashboard.DisconnectionStage.STOPPING_XRAY,
-                progress = 0.2f
-            )
-            
-            // Show this stage for minimum time
-            var elapsed = 0L
-            while (elapsed < minStageDisplayTime) {
-                kotlinx.coroutines.delay(checkInterval)
-                elapsed += checkInterval
-                
-                // Check if already disconnected (shouldn't happen, but safety check)
-                if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected) {
-                    return@launch
-                }
-            }
-            
-            // Stage 2: CLOSING_TUNNEL - Closing network tunnel
-            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
-                stage = com.hyperxray.an.feature.dashboard.DisconnectionStage.CLOSING_TUNNEL,
-                progress = 0.5f
-            )
-            
-            // Show this stage for minimum time
-            elapsed = 0L
-            while (elapsed < minStageDisplayTime) {
-                kotlinx.coroutines.delay(checkInterval)
-                elapsed += checkInterval
-                
-                if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected) {
-                    return@launch
-                }
-            }
-            
-            // Stage 3: STOPPING_VPN - Closing VPN interface
-            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
-                stage = com.hyperxray.an.feature.dashboard.DisconnectionStage.STOPPING_VPN,
-                progress = 0.7f
-            )
-            
-            // Show this stage for minimum time, or wait for service to stop
-            elapsed = 0L
-            val maxWait = 3000L // Max 3 seconds for VPN stop
-            while (elapsed < minStageDisplayTime || (_isServiceEnabled.value && elapsed < maxWait)) {
-                kotlinx.coroutines.delay(checkInterval)
-                elapsed += checkInterval
-                
-                if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected) {
-                    return@launch
-                }
-            }
-            
-            // Stage 4: CLEANING_UP - Releasing resources
-            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
-                stage = com.hyperxray.an.feature.dashboard.DisconnectionStage.CLEANING_UP,
-                progress = 0.9f
-            )
-            
-            // Show final cleanup stage and wait for service to completely stop
-            elapsed = 0L
-            val maxWaitForService = 10000L // Max 10 seconds for service to stop
-            var serviceStopped = false
-            
-            while (elapsed < minStageDisplayTime || !serviceStopped) {
-                kotlinx.coroutines.delay(checkInterval)
-                elapsed += checkInterval
-                
-                // Check if already disconnected (shouldn't happen, but safety check)
-                if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected) {
-                    return@launch
-                }
-                
-                // Check if service is completely stopped
-                if (!serviceStopped) {
-                    serviceStopped = !MainViewModel.isServiceRunning(application, TProxyService::class.java)
-                    if (serviceStopped && elapsed < minStageDisplayTime) {
-                        // Service stopped but we still need to show the stage for minimum time
-                        continue
-                    }
-                }
-                
-                // If service stopped and minimum time passed, we can proceed
-                if (serviceStopped && elapsed >= minStageDisplayTime) {
-                    break
-                }
-                
-                // Timeout check
-                if (elapsed >= maxWaitForService) {
-                    // Service might still be running, but we've waited long enough
-                    // Check one more time
-                    serviceStopped = !MainViewModel.isServiceRunning(application, TProxyService::class.java)
-                    break
-                }
-            }
-            
-            // Final state: DISCONNECTED (only after service is confirmed stopped)
-            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
-        }
-    }
-    
-    /**
-     * Starts the connection process with real-time stage checking.
-     * Each stage waits for actual service state changes instead of timeouts.
-     */
-    fun startConnectionProcess() {
-        viewModelScope.launch {
-            // Only start if we're not already connected
-            if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
-                return@launch
-            }
-            
-            // Reset SOCKS5 ready state
-            _socks5Ready.value = false
-            
-            // Stage 1: INITIALIZING - Service start command sent
-            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connecting(
-                stage = com.hyperxray.an.feature.dashboard.ConnectionStage.INITIALIZING,
-                progress = 0.1f
-            )
-            
-            // Wait for VPN service to start (check _isServiceEnabled)
-            val checkInterval = 200L // Check every 200ms
-            var maxWait = 10000L // 10 seconds max for VPN start
-            var elapsed = 0L
-            
-            while (elapsed < maxWait) {
-                kotlinx.coroutines.delay(checkInterval)
-                elapsed += checkInterval
-                
-                // Check if already connected
-                if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
-                    return@launch
-                }
-                
-                // Check if service is disabled (error occurred)
-                if (!_isServiceEnabled.value && elapsed > 1000) {
-                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
-                    return@launch
-                }
-                
-                // Check if VPN service started
-                if (_isServiceEnabled.value) {
-                    break // VPN started, move to next stage
-                }
-            }
-            
-            // If timeout and service still not enabled, show error
-            if (!_isServiceEnabled.value) {
-                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
-                return@launch
-            }
-            
-            // Check if already connected
-            if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
-                return@launch
-            }
-            
-            // Stage 2: STARTING_VPN - VPN service is starting
-            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connecting(
-                stage = com.hyperxray.an.feature.dashboard.ConnectionStage.STARTING_VPN,
-                progress = 0.3f
-            )
-            
-            // VPN is already started (we checked above), move to Xray stage
-            // Small delay to show the stage
-            kotlinx.coroutines.delay(300)
-            
-            // Check if already connected
-            if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
-                return@launch
-            }
-            
-            // Stage 3: STARTING_XRAY - Xray service is starting
-            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connecting(
-                stage = com.hyperxray.an.feature.dashboard.ConnectionStage.STARTING_XRAY,
-                progress = 0.5f
-            )
-            
-            // Wait for Xray to start (service is enabled, but Xray might need time)
-            // We'll wait for SOCKS5 ready as indicator that Xray is fully started
-            elapsed = 0L
-            maxWait = 15000L // 15 seconds max for Xray start
-            
-            while (elapsed < maxWait) {
-                kotlinx.coroutines.delay(checkInterval)
-                elapsed += checkInterval
-                
-                // Check if already connected
-                if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
-                    return@launch
-                }
-                
-                // Check if service is disabled
-                if (!_isServiceEnabled.value) {
-                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
-                    return@launch
-                }
-                
-                // Check if SOCKS5 is ready (indicates Xray is started)
-                if (_socks5Ready.value) {
-                    break // Xray started, move to next stage
-                }
-            }
-            
-            // Check if already connected
-            if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
-                return@launch
-            }
-            
-            // Stage 4: ESTABLISHING - Connection is being established
-            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connecting(
-                stage = com.hyperxray.an.feature.dashboard.ConnectionStage.ESTABLISHING,
-                progress = 0.7f
-            )
-            
-            // SOCKS5 is ready, connection is being established
-            // Small delay to show the stage
-            kotlinx.coroutines.delay(500)
-            
-            // Check if already connected
-            if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
-                return@launch
-            }
-            
-            // Stage 5: VERIFYING - Wait for real data to arrive
-            _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connecting(
-                stage = com.hyperxray.an.feature.dashboard.ConnectionStage.VERIFYING,
-                progress = 0.9f
-            )
-            
-            // Wait for real connection data (uptime > 0 or throughput > 0)
-            // Use fast direct CoreStatsClient.getTraffic() check instead of slow updateCoreStats()
-            elapsed = 0L
-            maxWait = 5000L // 5 seconds max wait for data (optimized for speed)
-            val verifyingCheckInterval = 200L // Check every 200ms (very fast polling)
-            val progressCheckInterval = 500L // Update progress every 500ms
-            
-            // First check immediately (no delay) - data might already be available
-            var firstCheck = true
-            
-            while (elapsed < maxWait) {
-                if (!firstCheck) {
-                    kotlinx.coroutines.delay(verifyingCheckInterval)
-                    elapsed += verifyingCheckInterval
-                } else {
-                    firstCheck = false
-                }
-                
-                // Check if already marked as connected
-                if (_connectionState.value is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
-                    return@launch
-                }
-                
-                // Check if service is still enabled
-                if (!_isServiceEnabled.value) {
-                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
-                    return@launch
-                }
-                
-                // Fast direct CoreStatsClient check - much faster than updateCoreStats()
-                // This only checks traffic, not full stats, so it's very quick
-                var hasTrafficData = false
-                try {
-                    val quickClient = CoreStatsClient.create("127.0.0.1", prefs.apiPort)
-                    if (quickClient != null) {
-                        val traffic = withTimeoutOrNull(1000L) { // 1 second timeout for quick check
-                            quickClient.getTraffic()
-                        }
-                        if (traffic != null && (traffic.uplink > 0 || traffic.downlink > 0)) {
-                            // Traffic data found! Update state and mark as connected
-                            Log.d(TAG, "Fast traffic check found data: uplink=${traffic.uplink}, downlink=${traffic.downlink}")
-                            
-                            // Update state with traffic data
-                            val currentState = _coreStatsState.value
-                            val newStats = CoreStatsState(
-                                uplink = traffic.uplink,
-                                downlink = traffic.downlink,
-                                uplinkThroughput = currentState.uplinkThroughput,
-                                downlinkThroughput = currentState.downlinkThroughput,
-                                numGoroutine = currentState.numGoroutine,
-                                numGC = currentState.numGC,
-                                alloc = currentState.alloc,
-                                totalAlloc = currentState.totalAlloc,
-                                sys = currentState.sys,
-                                mallocs = currentState.mallocs,
-                                frees = currentState.frees,
-                                liveObjects = currentState.liveObjects,
-                                pauseTotalNs = currentState.pauseTotalNs,
-                                uptime = currentState.uptime
-                            )
-                            _coreStatsState.value = newStats
-                            hasTrafficData = true
-                        }
-                        // Close quick client after use
-                        try {
-                            quickClient.close()
-                        } catch (closeEx: Exception) {
-                            Log.w(TAG, "Error closing quick client: ${closeEx.message}")
-                        }
-                    }
-                } catch (e: Exception) {
-                    // Quick check failed, continue with existing state check
-                    Log.d(TAG, "Quick traffic check failed: ${e.message}")
-                }
-                
-                // Also check existing state (might have been updated by updateCoreStats from DashboardScreen)
-                val stats = _coreStatsState.value
-                val hasRealConnection = hasTrafficData || 
-                                       stats.uptime > 0 || 
-                                       stats.uplinkThroughput > 0 || 
-                                       stats.downlinkThroughput > 0 ||
-                                       stats.uplink > 0 || 
-                                       stats.downlink > 0
-                
-                if (hasRealConnection) {
-                    // Real data is flowing, connection is established
-                    Log.d(TAG, "Real connection data detected in VERIFYING stage (elapsed: ${elapsed}ms), updating to Connected")
-                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connected
-                    return@launch
-                }
-                
-                // Update progress periodically (slowly increase to 0.98)
-                if (elapsed % progressCheckInterval < verifyingCheckInterval || elapsed == 0L) {
-                    val progress = 0.9f + (elapsed.toFloat() / maxWait.toFloat()) * 0.08f
-                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connecting(
-                        stage = com.hyperxray.an.feature.dashboard.ConnectionStage.VERIFYING,
-                        progress = progress.coerceAtMost(0.98f)
-                    )
-                }
-            }
-            
-            // If still no data after timeout, do one final fast check
-            try {
-                val finalClient = CoreStatsClient.create("127.0.0.1", prefs.apiPort)
-                if (finalClient != null) {
-                    val traffic = withTimeoutOrNull(1000L) {
-                        finalClient.getTraffic()
-                    }
-                    if (traffic != null && (traffic.uplink > 0 || traffic.downlink > 0)) {
-                        // Final check found data, update state immediately
-                        Log.d(TAG, "Final fast check found traffic data: uplink=${traffic.uplink}, downlink=${traffic.downlink}")
-                        val currentState = _coreStatsState.value
-                        val newStats = CoreStatsState(
-                            uplink = traffic.uplink,
-                            downlink = traffic.downlink,
-                            uplinkThroughput = currentState.uplinkThroughput,
-                            downlinkThroughput = currentState.downlinkThroughput,
-                            numGoroutine = currentState.numGoroutine,
-                            numGC = currentState.numGC,
-                            alloc = currentState.alloc,
-                            totalAlloc = currentState.totalAlloc,
-                            sys = currentState.sys,
-                            mallocs = currentState.mallocs,
-                            frees = currentState.frees,
-                            liveObjects = currentState.liveObjects,
-                            pauseTotalNs = currentState.pauseTotalNs,
-                            uptime = currentState.uptime
-                        )
-                        _coreStatsState.value = newStats
-                    }
-                    try {
-                        finalClient.close()
-                    } catch (closeEx: Exception) {
-                        Log.w(TAG, "Error closing final client: ${closeEx.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                Log.d(TAG, "Final fast check failed: ${e.message}")
-            }
-            
-            val finalStats = _coreStatsState.value
-            val hasFinalConnection = finalStats.uptime > 0 || 
-                                     finalStats.uplinkThroughput > 0 || 
-                                     finalStats.downlinkThroughput > 0 ||
-                                     finalStats.uplink > 0 || 
-                                     finalStats.downlink > 0
-            
-            if (hasFinalConnection && _isServiceEnabled.value) {
-                Log.d(TAG, "Final check: Real connection data detected, updating to Connected")
-                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connected
-            } else {
-                // Timeout reached but no data - keep showing VERIFYING
-                // updateCoreStats will eventually update when data arrives
-                Log.w(TAG, "VERIFYING timeout reached (${maxWait}ms) but no connection data detected yet")
-            }
-        }
     }
 
     fun clearCompressedBackupData() {
@@ -1082,35 +666,10 @@ class MainViewModel(application: Application) :
             return
         }
         
-        // Get active instance ports first to determine which port to use for main client
-        // Use singleton instance from TProxyService
-        val managerForClient = try {
-            MultiXrayCoreManager.getInstance(application)
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to get MultiXrayCoreManager instance: ${e.message}")
-            null
-        }
-        val activeInstancesForClient = if (managerForClient != null) {
-            managerForClient.getActiveInstances()
-        } else {
-            emptyMap()
-        }
-        
-        // Determine port for main client: prefer first active instance port, fallback to prefs.apiPort
-        val mainClientPort = if (activeInstancesForClient.isNotEmpty()) {
-            activeInstancesForClient.values.first()
-        } else {
-            prefs.apiPort
-        }
-        
         // Synchronize access to coreStatsClient to prevent race conditions
         val client = coreStatsClientMutex.withLock {
-            // Check if we need to recreate client (null, wrong port, or bad state)
-            val existingClient = coreStatsClient // Local copy for smart cast
-            val needsRecreation = existingClient == null || 
-                                 (clientState == ClientState.FAILED && consecutiveFailures >= 3)
-            
-            if (needsRecreation) {
+            // Check if we can recreate client (cooldown and state checks)
+            if (coreStatsClient == null) {
                 val now = System.currentTimeMillis()
                 val timeSinceClose = now - lastClientCloseTime
                 
@@ -1118,14 +677,13 @@ class MainViewModel(application: Application) :
                 if (timeSinceClose < MIN_RECREATE_INTERVAL_MS) {
                     val remainingCooldown = MIN_RECREATE_INTERVAL_MS - timeSinceClose
                     Log.d(TAG, "Client recreation cooldown active, ${remainingCooldown}ms remaining")
-                    // Return existing client if available, even if in bad state
-                    return@withLock existingClient
+                    return@withLock null
                 }
                 
                 // Check state: only recreate if STOPPED or FAILED (not SHUTTING_DOWN or CREATING)
                 if (clientState != ClientState.STOPPED && clientState != ClientState.FAILED) {
                     Log.d(TAG, "Client in state ${clientState}, skipping recreation")
-                    return@withLock existingClient
+                    return@withLock null
                 }
                 
                 // Calculate exponential backoff based on consecutive failures
@@ -1137,18 +695,8 @@ class MainViewModel(application: Application) :
                     if (timeSinceClose < backoffMs) {
                         val remainingBackoff = backoffMs - timeSinceClose
                         Log.d(TAG, "Exponential backoff active, ${remainingBackoff}ms remaining (failures: $consecutiveFailures)")
-                        return@withLock existingClient
+                        return@withLock null
                     }
-                }
-                
-                // Close existing client if it exists
-                if (existingClient != null) {
-                    try {
-                        existingClient.close()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error closing existing client before recreation: ${e.message}")
-                    }
-                    coreStatsClient = null
                 }
                 
                 // Set state to CREATING to prevent concurrent creation attempts
@@ -1156,20 +704,19 @@ class MainViewModel(application: Application) :
                 
                 try {
                     // create() now returns nullable and handles retries internally
-                    Log.d(TAG, "Attempting to create CoreStatsClient on port $mainClientPort")
-                    coreStatsClient = CoreStatsClient.create("127.0.0.1", mainClientPort)
+                    coreStatsClient = CoreStatsClient.create("127.0.0.1", prefs.apiPort)
                     if (coreStatsClient != null) {
-                        Log.i(TAG, "Successfully created new CoreStatsClient on port $mainClientPort")
+                        Log.d(TAG, "Created new CoreStatsClient")
                         clientState = ClientState.READY
                         consecutiveFailures = 0 // Reset on success
                     } else {
-                        Log.w(TAG, "Failed to create CoreStatsClient on port $mainClientPort after retries")
+                        Log.w(TAG, "Failed to create CoreStatsClient after retries")
                         clientState = ClientState.FAILED
                         consecutiveFailures++
                         lastClientCloseTime = System.currentTimeMillis()
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Exception creating CoreStatsClient on port $mainClientPort: ${e.message}", e)
+                    Log.e(TAG, "Exception creating CoreStatsClient: ${e.message}", e)
                     clientState = ClientState.FAILED
                     consecutiveFailures++
                     lastClientCloseTime = System.currentTimeMillis()
@@ -1184,9 +731,13 @@ class MainViewModel(application: Application) :
         // Validate client was created
         if (client == null) {
             Log.w(TAG, "CoreStatsClient is null, cannot update stats - will retry on next call")
-            // Preserve existing state - don't reset to zero
-            // This allows UI to show last known values while client is being created
-            // State is already preserved (no need to update with same values)
+            // Don't return immediately - update state with safe fallback values
+            // This allows UI to show "connecting" or "unavailable" state
+            val currentState = _coreStatsState.value
+            _coreStatsState.value = currentState.copy(
+                // Preserve existing values, don't reset to zero
+                // UI can show these as "last known" or "unavailable"
+            )
             return
         }
         
@@ -1215,15 +766,12 @@ class MainViewModel(application: Application) :
         // Handle timeout, exception, or service disabled
         if (statsResult == null) {
             // Timeout, exception, or service disabled occurred
-            Log.w(TAG, "System stats query failed (timeout/exception/disabled)")
+            Log.w(TAG, "Stats query failed (timeout/exception/disabled)")
             // Only close client if service is disabled or we've had multiple failures
             // This prevents rapid recreate loops
             if (!_isServiceEnabled.value) {
-                Log.d(TAG, "Service disabled, closing client and preserving state")
                 closeCoreStatsClient()
                 consecutiveFailures = 0
-                // Preserve existing state when service is disabled
-                // State will be reset in stopReceiver
             } else {
                 // Service is enabled but query failed - increment failure count
                 // Only close client after multiple consecutive failures to prevent loops
@@ -1237,8 +785,6 @@ class MainViewModel(application: Application) :
                 } else {
                     Log.d(TAG, "Stats query failed but keeping client (failures: $consecutiveFailures)")
                 }
-                // Preserve existing state on failure - don't reset to zero
-                // UI will show last known values
             }
             return
         }
@@ -1253,119 +799,27 @@ class MainViewModel(application: Application) :
         
         // Check if service is still enabled after first gRPC call
         if (!_isServiceEnabled.value) {
-            Log.d(TAG, "Service disabled during stats update after system stats query, preserving state and closing client")
+            Log.d(TAG, "Service disabled during stats update, skipping")
             closeCoreStatsClient()
-            // Preserve existing state - don't reset to zero
             return
         }
         
-        // Get all active instance ports from MultiXrayCoreManager
-        // If multiple instances are running, we need to aggregate traffic from all of them
-        // Use singleton instance from TProxyService
-        val managerForTraffic = try {
-            MultiXrayCoreManager.getInstance(application)
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to get MultiXrayCoreManager instance: ${e.message}")
-            null
-        }
-        val activeInstances = if (managerForTraffic != null) {
-            val instances = managerForTraffic.getActiveInstances()
-            if (instances.isEmpty()) {
-                // Manager exists but no active instances - log detailed status
-                val allStatuses = managerForTraffic.instancesStatus.value
-                Log.w(TAG, "MultiXrayCoreManager exists but no active instances. Total instances in status: ${allStatuses.size}")
-                allStatuses.forEach { (index, status) ->
-                    Log.w(TAG, "Instance $index status: $status")
+        val trafficResult = withTimeoutOrNull(5000L) {
+            try {
+                // Check if service is still enabled before making gRPC call
+                if (!_isServiceEnabled.value) {
+                    return@withTimeoutOrNull null
                 }
+                // Make gRPC call - may throw exception or timeout
+                client.getTraffic()
+            } catch (e: Exception) {
+                // Exception occurred during gRPC call - log it
+                // Note: This exception will be caught by withTimeoutOrNull and null will be returned
+                // but we catch it here to log it before that happens
+                Log.e(TAG, "Error getting traffic stats: ${e.message}", e)
+                // Return null to indicate failure (withTimeoutOrNull will return null)
+                null
             }
-            instances
-        } else {
-            // MultiXrayCoreManager might not be initialized yet (service not started)
-            // Log this case and use fallback
-            Log.w(TAG, "MultiXrayCoreManager instance not available (service may not be started), using fallback port ${prefs.apiPort}")
-            emptyMap()
-        }
-        
-        val portsToQuery = if (activeInstances.isNotEmpty()) {
-            activeInstances.values.toList()
-        } else {
-            // Fallback to prefs.apiPort if no active instances found
-            // This can happen if:
-            // 1. multiXrayCoreManager is null (not initialized yet)
-            // 2. No active instances are running (instances may have crashed or not started)
-            // 3. Single instance mode (instanceCount = 1) but instance not running
-            Log.w(TAG, "No active instances found in multiXrayCoreManager (manager=${managerForTraffic != null}), using fallback port ${prefs.apiPort}. " +
-                    "This may indicate instances failed to start or crashed.")
-            listOf(prefs.apiPort)
-        }
-        
-        Log.d(TAG, "Querying traffic from ${portsToQuery.size} instance(s): ${portsToQuery.joinToString(", ")}")
-        
-        // Aggregate traffic from all instances
-        var totalUplink = 0L
-        var totalDownlink = 0L
-        var successfulQueries = 0
-        
-        for (port in portsToQuery) {
-            val instanceClient = CoreStatsClient.create("127.0.0.1", port)
-            if (instanceClient == null) {
-                Log.w(TAG, "Failed to create CoreStatsClient for port $port (will try next port or fallback)")
-                continue
-            }
-            
-            val instanceTraffic = withTimeoutOrNull(3000L) {
-                try {
-                    if (!_isServiceEnabled.value) {
-                        Log.d(TAG, "Service disabled during traffic query for port $port")
-                        return@withTimeoutOrNull null
-                    }
-                    instanceClient.getTraffic()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Exception getting traffic from port $port: ${e.message}", e)
-                    null
-                } finally {
-                    // Close instance client after use
-                    try {
-                        instanceClient.close()
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error closing instance client for port $port: ${e.message}")
-                    }
-                }
-            }
-            
-            if (instanceTraffic != null) {
-                totalUplink += instanceTraffic.uplink
-                totalDownlink += instanceTraffic.downlink
-                successfulQueries++
-                Log.d(TAG, "Successfully queried port $port: uplink=${instanceTraffic.uplink}, downlink=${instanceTraffic.downlink}")
-            } else {
-                Log.w(TAG, "Failed to get traffic from port $port (timeout/exception/disabled)")
-            }
-        }
-        
-        val trafficResult = if (successfulQueries > 0) {
-            com.hyperxray.an.xray.runtime.stats.model.TrafficState(totalUplink, totalDownlink)
-        } else {
-            // Fallback: try using the main client if all instance queries failed
-            Log.w(TAG, "All ${portsToQuery.size} instance query(ies) failed, trying main client as fallback")
-            withTimeoutOrNull(3000L) {
-                try {
-                    if (!_isServiceEnabled.value) {
-                        Log.d(TAG, "Service disabled during main client fallback traffic query")
-                        return@withTimeoutOrNull null
-                    }
-                    client.getTraffic()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Exception getting traffic from main client fallback: ${e.message}", e)
-                    null
-                }
-            }
-        }
-        
-        if (successfulQueries > 1) {
-            Log.i(TAG, "Successfully aggregated traffic from $successfulQueries instances: totalUplink=$totalUplink, totalDownlink=$totalDownlink")
-        } else if (successfulQueries == 1 && portsToQuery.size > 1) {
-            Log.w(TAG, "Only 1 out of ${portsToQuery.size} instance queries succeeded")
         }
         
         // Handle timeout, exception, or service disabled
@@ -1375,27 +829,22 @@ class MainViewModel(application: Application) :
             // Don't close client immediately - it might recover on next call
             // Only close if service is disabled
             if (!_isServiceEnabled.value) {
-                Log.d(TAG, "Service disabled during traffic query, closing client and preserving state")
                 closeCoreStatsClient()
                 consecutiveFailures = 0
-                // Preserve existing state when service is disabled
-                // State will be reset in stopReceiver
             } else {
                 // Increment failure count but don't close immediately
                 // Traffic failures are less critical than system stats failures
                 consecutiveFailures++
                 if (consecutiveFailures >= 5) {
-                    Log.w(TAG, "Multiple consecutive traffic failures ($consecutiveFailures), closing client")
+                    Log.w(TAG, "Multiple consecutive failures ($consecutiveFailures), closing client")
                     synchronized(coreStatsClientLock) {
                         clientState = ClientState.FAILED
                     }
                     closeCoreStatsClient()
-                } else {
-                    Log.d(TAG, "Traffic query failed but keeping client (failures: $consecutiveFailures)")
                 }
             }
-            // Preserve existing state - don't update with failed query results
-            // This allows UI to show last known values while retrying
+            // Preserve existing traffic values instead of returning
+            // This allows UI to show last known values
             // Note: We don't update state here since traffic failed - preserve all existing values
             return
         }
@@ -1410,73 +859,54 @@ class MainViewModel(application: Application) :
         
         // Check if service is still enabled after both gRPC calls
         if (!_isServiceEnabled.value) {
-            Log.d(TAG, "Service disabled during stats update after traffic query, preserving state and closing client")
+            Log.d(TAG, "Service disabled during stats update, skipping")
             closeCoreStatsClient()
-            // Preserve existing state - don't reset to zero
             return
         }
         
         val stats = statsResult
         val traffic = trafficResult
 
-        // At this point, traffic is guaranteed to be non-null (checked above)
-        // Validate that we got some data (though traffic is already validated)
-        if (stats == null) {
-            // Traffic is non-null, but stats might be null - that's okay, we can still update traffic
-            Log.d(TAG, "Stats is null but traffic is available, continuing with traffic update")
+        // Validate that we got some data
+        if (stats == null && traffic == null) {
+            Log.w(TAG, "Both stats and traffic are null, closing client")
+            closeCoreStatsClient()
+            return
         }
-        
+
+        // Preserve existing traffic values if new traffic data is null
         val currentState = _coreStatsState.value
+        val newUplink = traffic?.uplink ?: currentState.uplink
+        val newDownlink = traffic?.downlink ?: currentState.downlink
+
+        // Calculate throughput (bytes per second)
         val now = System.currentTimeMillis()
+        var uplinkThroughput = 0.0
+        var downlinkThroughput = 0.0
         
-        // Preserve existing throughput values as default (will be updated if valid calculation is possible)
-        var uplinkThroughput = currentState.uplinkThroughput
-        var downlinkThroughput = currentState.downlinkThroughput
-        var newUplink = traffic.uplink
-        var newDownlink = traffic.downlink
-        
-        // Use Xray-core stats for throughput calculation
         if (lastStatsTime > 0 && now > lastStatsTime) {
             val timeDelta = (now - lastStatsTime) / 1000.0 // Convert to seconds
-            val MIN_TIME_DELTA = 0.1 // Minimum 100ms for valid calculation
             
-            if (timeDelta >= MIN_TIME_DELTA) {
+            if (timeDelta > 0) {
                 val uplinkDelta = newUplink - lastUplink
                 val downlinkDelta = newDownlink - lastDownlink
                 
-                // Handle negative deltas (e.g., xray restart resets counters)
-                if (uplinkDelta >= 0) {
-                    uplinkThroughput = uplinkDelta / timeDelta
-                } else {
-                    uplinkThroughput = 0.0
-                    Log.d(TAG, "Negative uplink delta detected (${uplinkDelta}), likely counter reset. Setting throughput to 0")
-                }
+                uplinkThroughput = uplinkDelta / timeDelta
+                downlinkThroughput = downlinkDelta / timeDelta
                 
-                if (downlinkDelta >= 0) {
-                    downlinkThroughput = downlinkDelta / timeDelta
-                } else {
-                    downlinkThroughput = 0.0
-                    Log.d(TAG, "Negative downlink delta detected (${downlinkDelta}), likely counter reset. Setting throughput to 0")
-                }
-                
-                Log.d(TAG, "Xray-core throughput calculated: uplink=${formatThroughput(uplinkThroughput)}, downlink=${formatThroughput(downlinkThroughput)}, timeDelta=${timeDelta}s, uplinkDelta=${uplinkDelta}, downlinkDelta=${downlinkDelta}")
-            } else {
-                // TimeDelta too small, preserve existing values
-                Log.d(TAG, "Xray-core timeDelta too small (${timeDelta}s), preserving existing throughput values")
+                Log.d(TAG, "Throughput calculated: uplink=${formatThroughput(uplinkThroughput)}, downlink=${formatThroughput(downlinkThroughput)}, timeDelta=${timeDelta}s")
             }
         } else if (lastStatsTime == 0L) {
-            // First measurement - initialize baseline, keep throughput at 0
-            uplinkThroughput = 0.0
-            downlinkThroughput = 0.0
-            Log.d(TAG, "First Xray-core measurement - initializing baseline")
+            // First measurement - initialize baseline
+            Log.d(TAG, "First throughput measurement - initializing baseline")
         }
         
-        // Update last values for next calculation (always update when we have valid traffic)
+        // Update last values for next calculation
         lastUplink = newUplink
         lastDownlink = newDownlink
         lastStatsTime = now
 
-        val newStats = CoreStatsState(
+        _coreStatsState.value = CoreStatsState(
             uplink = newUplink,
             downlink = newDownlink,
             uplinkThroughput = uplinkThroughput,
@@ -1492,29 +922,6 @@ class MainViewModel(application: Application) :
             pauseTotalNs = stats?.pauseTotalNs ?: currentState.pauseTotalNs,
             uptime = stats?.uptime ?: currentState.uptime
         )
-        _coreStatsState.value = newStats
-        
-        // Only update to Connected if we're in VERIFYING stage and real data has arrived
-        // Don't update during INITIALIZING, STARTING_VPN, STARTING_XRAY, or ESTABLISHING stages
-        val currentConnectionState = _connectionState.value
-        if (currentConnectionState is com.hyperxray.an.feature.dashboard.ConnectionState.Connecting) {
-            // Only proceed if we're in VERIFYING stage
-            if (currentConnectionState.stage == com.hyperxray.an.feature.dashboard.ConnectionStage.VERIFYING) {
-                val hasRealConnection = newStats.uptime > 0 || 
-                                       newStats.uplinkThroughput > 0 || 
-                                       newStats.downlinkThroughput > 0 ||
-                                       newStats.uplink > 0 || 
-                                       newStats.downlink > 0
-                
-                if (hasRealConnection && _isServiceEnabled.value) {
-                    Log.d(TAG, "Real connection data detected in VERIFYING stage, updating to Connected state")
-                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connected
-                }
-            }
-            // For other stages (INITIALIZING, STARTING_VPN, STARTING_XRAY, ESTABLISHING), 
-            // don't update to Connected - let startConnectionProcess handle the progression
-        }
-        
         Log.d(TAG, "Core stats updated - Uplink: ${formatBytes(newUplink)}, Downlink: ${formatBytes(newDownlink)}, Uplink Throughput: ${formatThroughput(uplinkThroughput)}, Downlink Throughput: ${formatThroughput(downlinkThroughput)}")
     }
 
@@ -1694,6 +1101,30 @@ class MainViewModel(application: Application) :
             switches = _settingsState.value.switches.copy(themeMode = mode)
         )
         reloadView?.invoke()
+    }
+
+    fun setAutoStart(enabled: Boolean) {
+        prefs.autoStart = enabled
+        _settingsState.value = _settingsState.value.copy(
+            switches = _settingsState.value.switches.copy(autoStart = enabled)
+        )
+    }
+
+    fun setConnectionStateDisconnecting() {
+        _connectionState.value = ConnectionState.Disconnecting(
+            com.hyperxray.an.feature.dashboard.DisconnectionStage.STOPPING_XRAY
+        )
+    }
+
+    fun navigate(route: String) {
+        viewModelScope.launch {
+            _uiEvent.trySend(MainViewUiEvent.Navigate(route))
+        }
+    }
+
+    fun setXrayCoreInstanceCount(count: Int) {
+        prefs.xrayCoreInstanceCount = count
+        _settingsState.value = _settingsState.value.copy(xrayCoreInstanceCount = count)
     }
 
     // Performance Settings Functions
@@ -2078,19 +1509,6 @@ class MainViewModel(application: Application) :
         )
     }
 
-    fun setXrayCoreInstanceCount(count: Int) {
-        // Clamp value between 1 and 4
-        val clampedCount = when {
-            count < 1 -> 1
-            count > 4 -> 4
-            else -> count
-        }
-        prefs.xrayCoreInstanceCount = clampedCount
-        _settingsState.value = _settingsState.value.copy(
-            xrayCoreInstanceCount = clampedCount
-        )
-    }
-
     fun importRuleFile(uri: Uri, fileName: String) {
         viewModelScope.launch(Dispatchers.IO) {
             val success = fileManager.importRuleFile(uri, fileName)
@@ -2134,19 +1552,14 @@ class MainViewModel(application: Application) :
     }
 
     fun startTProxyService(action: String) {
-        // Check config file synchronously for immediate feedback
-        if (_selectedConfigFile.value == null) {
-            viewModelScope.launch {
-                _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(application.getString(R.string.not_select_config)))
-            }
-            Log.w(TAG, "Cannot start service: no config file selected.")
-            setControlMenuClickable(true)
-            return
-        }
-        
-        // Create and send intent immediately (non-blocking)
-        val intent = Intent(application, TProxyService::class.java).setAction(action)
         viewModelScope.launch {
+            if (_selectedConfigFile.value == null) {
+                _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(application.getString(R.string.not_select_config)))
+                Log.w(TAG, "Cannot start service: no config file selected.")
+                setControlMenuClickable(true)
+                return@launch
+            }
+            val intent = Intent(application, TProxyService::class.java).setAction(action)
             _uiEvent.trySend(MainViewUiEvent.StartService(intent))
         }
     }
@@ -2175,34 +1588,234 @@ class MainViewModel(application: Application) :
     }
 
     fun stopTProxyService() {
-        // Create and send intent immediately (non-blocking)
-        val intent = Intent(
-            application,
-            TProxyService::class.java
-        ).setAction(TProxyService.ACTION_DISCONNECT)
         viewModelScope.launch {
+            // Start disconnection process to show proper state transitions
+            stopConnectionProcess()
+            
+            val intent = Intent(
+                application,
+                TProxyService::class.java
+            ).setAction(TProxyService.ACTION_DISCONNECT)
             _uiEvent.trySend(MainViewUiEvent.StartService(intent))
         }
     }
 
     fun prepareAndStartVpn(vpnPrepareLauncher: ActivityResultLauncher<Intent>) {
-        // Check config file synchronously for immediate feedback
-        if (_selectedConfigFile.value == null) {
-            viewModelScope.launch {
-                _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(application.getString(R.string.not_select_config)))
-            }
-            Log.w(TAG, "Cannot prepare VPN: no config file selected.")
-            setControlMenuClickable(true)
-            return
-        }
-        
-        // Check VPN permission and launch immediately
         viewModelScope.launch {
+            if (_selectedConfigFile.value == null) {
+                _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(application.getString(R.string.not_select_config)))
+                Log.w(TAG, "Cannot prepare VPN: no config file selected.")
+                setControlMenuClickable(true)
+                return@launch
+            }
             val vpnIntent = VpnService.prepare(application)
             if (vpnIntent != null) {
                 vpnPrepareLauncher.launch(vpnIntent)
             } else {
                 startTProxyService(TProxyService.ACTION_CONNECT)
+            }
+        }
+    }
+
+    fun startConnectionProcess() {
+        viewModelScope.launch {
+            try {
+                _connectionState.value = ConnectionState.Connecting(ConnectionStage.INITIALIZING, progress = 0.0f)
+                
+                // STAGE 1: INITIALIZING - Check prerequisites
+                if (_selectedConfigFile.value == null) {
+                    _connectionState.value = ConnectionState.Failed(
+                        "No config file selected"
+                    )
+                    return@launch
+                }
+                delay(200) // Brief delay to show initializing stage
+                
+                // STAGE 2: STARTING_VPN - VPN service starting
+                _connectionState.value = ConnectionState.Connecting(ConnectionStage.STARTING_VPN, progress = 0.2f)
+                
+                // Wait for service to be enabled (with timeout)
+                val serviceEnabled = withTimeoutOrNull(10000L) {
+                    _isServiceEnabled.filter { it }.first()
+                }
+                
+                if (serviceEnabled == null) {
+                    _connectionState.value = ConnectionState.Failed(
+                        "Service did not start within timeout"
+                    )
+                    return@launch
+                }
+                
+                // STAGE 3: STARTING_XRAY - Xray instances starting
+                _connectionState.value = ConnectionState.Connecting(ConnectionStage.STARTING_XRAY, progress = 0.4f)
+                
+                val instanceStatus = withTimeoutOrNull(20000L) {
+                    _instancesStatus.filter { statusMap ->
+                        statusMap.values.any { it is com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Running }
+                    }.first()
+                }
+
+                // Verify we have running instances but fall back to later stages if unavailable yet
+                val runningInstances = instanceStatus
+                    ?.values
+                    ?.filterIsInstance<com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Running>()
+                    ?: _instancesStatus.value.values.filterIsInstance<com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Running>()
+
+                if (runningInstances.isEmpty()) {
+                    Log.w(
+                        TAG,
+                        "Stage 3 (STARTING_XRAY): Did not observe running instance status within 20s. " +
+                            "Will continue and rely on SOCKS5 readiness."
+                    )
+                } else {
+                    Log.d(
+                        TAG,
+                        "Stage 3 (STARTING_XRAY): Completed - Xray instances running (${runningInstances.size} instances)"
+                    )
+                }
+                
+                // STAGE 4: ESTABLISHING - SOCKS5 becoming ready
+                _connectionState.value = ConnectionState.Connecting(ConnectionStage.ESTABLISHING, progress = 0.6f)
+                
+                val socks5Ready = withTimeoutOrNull(15000L) {
+                    _socks5Ready.filter { it }.first()
+                }
+                
+                if (socks5Ready == null) {
+                    Log.w(TAG, "SOCKS5 did not become ready within timeout, but continuing verification")
+                }
+                
+                // STAGE 5: VERIFYING - Final connection verification
+                _connectionState.value = ConnectionState.Connecting(ConnectionStage.VERIFYING, progress = 0.8f)
+                
+                val finalServiceCheck = _isServiceEnabled.value
+                val finalSocks5Check = _socks5Ready.value
+                val finalInstancesCheck = _instancesStatus.value.values.any { it is com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Running }
+                val readinessSatisfied = finalSocks5Check || finalInstancesCheck
+
+                if (!finalServiceCheck) {
+                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Failed(
+                        "Connection verification failed: service=$finalServiceCheck"
+                    )
+                    return@launch
+                }
+                if (!readinessSatisfied) {
+                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Failed(
+                        "Connection verification failed: socks5=$finalSocks5Check, instances=$finalInstancesCheck"
+                    )
+                    return@launch
+                }
+                
+                // SUCCESS - Show 100% progress briefly before switching to Connected
+                _connectionState.value = ConnectionState.Connecting(ConnectionStage.VERIFYING, progress = 1.0f)
+                delay(300)
+                
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Connected
+                Log.d(TAG, "Connection process completed successfully")
+                
+            } catch (e: TimeoutCancellationException) {
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Failed(
+                    "Connection timed out: ${e.message}"
+                )
+                Log.e(TAG, "Connection process timed out", e)
+            } catch (e: Exception) {
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Failed(
+                    "Connection failed: ${e.message}"
+                )
+                Log.e(TAG, "Connection process failed", e)
+            }
+        }
+    }
+
+    /**
+     * Handles the disconnection process with proper state transitions.
+     * Updates connection state through all disconnection stages for proper UI feedback.
+     */
+    fun stopConnectionProcess() {
+        viewModelScope.launch {
+            try {
+                val currentState = _connectionState.value
+                
+                // Only start disconnection process if we're currently connected or connecting
+                if (currentState !is com.hyperxray.an.feature.dashboard.ConnectionState.Connected &&
+                    currentState !is com.hyperxray.an.feature.dashboard.ConnectionState.Connecting) {
+                    // Already disconnected or in another state, just set to Disconnected
+                    _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+                    return@launch
+                }
+                
+                // STAGE 1: STOPPING_XRAY - Stopping Xray instances
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
+                    com.hyperxray.an.feature.dashboard.DisconnectionStage.STOPPING_XRAY,
+                    progress = 0.0f
+                )
+                delay(300) // Brief delay to show stage
+                
+                // Wait for instances to stop (with timeout)
+                val instancesStopped = withTimeoutOrNull(5000L) {
+                    _instancesStatus.filter { statusMap ->
+                        statusMap.values.none { it is com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Running }
+                    }.first()
+                }
+                
+                // STAGE 2: CLOSING_TUNNEL - Closing network tunnel
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
+                    com.hyperxray.an.feature.dashboard.DisconnectionStage.CLOSING_TUNNEL,
+                    progress = 0.3f
+                )
+                delay(200)
+                
+                // STAGE 3: STOPPING_VPN - Stopping VPN service
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
+                    com.hyperxray.an.feature.dashboard.DisconnectionStage.STOPPING_VPN,
+                    progress = 0.6f
+                )
+                
+                // Wait for service to be disabled (with timeout)
+                val serviceDisabled = withTimeoutOrNull(5000L) {
+                    _isServiceEnabled.filter { !it }.first()
+                }
+                
+                // STAGE 4: CLEANING_UP - Final cleanup
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
+                    com.hyperxray.an.feature.dashboard.DisconnectionStage.CLEANING_UP,
+                    progress = 0.9f
+                )
+                delay(200)
+                
+                // Reset state
+                _socks5Ready.value = false
+                if (instancesStopped != null) {
+                    _instancesStatus.value = emptyMap()
+                }
+                
+                // SUCCESS - Complete disconnection
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
+                    com.hyperxray.an.feature.dashboard.DisconnectionStage.CLEANING_UP,
+                    progress = 1.0f
+                )
+                delay(200)
+                
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+                Log.d(TAG, "Disconnection process completed successfully")
+                
+            } catch (e: TimeoutCancellationException) {
+                // Even if timeout, set to disconnected
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+                Log.w(TAG, "Disconnection process timed out, but setting to Disconnected", e)
+            } catch (e: Exception) {
+                // Even if error, set to disconnected
+                _connectionState.value = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+                Log.e(TAG, "Disconnection process failed, but setting to Disconnected", e)
+            }
+        }
+    }
+
+    fun checkAndStartAutoVpn(vpnPrepareLauncher: ActivityResultLauncher<Intent>) {
+        viewModelScope.launch {
+            if (prefs.autoStart && !_isServiceEnabled.value && _selectedConfigFile.value != null) {
+                Log.d(TAG, "Auto start enabled, starting VPN")
+                prepareAndStartVpn(vpnPrepareLauncher)
             }
         }
     }
@@ -2217,12 +1830,6 @@ class MainViewModel(application: Application) :
     fun navigateToAiInsights() {
         viewModelScope.launch {
             _uiEvent.trySend(MainViewUiEvent.Navigate(ROUTE_AI_INSIGHTS))
-        }
-    }
-
-    fun navigate(route: String) {
-        viewModelScope.launch {
-            _uiEvent.trySend(MainViewUiEvent.Navigate(route))
         }
     }
 
@@ -2324,7 +1931,6 @@ class MainViewModel(application: Application) :
     }
 
     fun testConnectivity() {
-        Log.d(TAG, "testConnectivity() called")
         viewModelScope.launch(Dispatchers.IO) {
             val prefs = prefs
             val url: URL
@@ -2469,13 +2075,13 @@ class MainViewModel(application: Application) :
                 val instanceStatusFilter = IntentFilter(TProxyService.ACTION_INSTANCE_STATUS_UPDATE)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     application.registerReceiver(
-                        instanceStatusUpdateReceiver,
+                        instanceStatusReceiver,
                         instanceStatusFilter,
                         Context.RECEIVER_NOT_EXPORTED
                     )
                 } else {
                     @Suppress("UnspecifiedRegisterReceiverFlag")
-                    application.registerReceiver(instanceStatusUpdateReceiver, instanceStatusFilter)
+                    application.registerReceiver(instanceStatusReceiver, instanceStatusFilter)
                 }
                 
                 receiversRegistered = true
@@ -2534,9 +2140,15 @@ class MainViewModel(application: Application) :
                 }
                 
                 try {
-                    application.unregisterReceiver(instanceStatusUpdateReceiver)
+                    application.unregisterReceiver(socks5ReadyReceiver)
                 } catch (e: IllegalArgumentException) {
-                    Log.w(TAG, "instanceStatusUpdateReceiver not registered: ${e.message}")
+                    Log.w(TAG, "socks5ReadyReceiver not registered: ${e.message}")
+                }
+                
+                try {
+                    application.unregisterReceiver(instanceStatusReceiver)
+                } catch (e: IllegalArgumentException) {
+                    Log.w(TAG, "instanceStatusReceiver not registered: ${e.message}")
                 }
                 
                 receiversRegistered = false

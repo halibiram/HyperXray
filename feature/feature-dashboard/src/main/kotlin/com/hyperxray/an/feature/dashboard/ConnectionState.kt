@@ -32,6 +32,13 @@ sealed class ConnectionState {
         val stage: DisconnectionStage,
         val progress: Float = 0f // 0.0 to 1.0
     ) : ConnectionState()
+
+    /**
+     * Connection failed with an error message
+     */
+    data class Failed(
+        val error: String
+    ) : ConnectionState()
 }
 
 /**
@@ -42,6 +49,7 @@ enum class ConnectionStage(
     val description: String
 ) {
     INITIALIZING("Initializing", "Preparing connection..."),
+    RECONNECTING("Reconnecting", "Retrying connection..."),
     STARTING_VPN("Starting VPN", "Setting up VPN interface..."),
     STARTING_XRAY("Starting Xray", "Launching Xray core..."),
     ESTABLISHING("Establishing", "Connecting to server..."),

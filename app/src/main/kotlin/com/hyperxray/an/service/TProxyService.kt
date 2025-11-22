@@ -64,6 +64,7 @@ import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.selects.onTimeout
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CancellationException
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
@@ -181,6 +182,9 @@ class TProxyService : VpnService() {
     
     @Volatile
     private var isStopping = false
+    
+    @Volatile
+    private var isStarting = false
     
     // AI-powered TProxy optimizer
     private var tproxyAiOptimizer: TProxyAiOptimizer? = null
@@ -320,7 +324,7 @@ class TProxyService : VpnService() {
         val action = intent.action
         when (action) {
             TProxyService.ACTION_DISCONNECT -> {
-                stopXray()
+                stopXray("User requested disconnect (ACTION_DISCONNECT)")
                 return START_NOT_STICKY
             }
 
@@ -425,7 +429,7 @@ class TProxyService : VpnService() {
         
         // Stop Xray and clean up all resources
         serviceScope.launch {
-            stopXray()
+            stopXray("Service onDestroy() called")
         }
         
         // Flush log file buffer before shutdown (async)
@@ -453,28 +457,71 @@ class TProxyService : VpnService() {
 
     override fun onRevoke() {
         serviceScope.launch {
-            stopXray()
+            stopXray("VPN permission revoked (onRevoke)")
         }
         super.onRevoke()
     }
 
     private fun startXray() {
-        // Reset UDP error tracking when starting fresh connection
-        udpErrorCount = 0
-        lastUdpErrorTime = 0L
-        serviceStartTime = System.currentTimeMillis()
-        udpRecoveryAttempts = 0
-        lastUdpRecoveryTime = 0L
-        synchronized(udpErrorHistory) {
-            udpErrorHistory.clear()
+        // Prevent duplicate start calls
+        if (isStarting) {
+            Log.d(TAG, "startXray() already in progress, ignoring duplicate call")
+            return
         }
         
-        // Synchronous connection process: start VPN service first, then Xray process
-        serviceScope.launch {
-            // Step 1: Start VPN service (TUN interface)
-            startService()
-            // Step 2: Start Xray process only after VPN service is ready
-            runXrayProcess()
+        if (isStopping) {
+            Log.w(TAG, "startXray() called while stopping, ignoring. Stack trace:", Exception("startXray called during stop"))
+            return
+        }
+        
+        isStarting = true
+        
+        try {
+            // Reset UDP error tracking when starting fresh connection
+            udpErrorCount = 0
+            lastUdpErrorTime = 0L
+            serviceStartTime = System.currentTimeMillis()
+            udpRecoveryAttempts = 0
+            lastUdpRecoveryTime = 0L
+            synchronized(udpErrorHistory) {
+                udpErrorHistory.clear()
+            }
+            
+            // Ensure directories exist before starting Xray
+            ensureXrayDirectories()
+            
+            // Synchronous connection process: start VPN service first, then Xray process
+            serviceScope.launch {
+                try {
+                    // Step 1: Start VPN service (TUN interface)
+                    val vpnStarted = startService()
+                    if (!vpnStarted) {
+                        Log.e(TAG, "VPN service failed to start. Aborting Xray process startup.")
+                        val errorIntent = Intent(ACTION_ERROR)
+                        errorIntent.setPackage(application.packageName)
+                        errorIntent.putExtra(EXTRA_ERROR_MESSAGE, "VPN service failed to start. Cannot proceed with Xray process.")
+                        sendBroadcast(errorIntent)
+                        return@launch
+                    }
+                    
+                    // Step 2: Start Xray process only after VPN service is ready
+                    Log.d(TAG, "VPN service started successfully. Proceeding to start Xray process...")
+                    runXrayProcess()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error in VPN/Xray startup sequence: ${e.message}", e)
+                    val errorIntent = Intent(ACTION_ERROR)
+                    errorIntent.setPackage(application.packageName)
+                    errorIntent.putExtra(EXTRA_ERROR_MESSAGE, "Error starting VPN/Xray: ${e.message}")
+                    sendBroadcast(errorIntent)
+                } finally {
+                    // Reset isStarting flag after completion or cancellation
+                    isStarting = false
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in startXray()", e)
+            isStarting = false
+            throw e
         }
     }
 
@@ -553,7 +600,38 @@ class TProxyService : VpnService() {
         }
     }
 
+    /**
+     * Ensures that all required directories for Xray operation exist.
+     * This prevents "No such file or directory" errors from native libraries
+     * like libxray.so when they try to access log files or frame buffers.
+     */
+    private fun ensureXrayDirectories() {
+        val filesDir = applicationContext.filesDir
+        val directories = listOf(
+            File(filesDir, "logs"),
+            File(filesDir, "frames"), // FrameInsert için
+            File(filesDir, "xray_config")
+        )
+        
+        directories.forEach { dir ->
+            if (!dir.exists()) {
+                val created = dir.mkdirs()
+                if (created) {
+                    Log.d(TAG, "Created directory: ${dir.absolutePath}")
+                } else {
+                    Log.w(TAG, "Failed to create directory: ${dir.absolutePath}")
+                }
+            }
+        }
+    }
+
     private suspend fun runXrayProcess() {
+        // Prevent duplicate calls
+        if (isStopping) {
+            Log.w(TAG, "runXrayProcess() called while stopping, aborting. Stack trace:", Exception("runXrayProcess called during stop"))
+            return
+        }
+        
         try {
             Log.d(TAG, "Attempting to start xray process(es).")
                 val prefs = Preferences(applicationContext)
@@ -571,7 +649,7 @@ class TProxyService : VpnService() {
                     handler.post {
                         if (!isStopping) {
                             serviceScope.launch {
-                                stopXray()
+                                stopXray("No configuration file selected")
                             }
                         }
                     }
@@ -591,7 +669,7 @@ class TProxyService : VpnService() {
                     handler.post {
                         if (!isStopping) {
                             serviceScope.launch {
-                                stopXray()
+                                stopXray("Invalid configuration file: path validation failed")
                             }
                         }
                     }
@@ -612,7 +690,7 @@ class TProxyService : VpnService() {
                     handler.post {
                         if (!isStopping) {
                             serviceScope.launch {
-                                stopXray()
+                                stopXray("Failed to read configuration file")
                             }
                         }
                     }
@@ -647,8 +725,9 @@ class TProxyService : VpnService() {
                         }
                     } catch (e: Exception) {
                         val errorMessage = "Failed to resolve server address: $serverAddress (${e.message})"
-                        Log.e(TProxyService.TAG, errorMessage, e)
-                        // Broadcast error to UI but don't stop - Xray might still work
+                        Log.w(TProxyService.TAG, errorMessage, e)
+                        // Broadcast warning to UI but don't stop - Xray can resolve DNS itself
+                        // This is not a critical error, so we continue
                         val errorIntent = Intent(TProxyService.ACTION_ERROR)
                         errorIntent.setPackage(application.packageName)
                         errorIntent.putExtra(TProxyService.EXTRA_ERROR_MESSAGE, "DNS resolution failed for server. Xray will try to resolve it.")
@@ -711,21 +790,99 @@ class TProxyService : VpnService() {
                                 }
                                 
                                 sendBroadcast(statusIntent)
-                                Log.d(TProxyService.TAG, "Broadcasted instance status update: ${statusMap.size} instances")
+                                
+                                // Log detailed instance status for debugging
+                                val runningCount = statusMap.values.count { it is XrayRuntimeStatus.Running }
+                                val startingCount = statusMap.values.count { it is XrayRuntimeStatus.Starting }
+                                val errorCount = statusMap.values.count { it is XrayRuntimeStatus.Error }
+                                val stoppedCount = statusMap.values.count { it is XrayRuntimeStatus.Stopped }
+                                
+                                Log.d(TProxyService.TAG, "Broadcasted instance status update: ${statusMap.size} total instances " +
+                                    "(Running: $runningCount, Starting: $startingCount, Error: $errorCount, Stopped: $stoppedCount)")
+                                
+                                // Log individual instance statuses for debugging
+                                if (statusMap.isNotEmpty()) {
+                                    statusMap.forEach { (index, status) ->
+                                        when (status) {
+                                            is XrayRuntimeStatus.Running -> {
+                                                Log.d(TProxyService.TAG, "Instance $index: Running (PID: ${status.processId}, Port: ${status.apiPort})")
+                                            }
+                                            is XrayRuntimeStatus.Starting -> {
+                                                Log.d(TProxyService.TAG, "Instance $index: Starting...")
+                                            }
+                                            is XrayRuntimeStatus.Error -> {
+                                                Log.w(TProxyService.TAG, "Instance $index: Error - ${status.message}")
+                                            }
+                                            is XrayRuntimeStatus.ProcessExited -> {
+                                                Log.w(TProxyService.TAG, "Instance $index: ProcessExited (code: ${status.exitCode}) - ${status.message}")
+                                            }
+                                            else -> {
+                                                Log.d(TProxyService.TAG, "Instance $index: $status")
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                     
                     val excludedPorts = extractPortsFromJson(configContent)
-                    val startedInstances = multiXrayCoreManager!!.startInstances(
-                        count = instanceCount,
-                        configPath = selectedConfigPath,
-                        configContent = configContent,
-                        excludedPorts = excludedPorts
-                    )
+                    Log.d(TProxyService.TAG, "Starting $instanceCount xray-core instances with excluded ports: $excludedPorts")
+                    
+                    // Check service lifecycle before starting instances
+                    if (isStopping) {
+                        Log.w(TProxyService.TAG, "Service is stopping, aborting instance startup")
+                        return
+                    }
+                    
+                    Log.d(TProxyService.TAG, "Calling startInstances() with count=$instanceCount, configPath=$selectedConfigPath")
+                    val startedInstances = try {
+                        val result = multiXrayCoreManager!!.startInstances(
+                            count = instanceCount,
+                            configPath = selectedConfigPath,
+                            configContent = configContent,
+                            excludedPorts = excludedPorts
+                        )
+                        Log.d(TProxyService.TAG, "startInstances() completed, returned ${result.size} instances")
+                        result
+                    } catch (e: CancellationException) {
+                        Log.d(TProxyService.TAG, "Instance startup cancelled (expected during shutdown)", e)
+                        emptyMap()
+                    } catch (e: Exception) {
+                        Log.e(TProxyService.TAG, "Exception during startInstances() call", e)
+                        emptyMap()
+                    }
+                    
+                    // Check service lifecycle after starting instances
+                    if (isStopping) {
+                        Log.w(TProxyService.TAG, "Service is stopping after instance startup, cleaning up")
+                        if (startedInstances.isNotEmpty()) {
+                            serviceScope.launch {
+                                multiXrayCoreManager?.stopAllInstances()
+                            }
+                        }
+                        return
+                    }
+                    
+                    Log.d(TProxyService.TAG, "startInstances() returned ${startedInstances.size} instances: $startedInstances")
+                    
+                    // Check service lifecycle again before proceeding
+                    if (isStopping) {
+                        Log.w(TProxyService.TAG, "Service is stopping after instances started, cleaning up")
+                        if (startedInstances.isNotEmpty()) {
+                            serviceScope.launch {
+                                multiXrayCoreManager?.stopAllInstances()
+                            }
+                        }
+                        return
+                    }
                     
                     // Immediately broadcast initial status after instances start
                     val initialStatus = multiXrayCoreManager!!.instancesStatus.value
+                    Log.d(TProxyService.TAG, "Initial instance status: ${initialStatus.size} instances registered")
+                    initialStatus.forEach { (index, status) ->
+                        Log.d(TProxyService.TAG, "Instance $index status: $status")
+                    }
                     if (initialStatus.isNotEmpty()) {
                         val statusIntent = Intent(TProxyService.ACTION_INSTANCE_STATUS_UPDATE)
                         statusIntent.setPackage(application.packageName)
@@ -752,21 +909,26 @@ class TProxyService : VpnService() {
                     }
                     
                     if (startedInstances.isEmpty()) {
-                        val errorMessage = "Failed to start any xray-core instances."
+                        val statusDetails = initialStatus.map { (index, status) -> 
+                            "Instance $index: $status"
+                        }.joinToString(", ")
+                        val errorMessage = "Failed to start any xray-core instances. Attempted: $instanceCount, Started: 0. Status details: $statusDetails"
                         Log.e(TProxyService.TAG, errorMessage)
                         val errorIntent = Intent(TProxyService.ACTION_ERROR)
                         errorIntent.setPackage(application.packageName)
-                        errorIntent.putExtra(TProxyService.EXTRA_ERROR_MESSAGE, errorMessage)
+                        errorIntent.putExtra(TProxyService.EXTRA_ERROR_MESSAGE, "Failed to start any xray-core instances. Check logs for details.")
                         sendBroadcast(errorIntent)
                         handler.post {
                             if (!isStopping) {
                                 serviceScope.launch {
-                                    stopXray()
+                                    stopXray("Failed to start any xray-core instances. Attempted: $instanceCount, Started: 0")
                                 }
                             }
                         }
                         return
                     }
+                    
+                    Log.i(TProxyService.TAG, "Successfully started ${startedInstances.size} out of $instanceCount xray-core instances")
                     
                     // Set the first instance's port as the primary API port for backward compatibility
                     val firstPort = startedInstances.values.firstOrNull()
@@ -842,26 +1004,40 @@ class TProxyService : VpnService() {
                             }
                         }
                     }
-                    
-                    Log.i(TProxyService.TAG, "Successfully started ${startedInstances.size} xray-core instances")
                 } else {
                     // Fallback to single process mode for backward compatibility
                     Log.d(TProxyService.TAG, "Starting single xray-core instance (legacy mode)")
                     runXrayProcessLegacy(configFile, configContent, prefs)
                 }
+        } catch (e: CancellationException) {
+            // Expected cancellation during shutdown - don't log as error
+            Log.d(TAG, "Xray process startup cancelled (expected during shutdown)", e)
+            // Re-throw to propagate cancellation
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error starting xray process(es)", e)
             val errorIntent = Intent(ACTION_ERROR)
             errorIntent.setPackage(application.packageName)
             errorIntent.putExtra(TProxyService.EXTRA_ERROR_MESSAGE, "Failed to start: ${e.message}")
             sendBroadcast(errorIntent)
-            handler.post {
-                if (!isStopping) {
-                    serviceScope.launch {
-                        stopXray()
+            // Only stop if it's a critical error and we're not already stopping
+            // Check if instances were actually started - if yes, don't stop them
+            val hasRunningInstances = multiXrayCoreManager?.hasRunningInstances() == true
+            if (!hasRunningInstances && !isStopping) {
+                Log.w(TAG, "No running instances found after error, stopping service")
+                handler.post {
+                    if (!isStopping) {
+                        serviceScope.launch {
+                            stopXray("Critical error during startup: ${e.message}")
+                        }
                     }
                 }
+            } else if (hasRunningInstances) {
+                Log.i(TAG, "Some instances are running despite error, continuing operation")
             }
+        } finally {
+            // Reset isStarting flag after completion
+            isStarting = false
         }
     }
     
@@ -891,7 +1067,7 @@ class TProxyService : VpnService() {
                 handler.post {
                     if (!isStopping) {
                         serviceScope.launch {
-                            stopXray()
+                            stopXray("Failed to get native library directory")
                         }
                     }
                 }
@@ -924,7 +1100,7 @@ class TProxyService : VpnService() {
                 handler.post {
                     if (!isStopping) {
                         serviceScope.launch {
-                            stopXray()
+                            stopXray("Failed to find available port for Xray API")
                         }
                     }
                 }
@@ -1108,7 +1284,40 @@ class TProxyService : VpnService() {
             // CRITICAL: Check if process is still alive after config write (synchronous)
             // Xray may exit immediately if config is invalid
             // Wait synchronously to ensure process has processed config
-            delay(500) // Wait for process to process config and potentially output errors
+            // Read stderr output in parallel to capture errors immediately
+            val stderrOutput = StringBuilder()
+            val stderrJob = serviceScope.launch(Dispatchers.IO) {
+                try {
+                    val errorReader = BufferedReader(InputStreamReader(currentProcess.errorStream))
+                    while (isActive && currentProcess.isAlive) {
+                        try {
+                            val line = errorReader.readLine()
+                            if (line == null) {
+                                delay(100) // Wait a bit before checking again
+                                continue
+                            }
+                            stderrOutput.append(line).append("\n")
+                            Log.e(TAG, "Xray stderr: $line")
+                            // Limit buffer size to prevent memory issues
+                            if (stderrOutput.length > 5000) {
+                                stderrOutput.delete(0, stderrOutput.length - 2500) // Keep last half
+                            }
+                        } catch (e: IOException) {
+                            if (currentProcess.isAlive) {
+                                delay(100)
+                                continue
+                            } else {
+                                break
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not read stderr: ${e.message}")
+                }
+            }
+            
+            // Increased delay to allow process to fully start and output any errors
+            delay(3000) // Wait 3 seconds for process to process config and potentially output errors
             
             if (!currentProcess.isAlive) {
                 val exitValue = try {
@@ -1117,28 +1326,44 @@ class TProxyService : VpnService() {
                     -1
                 }
                 
-                // Try to read error output before process cleanup
-                val errorOutput = StringBuilder()
+                // Cancel stderr reading job
+                stderrJob.cancel()
+                
+                // Try to read stdout error output before process cleanup
+                val stdoutOutput = StringBuilder()
                 try {
                     val reader = BufferedReader(InputStreamReader(currentProcess.inputStream))
                     var lineCount = 0
                     var line = reader.readLine()
-                    while (lineCount < 20 && line != null) {
-                        errorOutput.append(line).append("\n")
+                    while (lineCount < 50 && line != null) {
+                        stdoutOutput.append(line).append("\n")
+                        Log.e(TAG, "Xray stdout: $line")
                         line = reader.readLine()
                         lineCount++
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Could not read process output: ${e.message}")
+                    Log.w(TAG, "Could not read process stdout: ${e.message}")
+                }
+                
+                // Combine stderr and stdout output
+                val allErrorOutput = StringBuilder()
+                if (stderrOutput.isNotEmpty()) {
+                    allErrorOutput.append("=== STDERR ===\n")
+                    allErrorOutput.append(stderrOutput)
+                }
+                if (stdoutOutput.isNotEmpty()) {
+                    if (allErrorOutput.isNotEmpty()) allErrorOutput.append("\n")
+                    allErrorOutput.append("=== STDOUT ===\n")
+                    allErrorOutput.append(stdoutOutput)
                 }
                 
                 // Wait a bit more to allow stream reading job to capture error messages
                 delay(1000)
                 processOutputJob.cancel()
                 
-                val errorMessage = if (errorOutput.isNotEmpty()) {
+                val errorMessage = if (allErrorOutput.isNotEmpty()) {
                     "Xray process exited immediately after config write (exit code: $exitValue)\n\n" +
-                    "Xray error output:\n$errorOutput"
+                    "Xray process output:\n$allErrorOutput"
                 } else {
                     "Xray process exited immediately after config write (exit code: $exitValue)\n\n" +
                     "No error output captured. Possible causes:\n" +
@@ -1157,8 +1382,8 @@ class TProxyService : VpnService() {
                         manager.notifyError(
                             "Xray Immediate Crash After Config\n\n" +
                             "Exit code: $exitValue\n\n" +
-                            if (errorOutput.isNotEmpty()) {
-                                "Xray Error Output:\n${errorOutput.toString().take(500)}\n\n"
+                            if (allErrorOutput.isNotEmpty()) {
+                                "Xray Process Output:\n${allErrorOutput.toString().take(1000)}\n\n"
                             } else {
                                 ""
                             } +
@@ -1180,6 +1405,55 @@ class TProxyService : VpnService() {
             socks5ReadinessChecked = true
             
             Log.d(TAG, "Xray process started successfully, monitoring output stream.")
+            
+            // CRITICAL: Broadcast instance status for legacy mode (MainViewModel needs this for connection state)
+            // In legacy mode, we have a single instance running
+            if (currentProcess != null && currentProcess.isAlive) {
+                try {
+                    val processId = try {
+                        val pidField = currentProcess.javaClass.getDeclaredField("pid")
+                        pidField.isAccessible = true
+                        pidField.getLong(currentProcess)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not get process ID: ${e.message}")
+                        0L
+                    }
+                    
+                    val apiPort = prefs.apiPort
+                    if (processId > 0 && apiPort > 0) {
+                        // Broadcast instance status for legacy mode
+                        val statusIntent = Intent(ACTION_INSTANCE_STATUS_UPDATE)
+                        statusIntent.setPackage(application.packageName)
+                        statusIntent.putExtra("instance_count", 1)
+                        statusIntent.putExtra("has_running", true)
+                        statusIntent.putExtra("instance_0_pid", processId.toInt())
+                        statusIntent.putExtra("instance_0_port", apiPort)
+                        statusIntent.putExtra("instance_0_index", 0)
+                        statusIntent.putExtra("instance_0_status", "Running")
+                        sendBroadcast(statusIntent)
+                        Log.d(TAG, "Broadcasted legacy mode instance status: pid=$processId, port=$apiPort")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error broadcasting legacy instance status: ${e.message}", e)
+                }
+                
+                // Broadcast SOCKS5 readiness if not already done
+                if (socks5ReadinessChecked) {
+                    try {
+                        val socksPort = prefs.socksPort
+                        val socksAddress = prefs.socksAddress
+                        val readyIntent = Intent(ACTION_SOCKS5_READY)
+                        readyIntent.setPackage(application.packageName)
+                        readyIntent.putExtra("socks_address", socksAddress)
+                        readyIntent.putExtra("socks_port", socksPort)
+                        readyIntent.putExtra("is_ready", true)
+                        sendBroadcast(readyIntent)
+                        Log.d(TAG, "Broadcasted SOCKS5 readiness for legacy mode: $socksAddress:$socksPort")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error broadcasting SOCKS5 readiness: ${e.message}", e)
+                    }
+                }
+            }
         } catch (e: InterruptedIOException) {
             Log.d(TAG, "Xray process reading interrupted.")
         } catch (e: Exception) {
@@ -1197,35 +1471,43 @@ class TProxyService : VpnService() {
         } finally {
             Log.d(TAG, "Xray process task finished.")
             
-            // Clean up process reference
-            if (this.xrayProcess === currentProcess) {
-                this.xrayProcess = null
+            // CRITICAL FIX: Only stop VPN if process actually exited, not just because finally block executed
+            // Process may still be running even if readProcessStreamWithTimeout finished
+            val processActuallyExited = currentProcess != null && !currentProcess.isAlive
+            
+            // Clean up process reference only if process actually exited
+            if (processActuallyExited) {
+                if (this.xrayProcess === currentProcess) {
+                    this.xrayProcess = null
+                } else {
+                    Log.w(TAG, "Finishing task for an old xray process instance.")
+                }
             } else {
-                Log.w(TAG, "Finishing task for an old xray process instance.")
+                // Process is still running - don't clean up reference
+                Log.d(TAG, "Process is still running, keeping process reference. Task finished but process continues.")
             }
             
-            // Only call stopXray if not reloading and not already stopping
+            // Only call stopXray if process actually exited (not just because finally block executed)
             if (reloadingRequested) {
                 Log.d(TAG, "Xray process stopped due to configuration reload.")
                 reloadingRequested = false
-            } else if (!isStopping) {
-                Log.d(TAG, "Xray process exited unexpectedly or due to stop request. Stopping VPN.")
+            } else if (processActuallyExited && !isStopping) {
+                Log.d(TAG, "Xray process exited unexpectedly. Stopping VPN.")
                 
                 // Send Telegram notification for unexpected process exit
-                if (currentProcess != null && !currentProcess.isAlive) {
-                    val exitValue = try {
-                        currentProcess.exitValue()
-                    } catch (e: IllegalThreadStateException) {
-                        -1
-                    }
-                    telegramNotificationManager?.let { manager ->
-                        serviceScope.launch {
-                            manager.notifyError(
-                                "Xray process exited unexpectedly\n\n" +
-                                "Exit code: $exitValue\n" +
-                                "Process may have crashed"
-                            )
-                        }
+                val exitValue = try {
+                    currentProcess?.exitValue() ?: -1
+                } catch (e: IllegalThreadStateException) {
+                    -1
+                }
+                
+                telegramNotificationManager?.let { manager ->
+                    serviceScope.launch {
+                        manager.notifyError(
+                            "Xray process exited unexpectedly\n\n" +
+                            "Exit code: $exitValue\n" +
+                            "Process may have crashed"
+                        )
                     }
                 }
                 
@@ -1233,10 +1515,13 @@ class TProxyService : VpnService() {
                 handler.post {
                     if (!isStopping) {
                         serviceScope.launch {
-                            stopXray()
+                            stopXray("Xray process exited unexpectedly (legacy mode)")
                         }
                     }
                 }
+            } else if (!processActuallyExited && currentProcess != null) {
+                // Process is still running - this is normal, don't stop VPN
+                Log.d(TAG, "Process is still running. Task finished but process continues normally.")
             }
         }
     }
@@ -1245,15 +1530,57 @@ class TProxyService : VpnService() {
      * Reads process output stream with timeout protection and health checks.
      * Prevents thread hangs when process dies but stream remains open.
      * Uses coroutines for proper cancellation and resource management.
+     * Also reads stderr stream in parallel to capture error messages.
      */
     private suspend fun readProcessStreamWithTimeout(process: Process) {
         var readJob: Job? = null
+        var stderrJob: Job? = null
         var healthCheckJob: Job? = null
         
         try {
+            // Start reading stderr in parallel to capture error messages immediately
+            stderrJob = serviceScope.launch(Dispatchers.IO) {
+                try {
+                    BufferedReader(InputStreamReader(process.errorStream)).use { errorReader ->
+                        while (isActive && process.isAlive) {
+                            try {
+                                if (!errorReader.ready()) {
+                                    delay(100)
+                                    ensureActive()
+                                    continue
+                                }
+                                val line = errorReader.readLine()
+                                if (line == null) {
+                                    delay(100)
+                                    continue
+                                }
+                                // Log stderr output prominently
+                                Log.e(TAG, "Xray stderr: $line")
+                                // Also broadcast as log entry
+                                logFileManager.appendLog("STDERR: $line")
+                                logBroadcastChannel.trySend("STDERR: $line")
+                            } catch (e: IOException) {
+                                if (process.isAlive) {
+                                    delay(100)
+                                    continue
+                                } else {
+                                    break
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (isActive) {
+                        Log.w(TAG, "Error reading stderr: ${e.message}")
+                    }
+                }
+            }
+            
             // Health check coroutine monitors process and cancels read job if needed
+            // Increased initial delay to allow process to fully start before first check
             healthCheckJob = serviceScope.launch(Dispatchers.IO) {
                     try {
+                        delay(5000) // Wait 5 seconds before first health check to allow process startup
                         while (isActive) {
                             delay(2000) // Check every 2 seconds
                             ensureActive() // Check for cancellation
@@ -1262,6 +1589,7 @@ class TProxyService : VpnService() {
                             if (isStopping) {
                                 Log.d(TProxyService.TAG, "Health check detected stop request, cancelling read job.")
                                 readJob?.cancel()
+                                stderrJob?.cancel()
                                 break
                             }
                             
@@ -1274,6 +1602,23 @@ class TProxyService : VpnService() {
                                 }
                                 Log.d(TProxyService.TAG, "Health check detected process death (exit code: $exitValue), cancelling read job.")
                                 readJob?.cancel()
+                                stderrJob?.cancel()
+                                
+                                // Try to read remaining stderr output after process death
+                                try {
+                                    delay(500) // Give stderr reader time to capture final output
+                                    val errorReader = BufferedReader(InputStreamReader(process.errorStream))
+                                    var line = errorReader.readLine()
+                                    var lineCount = 0
+                                    while (line != null && lineCount < 20 && isActive) {
+                                        Log.e(TAG, "Xray stderr (final): $line")
+                                        line = errorReader.readLine()
+                                        lineCount++
+                                    }
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "Could not read final stderr: ${e.message}")
+                                }
+                                
                                 break
                             }
                         }
@@ -1420,20 +1765,23 @@ class TProxyService : VpnService() {
                 // Wait for read job to complete (it will finish when stream ends or is cancelled)
                 readJob.join()
                 
-                // Read job finished, cancel health check job since it's no longer needed
+                // Read job finished, cancel health check and stderr jobs since they're no longer needed
                 healthCheckJob?.cancel()
+                stderrJob?.cancel()
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Error setting up stream reading: ${e.message}", e)
             } finally {
-                // Cancel both jobs and wait for them to finish
+                // Cancel all jobs and wait for them to finish
                 try {
                     healthCheckJob?.cancel()
                     readJob?.cancel()
+                    stderrJob?.cancel()
                     // Wait for jobs to complete cancellation (with timeout)
                     withTimeoutOrNull(1000) {
                         healthCheckJob?.join()
                         readJob?.join()
+                        stderrJob?.join()
                     }
                 } catch (e: Exception) {
                     Log.w(TProxyService.TAG, "Error cancelling stream reading coroutines: ${e.message}", e)
@@ -1473,6 +1821,16 @@ class TProxyService : VpnService() {
     private fun getProcessBuilder(xrayPath: String): ProcessBuilder {
         val filesDir = applicationContext.filesDir
 
+        // Ensure filesDir exists
+        if (!filesDir.exists()) {
+            val created = filesDir.mkdirs()
+            if (!created) {
+                Log.w(TAG, "Failed to create filesDir: ${filesDir.absolutePath}")
+            } else {
+                Log.d(TAG, "Created filesDir: ${filesDir.absolutePath}")
+            }
+        }
+
         // Check if libxray.so exists
         val libxrayFile = File(xrayPath)
         if (!libxrayFile.exists()) {
@@ -1500,13 +1858,19 @@ class TProxyService : VpnService() {
         return processBuilder
     }
 
-    private fun stopXray() {
+    private fun stopXray(reason: String? = null) {
         // Prevent multiple simultaneous stop calls
         if (isStopping) {
-            Log.d(TAG, "stopXray already in progress, ignoring duplicate call.")
+            val stackTrace = Exception("Duplicate stopXray call")
+            Log.d(TAG, "stopXray already in progress, ignoring duplicate call. Original reason: $reason", stackTrace)
             return
         }
         isStopping = true
+        
+        // Log the reason and stack trace for debugging
+        val stackTrace = Exception("stopXray called")
+        val reasonMsg = reason ?: "No reason provided"
+        Log.i(TAG, "stopXray() called. Reason: $reasonMsg", stackTrace)
 
         // Cancel SOCKS5 readiness check job
         socks5ReadinessJob?.cancel()
@@ -1583,6 +1947,20 @@ class TProxyService : VpnService() {
                 }
             }
 
+            // Step 2.5: Stop MultiXrayCoreManager instances BEFORE cancelling serviceScope
+            // This ensures instances are stopped cleanly before their coroutine scope is cancelled
+            if (multiXrayCoreManager != null) {
+                try {
+                    Log.d(TAG, "Stopping MultiXrayCoreManager instances...")
+                    runBlocking {
+                        multiXrayCoreManager?.stopAllInstances()
+                    }
+                    Log.d(TAG, "MultiXrayCoreManager instances stopped.")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error stopping MultiXrayCoreManager instances", e)
+                }
+            }
+
             // Step 3: Cancel coroutine scope to stop stream reading
             // This is non-blocking and prevents new coroutines from starting
             Log.d(TAG, "Cancelling CoroutineScope.")
@@ -1625,16 +2003,53 @@ class TProxyService : VpnService() {
             Log.e(TAG, "Error during stopXray cleanup", e)
         } finally {
             isStopping = false
+            
+            // Broadcast stop action to UI to ensure cleanup
+            val stopIntent = Intent(TProxyService.ACTION_STOP)
+            stopIntent.setPackage(application.packageName)
+            sendBroadcast(stopIntent)
+            
             Log.d(TAG, "stopXray cleanup completed.")
         }
     }
 
-    private suspend fun startService() {
+    private suspend fun startService(): Boolean {
         synchronized(tunFdLock) {
-            if (tunFd != null) return
+            if (tunFd != null) {
+                Log.d(TAG, "VPN interface already established, skipping startService()")
+                return true
+            }
         }
 
         val prefs = Preferences(this)
+        
+        // Check VPN permission before attempting to establish VPN interface
+        val vpnPrepareIntent = VpnService.prepare(this)
+        if (vpnPrepareIntent != null) {
+            Log.e(TAG, "VPN permission not granted. VpnService.prepare() returned non-null intent.")
+            val errorMessage = "VPN permission not granted. Please grant VPN permission in system settings."
+            
+            // Send Telegram notification for VPN permission error
+            telegramNotificationManager?.let { manager ->
+                serviceScope.launch {
+                    manager.notifyError(
+                        "VPN Permission Required\n\n" +
+                        "VPN permission is not granted.\n" +
+                        "Please grant VPN permission in system settings."
+                    )
+                }
+            }
+            
+            // Broadcast error to UI
+            val errorIntent = Intent(ACTION_ERROR)
+            errorIntent.setPackage(application.packageName)
+            errorIntent.putExtra(EXTRA_ERROR_MESSAGE, errorMessage)
+            sendBroadcast(errorIntent)
+            
+            return false
+        }
+        
+        Log.d(TAG, "VPN permission check passed. Proceeding to establish VPN interface...")
         
         // Start system DNS cache server before building VPN (needed for DNS configuration)
         try {
@@ -1642,30 +2057,59 @@ class TProxyService : VpnService() {
                 systemDnsCacheServer = SystemDnsCacheServer.getInstance(this)
             }
             systemDnsCacheServer?.start()
+            Log.d(TAG, "DNS cache server started successfully")
         } catch (e: Exception) {
             Log.w(TAG, "Error starting DNS cache server: ${e.message}", e)
         }
         
+        Log.d(TAG, "Building VPN interface configuration...")
         val builder = getVpnBuilder(prefs, systemDnsCacheServer)
+        
+        Log.d(TAG, "Attempting to establish VPN interface (TUN)...")
         val newTunFd = builder.establish()
+        
+        Log.d(TAG, "VPN interface establish() result: ${if (newTunFd != null) "SUCCESS" else "FAILED (null)"}")
 
         synchronized(tunFdLock) {
             tunFd = newTunFd
         }
 
         if (newTunFd == null) {
+            Log.e(TAG, "Failed to establish VPN interface (TUN). builder.establish() returned null.")
+            Log.e(TAG, "Possible causes: VPN permission not granted, another VPN is active, or system-level TUN creation error.")
+            
+            // Check if another VPN is active
+            try {
+                val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                val activeNetwork = connectivityManager.activeNetwork
+                val caps = connectivityManager.getNetworkCapabilities(activeNetwork)
+                val hasVpn = caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+                
+                if (hasVpn) {
+                    Log.e(TAG, "Another VPN is currently active. Cannot establish new VPN interface.")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not check for active VPN: ${e.message}", e)
+            }
+            
             // Send Telegram notification for VPN setup failure
             telegramNotificationManager?.let { manager ->
                 serviceScope.launch {
                     manager.notifyError(
                         "VPN setup failed\n\n" +
                         "Failed to establish VPN interface (TUN).\n" +
-                        "Please check VPN permissions."
+                        "Please check VPN permissions or disable other VPN services."
                     )
                 }
             }
-            stopXray()
-            return
+            
+            // Broadcast error to UI
+            val errorIntent = Intent(ACTION_ERROR)
+            errorIntent.setPackage(application.packageName)
+            errorIntent.putExtra(EXTRA_ERROR_MESSAGE, "Failed to establish VPN interface (TUN). Please check VPN permissions or disable other VPN services.")
+            sendBroadcast(errorIntent)
+            
+            return false
         }
 
         val tproxyFile = File(cacheDir, "tproxy.conf")
@@ -1675,8 +2119,9 @@ class TProxyService : VpnService() {
                 val tproxyConf = getTproxyConf(prefs)
                 fos.write(tproxyConf.toByteArray())
             }
+            Log.d(TAG, "TProxy config file created successfully")
         } catch (e: IOException) {
-            Log.e(TAG, e.toString())
+            Log.e(TAG, "Failed to write TProxy config file: ${e.message}", e)
             
             // Send Telegram notification for TProxy config write failure
             telegramNotificationManager?.let { manager ->
@@ -1689,8 +2134,27 @@ class TProxyService : VpnService() {
                 }
             }
             
-            stopXray()
-            return
+            // Broadcast error to UI
+            val errorIntent = Intent(ACTION_ERROR)
+            errorIntent.setPackage(application.packageName)
+            errorIntent.putExtra(EXTRA_ERROR_MESSAGE, "Failed to write TProxy config file: ${e.message}")
+            sendBroadcast(errorIntent)
+            
+            return false
+        }
+
+        Log.d(TAG, "VPN interface established successfully. Waiting for Xray to start and SOCKS5 to become ready...")
+        return true
+    }
+
+    private suspend fun startNativeTProxy() {
+        Log.d(TAG, "Starting native TProxy service...")
+        
+        val tproxyFile = File(cacheDir, "tproxy.conf")
+        if (!tproxyFile.exists()) {
+             Log.e(TAG, "TProxy config file not found in startNativeTProxy")
+             stopXray("TProxy config file not found")
+             return
         }
 
         // Safely get fd with synchronization - check all conditions atomically
@@ -1704,6 +2168,7 @@ class TProxyService : VpnService() {
             // Get fd while holding lock to prevent race condition
             val currentTunFd = tunFd
             if (currentTunFd == null) {
+                Log.e(TAG, "tunFd is null in startNativeTProxy")
                 return@synchronized null
             }
 
@@ -1718,14 +2183,14 @@ class TProxyService : VpnService() {
         fd?.let { fileDescriptor ->
             // Use fd immediately after extraction (minimize race window)
             TProxyStartService(tproxyFile.absolutePath, fileDescriptor)
+            Log.d(TAG, "Native TProxy service started.")
         } ?: run {
-            Log.e(TAG, "tunFd is null or invalid after establish()")
-            stopXray()
+            Log.e(TAG, "tunFd is null or invalid in startNativeTProxy")
+            stopXray("tunFd is null or invalid in startNativeTProxy")
             return
         }
 
         // Start AI-powered TProxy optimization
-        // Note: prefs is already defined above (line 321)
         val optimizer = tproxyAiOptimizer
         if (optimizer != null && !optimizer.isOptimizing()) {
             Log.i(TAG, "Starting AI-powered TProxy optimization")
@@ -1758,7 +2223,7 @@ class TProxyService : VpnService() {
                             try {
                                 withContext(Dispatchers.IO) {
                                     FileOutputStream(tproxyFile, false).use { fos ->
-                                        val tproxyConf = getTproxyConf(prefs)
+                                        val tproxyConf = getTproxyConf(Preferences(this@TProxyService))
                                         fos.write(tproxyConf.toByteArray())
                                         fos.flush()
                                     }
@@ -1851,6 +2316,7 @@ class TProxyService : VpnService() {
         initNotificationChannel(channelName)
         createNotification(channelName)
     }
+
 
     private fun getVpnBuilder(prefs: Preferences, dnsCacheServer: SystemDnsCacheServer?): Builder = Builder().apply {
         setBlocking(false)
@@ -2628,7 +3094,7 @@ class TProxyService : VpnService() {
                 lastUdpRecoveryTime = 0L
                 
                 // Stop current Xray instance gracefully
-                stopXray()
+                stopXray("UDP error rate too high (${pattern.errorRate}%), restarting service")
                 
                 // Wait for cleanup
                 delay(3000)
@@ -3119,8 +3585,13 @@ class TProxyService : VpnService() {
         }
     }
     
+    
     fun updateCoreStatsState(stats: CoreStatsState) {
         coreStatsState = stats
+        
+        // Broadcast instance status update to UI (for real-time dashboard updates)
+        broadcastInstanceStatus()
+        
         // Notify AI optimizer if it's running
         // The optimizer will pick up the new stats in its next cycle
         
@@ -3141,6 +3612,34 @@ class TProxyService : VpnService() {
                     setLastPerformanceNotificationTime(now)
                 }
             }
+        }
+    }
+    
+    /**
+     * Broadcast instance status to MainViewModel for dashboard updates.
+     * Called automatically on each stats update.
+     */
+    private fun broadcastInstanceStatus() {
+        multiXrayCoreManager?.let { manager ->
+            val instances = manager.getActiveInstances()
+            val statusMap = manager.instancesStatus.value
+            
+            val intent = Intent(ACTION_INSTANCE_STATUS_UPDATE)
+            intent.setPackage(application.packageName)
+            intent.putExtra("instance_count", statusMap.size)
+            intent.putExtra("has_running", instances.isNotEmpty())
+            
+            // Add detailed instance information
+            instances.entries.forEachIndexed { index: Int, entry: Map.Entry<Int, Int> ->
+                val instanceIndex = entry.key
+                val port = entry.value
+                intent.putExtra("instance_${index}_index", instanceIndex)
+                intent.putExtra("instance_${index}_port", port)
+                intent.putExtra("instance_${index}_status", statusMap[instanceIndex]?.toString() ?: "UNKNOWN")
+            }
+            
+            sendBroadcast(intent)
+            Log.v(TAG, "Broadcasted instance status: ${instances.size} active instances")
         }
     }
     
@@ -3573,6 +4072,9 @@ class TProxyService : VpnService() {
                 sendBroadcast(readyIntent)
                 
                 Log.i(TAG, "✅ SOCKS5 is ready on $socksAddress:$socksPort - broadcast sent")
+                
+                // Start Native TProxy now that SOCKS5 is ready
+                startNativeTProxy()
             } else {
                 Log.w(TAG, "⚠️ SOCKS5 did not become ready within timeout")
                 Socks5ReadinessChecker.setSocks5Ready(false)

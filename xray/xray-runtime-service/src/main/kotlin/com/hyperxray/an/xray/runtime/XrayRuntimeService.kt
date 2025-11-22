@@ -18,6 +18,8 @@ import java.io.IOException
 import java.io.InputStreamReader
 import java.io.InterruptedIOException
 import kotlin.concurrent.Volatile
+import org.json.JSONException
+import org.json.JSONObject
 
 /**
  * Service for managing Xray-core binary lifecycle.
@@ -114,6 +116,7 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
      * @param apiPort Optional API port (if null, will find available port)
      * @return The API port number used, or null if startup failed
      */
+    @Synchronized
     override fun start(
         configPath: String,
         configContent: String?,
@@ -128,6 +131,24 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
         if (isStopping) {
             Log.w(TAG, "Cannot start while stopping")
             return null
+        }
+        
+        // Check if process is already running and alive
+        val currentProcess = xrayProcess
+        if (currentProcess != null && currentProcess.isAlive) {
+            val currentStatus = _status.value
+            if (currentStatus is XrayRuntimeStatus.Running) {
+                Log.w(TAG, "Process already running (pid=${(currentStatus as XrayRuntimeStatus.Running).processId}), ignoring start request")
+                return (currentStatus as? XrayRuntimeStatus.Running)?.apiPort
+            } else {
+                // Process is alive but not in Running state - might be in transition
+                Log.w(TAG, "Process exists but not in Running state (status=$currentStatus), stopping it first")
+                try {
+                    currentProcess.destroy()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error destroying existing process: ${e.message}")
+                }
+            }
         }
         
         val currentStatus = _status.value
@@ -169,6 +190,16 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
                 return null
             }
             
+            // CRITICAL: Validate JSON format before starting process
+            // This prevents Xray from crashing immediately after config write
+            if (!validateJsonConfig(finalConfigContent)) {
+                val errorMessage = "Invalid JSON configuration format"
+                Log.e(TAG, errorMessage)
+                _status.value = XrayRuntimeStatus.Error(errorMessage)
+                isStarting = false
+                return null
+            }
+            
             // Find available port if not provided
             val finalApiPort = apiPort ?: findAvailablePort(extractPortsFromJson(finalConfigContent))
             if (finalApiPort == null) {
@@ -180,11 +211,12 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
             }
             
             // Start the process
+            // NOTE: isStarting will be reset in runXrayProcess() after process actually starts or fails
             serviceScope.launch {
                 runXrayProcess(libraryDir, configFile, finalConfigContent, finalApiPort)
             }
             
-            isStarting = false
+            // Don't reset isStarting here - it will be reset in runXrayProcess()
             finalApiPort
         } catch (e: Exception) {
             Log.e(TAG, "Error starting Xray", e)
@@ -395,6 +427,27 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
         }
     }
     
+    /**
+     * Validates that the config content is valid JSON.
+     * This prevents Xray from crashing immediately after config write due to invalid JSON.
+     * 
+     * @param configContent The config content to validate
+     * @return true if valid JSON, false otherwise
+     */
+    private fun validateJsonConfig(configContent: String): Boolean {
+        return try {
+            // Try to parse as JSON
+            org.json.JSONObject(configContent)
+            true
+        } catch (e: org.json.JSONException) {
+            Log.e(TAG, "Invalid JSON config format: ${e.message}")
+            false
+        } catch (e: Exception) {
+            Log.e(TAG, "Error validating JSON config: ${e.message}")
+            false
+        }
+    }
+    
     private fun extractPortsFromJson(jsonContent: String): Set<Int> {
         // Simple regex-based extraction of port numbers
         // This is a basic implementation - can be enhanced
@@ -455,6 +508,7 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
                     val errorMessage = "Xray process exited during startup (exit code: $exitValue)"
                     Log.e(TAG, errorMessage)
                     _status.value = XrayRuntimeStatus.ProcessExited(exitValue, errorMessage)
+                    isStarting = false
                     return
                 }
                 
@@ -466,8 +520,9 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
             
             // CRITICAL: Start reading process output IMMEDIATELY (before config write)
             // This allows us to capture error messages even if process crashes immediately after config write
+            val capturedOutput = mutableListOf<String>()
             val processOutputJob = serviceScope.launch {
-                readProcessStream(currentProcess)
+                readProcessStreamWithCapture(currentProcess, capturedOutput)
             }
             
             // Small delay to allow process to potentially output startup errors
@@ -486,75 +541,79 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
                     val exitValue = try { currentProcess.exitValue() } catch (ex: IllegalThreadStateException) { -1 }
                     Log.e(TAG, "Xray process exited while writing config, exit code: $exitValue")
                     
-                    // Try to read error output before it's lost
-                    try {
-                        val errorReader = BufferedReader(InputStreamReader(currentProcess.inputStream))
-                        val errorOutput = StringBuilder()
-                        var lineCount = 0
-                        var line = errorReader.readLine()
-                        while (lineCount < 20 && line != null) {
-                            errorOutput.append(line).append("\n")
-                            line = errorReader.readLine()
-                            lineCount++
-                        }
-                        if (errorOutput.isNotEmpty()) {
-                            Log.e(TAG, "Xray error output during config write:\n$errorOutput")
-                        }
-                    } catch (ex: Exception) {
-                        Log.w(TAG, "Could not read error output: ${ex.message}")
+                    // Wait a moment for output capture to collect error messages
+                    delay(200)
+                    processOutputJob.cancel()
+                    
+                    val errorOutput = capturedOutput.joinToString("\n")
+                    val errorMessage = if (errorOutput.isNotEmpty()) {
+                        "Xray process exited during config write (exit code: $exitValue)\n\n" +
+                        "Xray error output:\n$errorOutput"
+                    } else {
+                        "Xray process exited during config write (exit code: $exitValue)\n\n" +
+                        "No error output captured. Possible causes:\n" +
+                        "1. Invalid JSON config format\n" +
+                        "2. Missing required config fields\n" +
+                        "3. Invalid inbound/outbound configuration"
                     }
                     
-                    _status.value = XrayRuntimeStatus.ProcessExited(exitValue, "Process exited during config write")
+                    Log.e(TAG, errorMessage)
+                    _status.value = XrayRuntimeStatus.ProcessExited(exitValue, errorMessage)
+                    isStarting = false
+                } else {
+                    processOutputJob.cancel()
                 }
-                processOutputJob.cancel()
                 throw e
             }
             
             // CRITICAL: Check if process is still alive after config write
             // Xray may exit immediately if config is invalid
-            delay(500) // Wait a moment to allow process to process config and potentially output errors
-            if (!currentProcess.isAlive) {
-                val exitValue = try {
-                    currentProcess.exitValue()
-                } catch (e: IllegalThreadStateException) {
-                    -1
-                }
+            // Use periodic checks instead of single delay to catch early exits faster
+            var postConfigChecks = 0
+            val maxPostConfigChecks = 20 // 20 * 100ms = 2 seconds total
+            val postConfigCheckInterval = 100L
+            
+            while (postConfigChecks < maxPostConfigChecks) {
+                delay(postConfigCheckInterval)
+                postConfigChecks++
                 
-                // Try to read error output before process cleanup
-                val errorOutput = StringBuilder()
-                try {
-                    val reader = BufferedReader(InputStreamReader(currentProcess.inputStream))
-                    var lineCount = 0
-                    var line = reader.readLine()
-                    while (lineCount < 30 && line != null) {
-                        errorOutput.append(line).append("\n")
-                        line = reader.readLine()
-                        lineCount++
+                if (!currentProcess.isAlive) {
+                    val exitValue = try {
+                        currentProcess.exitValue()
+                    } catch (e: IllegalThreadStateException) {
+                        -1
                     }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Could not read process output: ${e.message}")
+                    
+                    // Wait a moment for output capture to collect error messages
+                    delay(300)
+                    processOutputJob.cancel()
+                    
+                    val errorOutput = capturedOutput.joinToString("\n")
+                    val errorMessage = if (errorOutput.isNotEmpty()) {
+                        "Xray process exited immediately after config write (exit code: $exitValue, after ${postConfigChecks * postConfigCheckInterval}ms)\n\n" +
+                        "Xray error output:\n$errorOutput"
+                    } else {
+                        "Xray process exited immediately after config write (exit code: $exitValue, after ${postConfigChecks * postConfigCheckInterval}ms)\n\n" +
+                        "No error output captured. Possible causes:\n" +
+                        "1. Invalid JSON config format\n" +
+                        "2. Missing required config fields\n" +
+                        "3. Invalid inbound/outbound configuration\n" +
+                        "4. File permissions issue\n" +
+                        "5. Missing geoip/geosite files\n" +
+                        "6. Port conflict or binding error"
+                    }
+                    
+                    Log.e(TAG, errorMessage)
+                    _status.value = XrayRuntimeStatus.ProcessExited(exitValue, errorMessage)
+                    isStarting = false
+                    return@runXrayProcess
                 }
                 
-                // Wait a bit more to allow stream reading job to capture error messages
-                delay(1000)
-                processOutputJob.cancel()
-                
-                val errorMessage = if (errorOutput.isNotEmpty()) {
-                    "Xray process exited immediately after config write (exit code: $exitValue)\n\n" +
-                    "Xray error output:\n$errorOutput"
-                } else {
-                    "Xray process exited immediately after config write (exit code: $exitValue)\n\n" +
-                    "No error output captured. Possible causes:\n" +
-                    "1. Invalid JSON config format\n" +
-                    "2. Missing required config fields\n" +
-                    "3. Invalid inbound/outbound configuration\n" +
-                    "4. File permissions issue\n" +
-                    "5. Missing geoip/geosite files"
+                // If process is still alive after reasonable time, assume it's starting successfully
+                if (postConfigChecks >= 5) { // After 500ms, if still alive, likely OK
+                    Log.d(TAG, "Process still alive after ${postConfigChecks * postConfigCheckInterval}ms, assuming successful startup")
+                    break
                 }
-                
-                Log.e(TAG, errorMessage)
-                _status.value = XrayRuntimeStatus.ProcessExited(exitValue, errorMessage)
-                return@runXrayProcess
             }
             
             // Update status to Running
@@ -569,6 +628,8 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
             }
             
             _status.value = XrayRuntimeStatus.Running(processId, apiPort)
+            // Reset isStarting flag now that process is successfully running
+            isStarting = false
             Log.d(TAG, "Xray-core started successfully (pid=$processId, apiPort=$apiPort)")
             
             // Monitor process output continues in background job
@@ -580,10 +641,22 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
             
         } catch (e: InterruptedIOException) {
             Log.d(TAG, "Xray process reading interrupted")
+            isStarting = false
         } catch (e: Exception) {
             Log.e(TAG, "Error executing Xray", e)
             _status.value = XrayRuntimeStatus.Error("Process execution failed: ${e.message}", e)
+            isStarting = false
         } finally {
+            // Ensure isStarting is always reset in finally block
+            if (isStarting) {
+                // Only reset if we haven't already done so
+                // This handles edge cases where we might have missed a reset
+                val currentStatus = _status.value
+                if (currentStatus !is XrayRuntimeStatus.Running && currentStatus !is XrayRuntimeStatus.Starting) {
+                    isStarting = false
+                }
+            }
+            
             if (xrayProcess === currentProcess) {
                 xrayProcess = null
             }
@@ -594,7 +667,13 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
                 } catch (e: IllegalThreadStateException) {
                     -1
                 }
-                _status.value = XrayRuntimeStatus.ProcessExited(exitValue, "Process exited unexpectedly")
+                // Only set ProcessExited if we haven't already set a status
+                val currentStatus = _status.value
+                if (currentStatus !is XrayRuntimeStatus.ProcessExited && 
+                    currentStatus !is XrayRuntimeStatus.Error &&
+                    currentStatus !is XrayRuntimeStatus.Running) {
+                    _status.value = XrayRuntimeStatus.ProcessExited(exitValue, "Process exited unexpectedly")
+                }
             }
         }
     }
@@ -613,9 +692,11 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
             "/system/bin/linker"
         }
         
-        Log.d(TAG, "Using linker: $linkerPath to execute: $xrayPath")
+        Log.i(TAG, "Using linker: $linkerPath to execute: $xrayPath")
         
-        val command = mutableListOf(linkerPath, xrayPath, "run")
+        val command = mutableListOf(linkerPath, xrayPath)
+        // Removed "run" argument as it might interfere with stdin config reading or cause issues on some Android versions
+        // val command = mutableListOf(linkerPath, xrayPath, "run")
         val processBuilder = ProcessBuilder(command)
         val environment = processBuilder.environment()
         environment["XRAY_LOCATION_ASSET"] = filesDir.path
@@ -633,7 +714,7 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
                     // Forward to callback if set
                     logLineCallback?.onLogLine(line)
                     // Also log to Android Log for debugging
-                    Log.d(TAG, "Xray: $line")
+                    Log.i(TAG, "Xray: $line")
                 }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -641,7 +722,43 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
             throw e
         } catch (e: Exception) {
             if (!isStopping) {
-                Log.d(TAG, "Stream reading finished: ${e.message}")
+                Log.e(TAG, "Stream reading finished with error: ${e.message}", e)
+            }
+        }
+    }
+    
+    /**
+     * Reads process output and captures it to a list for error analysis.
+     * This is used during startup to capture error messages if process crashes.
+     * 
+     * @param process The process to read from
+     * @param capturedOutput List to store captured output lines
+     */
+    private suspend fun readProcessStreamWithCapture(process: Process, capturedOutput: MutableList<String>) {
+        try {
+            BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    // Capture line for error analysis
+                    synchronized(capturedOutput) {
+                        capturedOutput.add(line)
+                        // Keep only last 50 lines to prevent memory issues
+                        if (capturedOutput.size > 50) {
+                            capturedOutput.removeAt(0)
+                        }
+                    }
+                    // Forward to callback if set
+                    logLineCallback?.onLogLine(line)
+                    // Also log to Android Log for debugging
+                    Log.i(TAG, "Xray: $line")
+                }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Cancellation is expected when stopping
+            throw e
+        } catch (e: Exception) {
+            if (!isStopping) {
+                Log.e(TAG, "Stream reading finished with error: ${e.message}", e)
             }
         }
     }

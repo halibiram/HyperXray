@@ -110,6 +110,8 @@ fun ConnectionStatusCard(
         is ConnectionState.Disconnecting -> connectionState.progress
         else -> 0f
     }
+    val isFailed = connectionState is ConnectionState.Failed
+    val errorMessage = if (connectionState is ConnectionState.Failed) connectionState.error else null
     
     // Cache gradient colors to avoid recreation
     val connectedGradient = remember { 
@@ -131,6 +133,7 @@ fun ConnectionStatusCard(
             is ConnectionState.Connecting -> connectingGradient
             is ConnectionState.Disconnecting -> disconnectingGradient
             is ConnectionState.Disconnected -> disconnectedGradient
+            is ConnectionState.Failed -> listOf(Color(0xFFEF4444), Color(0xFFDC2626), Color(0xFFB91C1C)) // Red
         }
     }
     
@@ -284,6 +287,7 @@ fun ConnectionStatusCard(
                                 is ConnectionState.Connecting -> connectingStage?.displayName ?: "Connecting"
                                 is ConnectionState.Disconnecting -> disconnectingStage?.displayName ?: "Disconnecting"
                                 is ConnectionState.Disconnected -> "Disconnected"
+                                is ConnectionState.Failed -> "Connection Failed"
                             },
                             style = MaterialTheme.typography.headlineMedium.copy(
                                 fontWeight = FontWeight.Bold,
@@ -307,6 +311,26 @@ fun ConnectionStatusCard(
                                     ),
                                     color = Color(0xFFB0B0B0)
                                 )
+                                
+                                // Error message display
+                                AnimatedVisibility(
+                                    visible = isFailed && errorMessage != null,
+                                    enter = fadeIn() + slideInVertically(),
+                                    exit = fadeOut() + slideOutVertically()
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = errorMessage ?: "Unknown error",
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                letterSpacing = 0.2.sp,
+                                                fontWeight = FontWeight.Medium
+                                            ),
+                                            color = Color(0xFFEF4444), // Red error text
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        )
+                                    }
+                                }
                                 
                                 // Progress bar for connecting state
                                 Spacer(modifier = Modifier.height(16.dp))
@@ -429,6 +453,7 @@ fun ConnectionStatusCard(
                         containerColor = when (connectionState) {
                             is ConnectionState.Connected -> Color(0xFFEF4444)
                             is ConnectionState.Disconnecting -> Color(0xFFF59E0B)
+                            is ConnectionState.Failed -> Color(0xFFF97316) // Orange for retry
                             else -> Color(0xFF10B981)
                         },
                         contentColor = Color.White,
@@ -455,6 +480,7 @@ fun ConnectionStatusCard(
                             is ConnectionState.Connecting -> "Connecting..."
                             is ConnectionState.Disconnecting -> "Disconnecting..."
                             is ConnectionState.Disconnected -> "Connect"
+                            is ConnectionState.Failed -> "Retry Connection"
                         },
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold
@@ -485,15 +511,24 @@ private fun ConnectionStagesList(
         )
     }
     
-    val currentStageIndex = currentStage?.let { allStages.indexOf(it) } ?: -1
+    // Map RECONNECTING to INITIALIZING (index 0) for visual progress
+    val effectiveStage = if (currentStage == ConnectionStage.RECONNECTING) ConnectionStage.INITIALIZING else currentStage
+    val currentStageIndex = effectiveStage?.let { allStages.indexOf(it) } ?: -1
     
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         allStages.forEachIndexed { index, stage ->
+            // If we are reconnecting, show the RECONNECTING info for the first step
+            val displayStage = if (currentStage == ConnectionStage.RECONNECTING && stage == ConnectionStage.INITIALIZING) {
+                ConnectionStage.RECONNECTING
+            } else {
+                stage
+            }
+            
             ConnectionStageItem(
-                stage = stage,
+                stage = displayStage,
                 isActive = index == currentStageIndex,
                 isCompleted = index < currentStageIndex,
                 modifier = Modifier.fillMaxWidth()
@@ -794,6 +829,7 @@ private fun AnimatedConnectionFace(
         is ConnectionState.Connecting -> Color(0xFF2979FF) // Blue
         is ConnectionState.Disconnecting -> Color(0xFFFF00E5) // Purple
         is ConnectionState.Disconnected -> Color(0xFF555555) // Gray
+        is ConnectionState.Failed -> Color(0xFFEF4444) // Red
     }
     
     val secondaryColor = when (connectionState) {
@@ -1010,6 +1046,23 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCyberMouth(
                 color = color,
                 style = Stroke(width = 2.dp.toPx())
             )
+        }
+        is ConnectionState.Failed -> {
+            // Error Indicator - Dashed Line
+            val dashLength = 8.dp.toPx()
+            val gapLength = 4.dp.toPx()
+            var currentX = center.x - width / 2
+            
+            while (currentX < center.x + width / 2) {
+                drawLine(
+                    color = color.copy(alpha = 0.6f),
+                    start = Offset(currentX, center.y),
+                    end = Offset(minOf(currentX + dashLength, center.x + width / 2), center.y),
+                    strokeWidth = 3.dp.toPx(),
+                    cap = StrokeCap.Round
+                )
+                currentX += dashLength + gapLength
+            }
         }
     }
 }
