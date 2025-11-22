@@ -1723,13 +1723,22 @@ class MainViewModel(application: Application) :
                 // STAGE 4: ESTABLISHING - SOCKS5 becoming ready
                 _connectionState.value = ConnectionState.Connecting(ConnectionStage.ESTABLISHING, progress = 0.6f)
                 
-                // Wait for SOCKS5 to become ready with reasonable timeout
-                val socks5Ready = withTimeoutOrNull(10000L) {
-                    _socks5Ready.filter { it }.first()
+                // Check if SOCKS5 is already ready (race condition fix)
+                // If broadcast arrived before ESTABLISHING stage, _socks5Ready might already be true
+                val socks5Ready = if (_socks5Ready.value) {
+                    Log.d(TAG, "SOCKS5 already ready (checked before ESTABLISHING stage)")
+                    true
+                } else {
+                    // Wait for SOCKS5 to become ready with reasonable timeout
+                    withTimeoutOrNull(10000L) {
+                        _socks5Ready.filter { it }.first()
+                    } ?: false
                 }
                 
-                if (socks5Ready == null) {
+                if (!socks5Ready) {
                     Log.w(TAG, "SOCKS5 did not become ready within timeout, but continuing verification")
+                } else {
+                    Log.d(TAG, "SOCKS5 is ready, proceeding to VERIFYING stage")
                 }
                 
                 // STAGE 5: VERIFYING - Final connection verification

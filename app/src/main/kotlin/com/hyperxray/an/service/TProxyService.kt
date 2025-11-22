@@ -4139,6 +4139,7 @@ class TProxyService : VpnService() {
                 readyIntent.setPackage(application.packageName)
                 readyIntent.putExtra("socks_address", socksAddress)
                 readyIntent.putExtra("socks_port", socksPort)
+                readyIntent.putExtra("is_ready", true)
                 sendBroadcast(readyIntent)
                 
                 Log.i(TAG, "✅ SOCKS5 is ready on $socksAddress:$socksPort - broadcast sent")
@@ -4195,6 +4196,7 @@ class TProxyService : VpnService() {
                         readyIntent.setPackage(application.packageName)
                         readyIntent.putExtra("socks_address", socksAddress)
                         readyIntent.putExtra("socks_port", socksPort)
+                        readyIntent.putExtra("is_ready", true)
                         sendBroadcast(readyIntent)
                     }
                 } catch (e: Exception) {
