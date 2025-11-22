@@ -90,7 +90,7 @@ fun ConnectionStatusCard(
     downlinkThroughput: Double = 0.0,
     modifier: Modifier = Modifier
 ) {
-    // Determine connection state properties
+    // Determine connection state properties - simple calculations, no unnecessary optimization
     val isConnected = connectionState is ConnectionState.Connected
     val isConnecting = connectionState is ConnectionState.Connecting
     val isDisconnecting = connectionState is ConnectionState.Disconnecting

@@ -1723,7 +1723,8 @@ class MainViewModel(application: Application) :
                 // STAGE 4: ESTABLISHING - SOCKS5 becoming ready
                 _connectionState.value = ConnectionState.Connecting(ConnectionStage.ESTABLISHING, progress = 0.6f)
                 
-                val socks5Ready = withTimeoutOrNull(15000L) {
+                // Wait for SOCKS5 to become ready with reasonable timeout
+                val socks5Ready = withTimeoutOrNull(10000L) {
                     _socks5Ready.filter { it }.first()
                 }
                 
