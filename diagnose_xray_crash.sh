@@ -51,3 +51,6 @@ echo "  4. Port çakışması"
 echo ""
 echo "Detaylı log için: adb logcat | grep -iE 'TProxyService|xray'"
 
+
+
+

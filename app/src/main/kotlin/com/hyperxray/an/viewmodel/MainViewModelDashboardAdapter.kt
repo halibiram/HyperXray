@@ -7,6 +7,7 @@ import com.hyperxray.an.feature.dashboard.DnsCacheStats as FeatureDnsCacheStats
 import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.telemetry.AggregatedTelemetry
 import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
+import android.util.Log
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -52,20 +53,32 @@ fun AggregatedTelemetry.toFeatureState(): FeatureAggregatedTelemetry {
 }
 
 /**
- * Extension function to convert DnsCacheManager.DnsCacheStats to feature module DnsCacheStats
+ * Extension function to parse DnsCacheManager.getStats() string to feature module DnsCacheStats
+ * Commit 312450a: DnsCacheManager only has getStats() method, not getStatsData()
  */
-fun DnsCacheManager.DnsCacheStats.toFeatureState(): FeatureDnsCacheStats {
+private fun parseDnsCacheStats(statsString: String): FeatureDnsCacheStats {
+    // Parse stats string: "DNS Cache: X entries, hits=Y, misses=Z, hitRate=W%"
+    val entriesMatch = Regex("(\\d+) entries").find(statsString)
+    val hitsMatch = Regex("hits=(\\d+)").find(statsString)
+    val missesMatch = Regex("misses=(\\d+)").find(statsString)
+    val hitRateMatch = Regex("hitRate=(\\d+)%").find(statsString)
+    
+    val entryCount = entriesMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
+    val hits = hitsMatch?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+    val misses = missesMatch?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+    val hitRate = hitRateMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
+    
     return FeatureDnsCacheStats(
         entryCount = entryCount,
-        memoryUsageMB = memoryUsageMB,
-        memoryLimitMB = memoryLimitMB,
-        memoryUsagePercent = memoryUsagePercent,
+        memoryUsageMB = 0L, // Not available in commit 312450a
+        memoryLimitMB = 0L, // Not available in commit 312450a
+        memoryUsagePercent = 0, // Not available in commit 312450a
         hits = hits,
         misses = misses,
         hitRate = hitRate,
-        avgDomainHitRate = avgDomainHitRate,
-        avgHitLatencyMs = avgHitLatencyMs,
-        avgMissLatencyMs = avgMissLatencyMs
+        avgDomainHitRate = 0, // Not available in commit 312450a
+        avgHitLatencyMs = 0.0, // Not available in commit 312450a
+        avgMissLatencyMs = 0.0 // Not available in commit 312450a
     )
 }
 
@@ -125,13 +138,30 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
     override fun updateDnsCacheStats() {
         mainViewModel.viewModelScope.launch {
             try {
-                val stats = DnsCacheManager.getStatsData()
-                dnsCacheStatsFlow.value = stats.toFeatureState()
+                // Try to initialize DnsCacheManager if not already initialized
+                // Use prefs to get context (prefs has access to Application)
+                val context = mainViewModel.prefs.getContext()
+                try {
+                    DnsCacheManager.initialize(context)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to initialize DnsCacheManager: ${e.message}", e)
+                }
+                
+                // Commit 312450a: DnsCacheManager only has getStats() method, not getStatsData()
+                val statsString = DnsCacheManager.getStats()
+                val stats = parseDnsCacheStats(statsString)
+                dnsCacheStatsFlow.value = stats
+                Log.d(TAG, "DNS cache stats updated: $statsString")
             } catch (e: Exception) {
-                // DnsCacheManager might not be initialized yet
-                dnsCacheStatsFlow.value = null
+                Log.e(TAG, "Error updating DNS cache stats: ${e.message}", e)
+                // Keep last value instead of setting to null, so UI doesn't reset to zero
+                // dnsCacheStatsFlow.value remains unchanged on error
             }
         }
+    }
+    
+    companion object {
+        private const val TAG = "MainViewModelDashboardAdapter"
     }
 }
 

@@ -19,3 +19,5 @@ object PrefsContract {
         const val COLUMN_PREF_TYPE: String = "pref_type"
     }
 }
+
+

@@ -84,7 +84,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import com.hyperxray.an.R
 import com.hyperxray.an.common.ROUTE_CONFIG
 import com.hyperxray.an.common.ROUTE_LOG
-import com.hyperxray.an.common.ROUTE_OPTIMIZER
+import com.hyperxray.an.common.ROUTE_UTILS
 import com.hyperxray.an.common.ROUTE_SETTINGS
 import com.hyperxray.an.common.ROUTE_STATS
 import com.hyperxray.an.viewmodel.LogViewModel
@@ -225,7 +225,7 @@ fun AppTopAppBar(
         "stats" -> stringResource(R.string.core_stats_title)
         "config" -> stringResource(R.string.configuration)
         "log" -> stringResource(R.string.log)
-        "optimizer" -> "TLS SNI Optimizer"
+        "utils" -> "Utils"
         "settings" -> stringResource(R.string.settings)
         else -> stringResource(R.string.app_name)
     }
@@ -240,7 +240,7 @@ fun AppTopAppBar(
             when (currentRoute) {
                 "log" -> logListState.firstVisibleItemIndex > 0 || logListState.firstVisibleItemScrollOffset > 0
                 "config" -> configListState.firstVisibleItemIndex > 0 || configListState.firstVisibleItemScrollOffset > 0
-                "optimizer" -> false // Optimizer screen doesn't scroll
+                "utils" -> false // Utils screen might scroll, but let's keep it false for now or update later
                 "settings" -> settingsScrollState.value > 0
                 else -> false
             }
@@ -746,13 +746,13 @@ fun AppBottomNavigationBar(navController: NavHostController) {
                 }
             )
             AdvancedNavItem(
-                route = ROUTE_OPTIMIZER,
+                route = ROUTE_UTILS,
                 currentRoute = currentRoute,
-                icon = R.drawable.optimizer,
-                label = "Optimizer",
+                icon = R.drawable.utils,
+                label = "Utils",
                 onClick = {
                     hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    navigateToRoute(navController, ROUTE_OPTIMIZER)
+                    navigateToRoute(navController, ROUTE_UTILS)
                 }
             )
             AdvancedNavItem(
@@ -971,13 +971,13 @@ fun AppNavigationRail(navController: NavHostController) {
                 }
             )
             AdvancedRailItem(
-                route = ROUTE_OPTIMIZER,
+                route = ROUTE_UTILS,
                 currentRoute = currentRoute,
-                icon = R.drawable.optimizer,
-                label = "Optimizer",
+                icon = R.drawable.utils,
+                label = "Utils",
                 onClick = {
                     hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    navigateToRoute(navController, ROUTE_OPTIMIZER)
+                    navigateToRoute(navController, ROUTE_UTILS)
                 }
             )
             AdvancedRailItem(

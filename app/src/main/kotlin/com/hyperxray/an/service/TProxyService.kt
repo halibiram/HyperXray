@@ -400,15 +400,9 @@ class TProxyService : VpnService() {
         Log.d(TAG, "onDestroy called, cleaning up resources.")
         
         // Stop system DNS cache server
+        systemDnsCacheServer?.clearSocks5Proxy()
         systemDnsCacheServer?.stop()
-        systemDnsCacheServer?.shutdown()
-        
-        // Shutdown DNS cache manager (flush cache and cleanup resources)
-        DnsCacheManager.shutdown()
         systemDnsCacheServer = null
-        
-        // Shutdown DNS cache manager (flush cache and cleanup resources)
-        DnsCacheManager.shutdown()
         
         // Stop heartbeat
         heartbeatJob?.cancel()
@@ -2089,6 +2083,17 @@ class TProxyService : VpnService() {
         
         Log.d(TAG, "VPN permission check passed. Proceeding to establish VPN interface...")
         
+        // Initialize DnsCacheManager first (before starting DNS cache server)
+        if (!dnsCacheInitialized) {
+            try {
+                DnsCacheManager.initialize(this)
+                dnsCacheInitialized = true
+                Log.d(TAG, "DnsCacheManager initialized in startService()")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to initialize DnsCacheManager in startService(): ${e.message}", e)
+            }
+        }
+        
         // Start system DNS cache server before building VPN (needed for DNS configuration)
         try {
             if (systemDnsCacheServer == null) {
@@ -2106,11 +2111,47 @@ class TProxyService : VpnService() {
         Log.d(TAG, "Attempting to establish VPN interface (TUN)...")
         val newTunFd = builder.establish()
         
+        // Set VPN interface IP for DNS socket binding (ensures DNS queries go through VPN)
+        if (newTunFd != null && prefs.ipv4) {
+            systemDnsCacheServer?.setVpnInterfaceIp(prefs.tunnelIpv4Address)
+            Log.i(TAG, "✅ VPN interface IP set for DNS: ${prefs.tunnelIpv4Address} (direct UDP DNS queries will be routed through VPN)")
+        } else {
+            if (newTunFd == null) {
+                Log.w(TAG, "⚠️ VPN interface not established, DNS queries may not route through VPN")
+            }
+            if (!prefs.ipv4) {
+                Log.w(TAG, "⚠️ IPv4 disabled, VPN interface IP not set for DNS")
+            }
+        }
+        
+        // Try to set SOCKS5 proxy early if already ready (before checkSocks5Readiness)
+        // This ensures DNS queries can use SOCKS5 fallback immediately
+        val prefsForSocks = Preferences(this)
+        val socksAddress = prefsForSocks.socksAddress
+        val socksPort = prefsForSocks.socksPort
+        serviceScope.launch {
+            try {
+                // Quick check if SOCKS5 is already ready
+                if (Socks5ReadinessChecker.isSocks5Ready(this@TProxyService, socksAddress, socksPort)) {
+                    systemDnsCacheServer?.setSocks5Proxy(socksAddress, socksPort)
+                    Log.d(TAG, "✅ SOCKS5 UDP proxy set for DNS (early check): $socksAddress:$socksPort")
+                } else {
+                    Log.d(TAG, "⏳ SOCKS5 not ready yet, will be set after readiness check")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error in early SOCKS5 proxy check: ${e.message}")
+            }
+        }
+        
+        // Note: SOCKS5 proxy will also be set after SOCKS5 becomes ready (in checkSocks5Readiness)
+        // This early check ensures DNS queries can use SOCKS5 fallback as soon as possible
+        
         Log.d(TAG, "VPN interface establish() result: ${if (newTunFd != null) "SUCCESS" else "FAILED (null)"}")
 
         synchronized(tunFdLock) {
             tunFd = newTunFd
         }
+
 
         if (newTunFd == null) {
             Log.e(TAG, "Failed to establish VPN interface (TUN). builder.establish() returned null.")
@@ -2377,9 +2418,22 @@ class TProxyService : VpnService() {
             val listeningPort = dnsCacheServer?.getListeningPort()
             if (listeningPort != null) {
                 if (listeningPort == 53) {
-                    addDnsServer("127.0.0.1") // Use local DNS cache server
+                    // SystemDnsCacheServer port 53'te çalışıyor - VpnService DNS'i 127.0.0.1 olarak ayarla
+                    try {
+                        addDnsServer("127.0.0.1") // Use local DNS cache server on port 53
+                        Log.d(TAG, "✅ VpnService DNS set to 127.0.0.1:53 (SystemDnsCacheServer)")
+                    } catch (e: IllegalArgumentException) {
+                        Log.e(TAG, "Failed to set VpnService DNS to 127.0.0.1: ${e.message}", e)
+                        // Fallback to custom DNS
+                        prefs.dnsIpv4.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
+                    }
                 } else {
-                    // Use custom DNS server but cache will work through Xray-core
+                    // SystemDnsCacheServer is running on port 5353 (port 53 not available)
+                    // VpnService DNS trafiğini yakalayıp SystemDnsCacheServer'a yönlendirmek için
+                    // VpnService DNS'i 127.0.0.1 olarak ayarlamayı deniyoruz, ancak VpnService port 53'e gidecek
+                    // Bu yüzden custom DNS kullanıyoruz ve SystemDnsCacheServer SOCKS5 üzerinden DNS sorgularını yapabilir
+                    Log.i(TAG, "⚠️ SystemDnsCacheServer on port $listeningPort - VpnService DNS will use custom DNS (SystemDnsCacheServer available via SOCKS5)")
+                    // Use custom DNS - SystemDnsCacheServer SOCKS5 üzerinden DNS sorgularını yapabilir
                     prefs.dnsIpv4.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
                 }
             } else {
@@ -2419,12 +2473,14 @@ class TProxyService : VpnService() {
      * Root is NOT required - works by parsing Xray DNS logs
      */
     private fun interceptDnsFromXrayLogs(logLine: String) {
+        // Ensure DnsCacheManager is initialized (should already be initialized in startService)
         if (!dnsCacheInitialized) {
             try {
                 DnsCacheManager.initialize(this)
                 dnsCacheInitialized = true
+                Log.d(TAG, "DnsCacheManager initialized in interceptDnsFromXrayLogs()")
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to initialize DNS cache: ${e.message}")
+                Log.w(TAG, "Failed to initialize DNS cache in interceptDnsFromXrayLogs(): ${e.message}", e)
                 return
             }
         }
@@ -2657,12 +2713,10 @@ class TProxyService : VpnService() {
     private fun stopService() {
         Log.d(TAG, "stopService called, cleaning up VPN resources.")
 
-        // Step 1: Stop system DNS cache server
+        // Step 1: Clear VPN interface IP, clear SOCKS5 proxy, and stop system DNS cache server
+        systemDnsCacheServer?.setVpnInterfaceIp(null)
+        systemDnsCacheServer?.clearSocks5Proxy()
         systemDnsCacheServer?.stop()
-        systemDnsCacheServer?.shutdown()
-        
-        // Shutdown DNS cache manager (flush cache and cleanup resources)
-        DnsCacheManager.shutdown()
         systemDnsCacheServer = null
         
         // Step 2: Stop AI optimizer before stopping service
@@ -4144,6 +4198,10 @@ class TProxyService : VpnService() {
                 
                 Log.i(TAG, "✅ SOCKS5 is ready on $socksAddress:$socksPort - broadcast sent")
                 
+                // Set SOCKS5 proxy for DNS cache server now that SOCKS5 is ready
+                systemDnsCacheServer?.setSocks5Proxy(socksAddress, socksPort)
+                Log.d(TAG, "✅ SOCKS5 UDP proxy set for DNS (after readiness check): $socksAddress:$socksPort")
+                
                 // Start Native TProxy now that SOCKS5 is ready
                 startNativeTProxy()
             } else {
@@ -4190,6 +4248,10 @@ class TProxyService : VpnService() {
                         Log.i(TAG, "✅ SOCKS5 recovered - updating readiness state")
                         socks5ReadinessChecked = true
                         Socks5ReadinessChecker.setSocks5Ready(true)
+                        
+                        // Set SOCKS5 proxy for DNS cache server after recovery
+                        systemDnsCacheServer?.setSocks5Proxy(socksAddress, socksPort)
+                        Log.d(TAG, "✅ SOCKS5 UDP proxy set for DNS (after recovery): $socksAddress:$socksPort")
                         
                         // Broadcast recovery
                         val readyIntent = Intent(TProxyService.ACTION_SOCKS5_READY)

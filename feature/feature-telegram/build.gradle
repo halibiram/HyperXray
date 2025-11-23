@@ -29,11 +29,26 @@ android {
     }
 }
 
+// Disable bundle tasks to break circular dependency with app module
+// These tasks bundle compile-time dependencies for kapt, but cause circular dependency
+// afterEvaluate {
+//     tasks.matching { it.name.contains('bundleLibCompileToJar') }.configureEach { task ->
+//         task.enabled = false
+//     }
+//     tasks.matching { it.name.contains('bundleLibRuntimeToJar') }.configureEach { task ->
+//         task.enabled = false
+//     }
+//     tasks.matching { it.name.contains('createFullJar') }.configureEach { task ->
+//         task.enabled = false
+//     }
+// }
+
 dependencies {
     // Core modules
     implementation project(':core:core-designsystem')
     implementation project(':core:core-network')
     implementation project(':core:core-di')
+    implementation project(':core:core-database')
     
     // Compose BOM for version management
     implementation platform('androidx.compose:compose-bom:2025.08.00')

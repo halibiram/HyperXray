@@ -6,7 +6,6 @@ import android.content.Context
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
-import com.hyperxray.an.R
 import com.hyperxray.an.common.ThemeMode
 
 class Preferences(context: Context) {
@@ -18,6 +17,11 @@ class Preferences(context: Context) {
         this.contentResolver = context1.contentResolver
         this.gson = Gson()
     }
+    
+    /**
+     * Get application context for external use (e.g., initializing components)
+     */
+    fun getContext(): Context = context1
 
     private fun getPrefData(key: String): Pair<String?, String?> {
         val uri = PrefsContract.PrefsEntry.CONTENT_URI.buildUpon().appendPath(key).build()
@@ -304,7 +308,7 @@ class Preferences(context: Context) {
 
     var connectivityTestTarget: String
         get() = getPrefData(CONNECTIVITY_TEST_TARGET).first
-            ?: context1.getString(R.string.connectivity_test_url)
+            ?: "http://www.gstatic.com/generate_204"
         set(value) {
             setValueInProvider(CONNECTIVITY_TEST_TARGET, value)
         }
@@ -316,13 +320,15 @@ class Preferences(context: Context) {
         }
 
     var geoipUrl: String
-        get() = getPrefData(GEOIP_URL).first ?: context1.getString(R.string.geoip_url)
+        get() = getPrefData(GEOIP_URL).first
+            ?: "https://github.com/lhear/v2ray-rules-dat/releases/latest/download/geoip.dat"
         set(value) {
             setValueInProvider(GEOIP_URL, value)
         }
 
     var geositeUrl: String
-        get() = getPrefData(GEOSITE_URL).first ?: context1.getString(R.string.geosite_url)
+        get() = getPrefData(GEOSITE_URL).first
+            ?: "https://github.com/lhear/v2ray-rules-dat/releases/latest/download/geosite.dat"
         set(value) {
             setValueInProvider(GEOSITE_URL, value)
         }
@@ -650,3 +656,5 @@ class Preferences(context: Context) {
             setValueInProvider(AUTO_START, enable)
         }
 }
+
+

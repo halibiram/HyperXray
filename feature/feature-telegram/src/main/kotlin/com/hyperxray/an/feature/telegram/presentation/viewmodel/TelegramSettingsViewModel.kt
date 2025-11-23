@@ -22,7 +22,7 @@ import kotlinx.coroutines.launch
 class TelegramSettingsViewModel(application: Application) : AndroidViewModel(application) {
     private val secureStorage = SecureStorageManager(application)
     private val configDataSource = TelegramConfigDataSource(application, secureStorage)
-    private val apiDataSource = TelegramApiDataSource()
+    private val apiDataSource = TelegramApiDataSource(application)
     private val repository = TelegramRepositoryImpl(apiDataSource, configDataSource)
     
     private val getConfigUseCase = GetTelegramConfigUseCase(repository)

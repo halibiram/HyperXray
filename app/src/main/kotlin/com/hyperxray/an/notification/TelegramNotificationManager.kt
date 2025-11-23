@@ -47,7 +47,7 @@ class TelegramNotificationManager private constructor(context: Context) {
     private val applicationContext = context.applicationContext
     private val secureStorage = SecureStorageManager(applicationContext)
     private val configDataSource = TelegramConfigDataSource(applicationContext, secureStorage)
-    private val apiDataSource = TelegramApiDataSource()
+    private val apiDataSource = TelegramApiDataSource(applicationContext)
     private val repository: TelegramRepository = TelegramRepositoryImpl(apiDataSource, configDataSource)
     
     private val getConfigUseCase = GetTelegramConfigUseCase(repository)

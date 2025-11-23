@@ -21,13 +21,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.hyperxray.an.common.ROUTE_CONFIG
 import com.hyperxray.an.common.ROUTE_LOG
-import com.hyperxray.an.common.ROUTE_OPTIMIZER
+import com.hyperxray.an.common.ROUTE_UTILS
 import com.hyperxray.an.common.ROUTE_SETTINGS
 import com.hyperxray.an.common.ROUTE_STATS
 import com.hyperxray.an.service.TProxyService
 import com.hyperxray.an.ui.screens.ConfigScreen
 import com.hyperxray.an.ui.screens.LogScreen
-import com.hyperxray.an.ui.screens.OptimizerScreen
+import com.hyperxray.an.ui.screens.UtilsScreen
 import com.hyperxray.an.ui.screens.SettingsScreen
 import com.hyperxray.an.feature.dashboard.DashboardScreen
 import com.hyperxray.an.viewmodel.LogViewModel
@@ -41,7 +41,7 @@ private val BOTTOM_NAV_ROUTE_INDEX = mapOf(
     ROUTE_STATS to 0,
     ROUTE_CONFIG to 1,
     ROUTE_LOG to 2,
-    ROUTE_OPTIMIZER to 3,
+    ROUTE_UTILS to 3,
     ROUTE_SETTINGS to 4
 )
 
@@ -110,7 +110,8 @@ fun BottomNavHost(
     logListState: LazyListState,
     configListState: LazyListState,
     settingsScrollState: ScrollState,
-    onSwitchVpnService: () -> Unit = {}
+    onSwitchVpnService: () -> Unit = {},
+    appNavController: NavHostController? = null
 ) {
     NavHost(
         navController = navController,
@@ -175,13 +176,13 @@ fun BottomNavHost(
         }
 
         composable(
-            route = ROUTE_OPTIMIZER,
+            route = ROUTE_UTILS,
             enterTransition = { enterTransition() },
             exitTransition = { exitTransition() },
             popEnterTransition = { popEnterTransition() },
             popExitTransition = { popExitTransition() }
         ) {
-            OptimizerScreen()
+            UtilsScreen(navController = appNavController)
         }
 
         composable(

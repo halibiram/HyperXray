@@ -9,6 +9,7 @@ import android.database.MatrixCursor
 import android.net.Uri
 import android.util.Log
 import androidx.preference.PreferenceManager
+import com.hyperxray.an.prefs.PrefsContract
 
 class PrefsProvider : ContentProvider() {
     private lateinit var prefs: SharedPreferences

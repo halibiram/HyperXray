@@ -28,7 +28,7 @@ class MonitoringControlUseCaseImpl(
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val secureStorage = SecureStorageManager(context)
     private val configDataSource = TelegramConfigDataSource(context, secureStorage)
-    private val apiDataSource = TelegramApiDataSource()
+    private val apiDataSource = TelegramApiDataSource(context)
     private val repository: TelegramRepository = com.hyperxray.an.feature.telegram.data.repository.TelegramRepositoryImpl(apiDataSource, configDataSource)
     private val getConfigUseCase = GetTelegramConfigUseCase(repository)
     private val getDashboardUseCase: GetDashboardUseCase = GetDashboardUseCaseImpl(context)

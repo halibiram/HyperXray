@@ -1,5 +1,6 @@
 package com.hyperxray.an.feature.telegram.data.datasource
 
+import android.content.Context
 import android.util.Log
 import com.hyperxray.an.core.network.http.HttpClientFactory
 import com.hyperxray.an.feature.telegram.data.model.InlineKeyboardButton
@@ -10,6 +11,7 @@ import com.hyperxray.an.feature.telegram.domain.entity.TelegramConfig
 import com.hyperxray.an.feature.telegram.domain.entity.TelegramNotification
 import com.hyperxray.an.feature.telegram.domain.repository.TelegramMessage
 import com.hyperxray.an.feature.telegram.domain.repository.TelegramUpdate
+import com.hyperxray.an.prefs.Preferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -20,6 +22,8 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
+import java.net.InetSocketAddress
+import java.net.Proxy
 import java.util.concurrent.TimeUnit
 
 private const val TAG = "TelegramApiDataSource"
@@ -31,8 +35,11 @@ private const val ANSWER_CALLBACK_QUERY_URL = "/answerCallbackQuery"
 /**
  * Telegram Bot API data source
  * Uses optimized HTTP client with retry mechanism and proper timeout management
+ * Supports SOCKS5 proxy connection for Telegram API requests
  */
-class TelegramApiDataSource {
+class TelegramApiDataSource(
+    private val context: Context? = null
+) {
     private val httpClient: OkHttpClient = createTelegramHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
     
@@ -43,13 +50,21 @@ class TelegramApiDataSource {
      * - Optimized timeouts for Telegram API
      * - Connection pooling for better performance
      * - Proper error handling
-     * - Uses VPN connection (api.telegram.org will go through VPN)
-     * - YouTube and other bypass domains will be handled by VPN routing rules
+     * - SOCKS5 proxy support (if configured in Preferences)
+     * - Uses VPN connection (api.telegram.org will go through VPN or SOCKS5 proxy)
      */
     private fun createTelegramHttpClient(): OkHttpClient {
-        // Use default HTTP client which will route through VPN
-        // VPN routing rules will handle bypass domains (like YouTube)
-        val baseClient = HttpClientFactory.createHttpClient()
+        // Create SOCKS5 proxy if context is available and SOCKS5 is configured
+        val socks5Proxy = createSocks5Proxy()
+        
+        // Use HTTP client with SOCKS5 proxy if available, otherwise use default client
+        val baseClient = if (socks5Proxy != null) {
+            Log.i(TAG, "✅ Using SOCKS5 proxy for Telegram API: ${socks5Proxy.address()}")
+            HttpClientFactory.createHttpClient(socks5Proxy)
+        } else {
+            Log.d(TAG, "Using default HTTP client (no SOCKS5 proxy)")
+            HttpClientFactory.createHttpClient()
+        }
         
         return baseClient.newBuilder()
             // Telegram API specific timeouts (longer for VPN routing)
@@ -70,6 +85,47 @@ class TelegramApiDataSource {
                 )
             )
             .build()
+    }
+    
+    /**
+     * Create SOCKS5 proxy from tunnel configuration
+     * Only uses tunnel SOCKS5 when VPN connection is active
+     * Returns null if VPN is not connected or SOCKS5 is not available
+     */
+    private fun createSocks5Proxy(): Proxy? {
+        if (context == null) {
+            Log.d(TAG, "Context not available, SOCKS5 proxy disabled")
+            return null
+        }
+        
+        try {
+            val prefs = Preferences(context)
+            
+            // Only use SOCKS5 proxy when VPN tunnel is active
+            if (!prefs.enable) {
+                Log.d(TAG, "VPN tunnel not active, using direct connection (no SOCKS5 proxy)")
+                return null
+            }
+            
+            val socksAddress = prefs.socksAddress
+            val socksPort = prefs.socksPort
+            
+            // Validate SOCKS5 configuration
+            if (socksAddress.isBlank() || socksPort <= 0 || socksPort > 65535) {
+                Log.d(TAG, "SOCKS5 not configured or invalid: address=$socksAddress, port=$socksPort")
+                return null
+            }
+            
+            // Create SOCKS5 proxy for tunnel
+            val proxyAddress = InetSocketAddress(socksAddress, socksPort)
+            val proxy = Proxy(Proxy.Type.SOCKS, proxyAddress)
+            
+            Log.i(TAG, "✅ Using tunnel SOCKS5 proxy: $socksAddress:$socksPort (VPN active)")
+            return proxy
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to create SOCKS5 proxy: ${e.message}", e)
+            return null
+        }
     }
     
     /**
