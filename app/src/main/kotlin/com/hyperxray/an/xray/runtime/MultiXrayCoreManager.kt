@@ -58,6 +58,12 @@ class MultiXrayCoreManager(private val context: Context) {
     
     private val _instancesStatus = MutableStateFlow<Map<Int, XrayRuntimeStatus>>(emptyMap())
     
+    // Sticky routing cache for domain/IP to instance mapping
+    private val routingCache = InstanceRoutingCache(
+        maxSize = prefs.stickyRoutingCacheSize,
+        ttlMs = prefs.stickyRoutingTtlMs
+    )
+    
     /**
      * Current status of all instances.
      * Map key is instance index (0-based), value is the status.
@@ -447,6 +453,9 @@ class MultiXrayCoreManager(private val context: Context) {
             _instancesStatus.value = emptyMap()
             loadBalancerCounter.set(0)
             
+            // Clear routing cache when all instances stop
+            routingCache.clear()
+            
             Log.i(TAG, "All instances stopped")
         }
     }
@@ -497,6 +506,128 @@ class MultiXrayCoreManager(private val context: Context) {
         val instanceList = activeInstances.toList()
         val index = loadBalancerCounter.getAndIncrement() % instanceList.size
         return instanceList[index]
+    }
+    
+    /**
+     * Get instance for domain using sticky routing.
+     * Returns cached instance if available, otherwise selects new instance based on hash.
+     * 
+     * @param domain Domain name
+     * @return Pair of (instance index, API port), or null if no active instances
+     */
+    suspend fun getInstanceForDomain(domain: String): Pair<Int, Int>? {
+        if (!prefs.stickyRoutingEnabled) {
+            return getNextInstance()
+        }
+        
+        val activeInstances = getActiveInstances()
+        if (activeInstances.isEmpty()) {
+            return null
+        }
+        
+        // Try to get from cache
+        val cached = routingCache.getInstanceForDomain(domain)
+        if (cached != null) {
+            // Verify cached instance is still active
+            val (instanceIndex, apiPort) = cached
+            if (activeInstances.containsKey(instanceIndex) && activeInstances[instanceIndex] == apiPort) {
+                return cached
+            } else {
+                // Cached instance is no longer active, remove from cache
+                Log.d(TAG, "Cached instance $instanceIndex for domain $domain is no longer active, selecting new instance")
+            }
+        }
+        
+        // Select new instance based on hash for deterministic assignment
+        val instanceList = activeInstances.toList().sortedBy { it.first }
+        val instanceIndex = selectInstanceByHash(domain, instanceList.size)
+        val selected = instanceList[instanceIndex]
+        
+        // Cache the selection
+        routingCache.setInstanceForDomain(domain, selected.first, selected.second)
+        
+        Log.d(TAG, "Selected instance ${selected.first} (port ${selected.second}) for domain $domain")
+        return selected
+    }
+    
+    /**
+     * Get instance for IP using sticky routing.
+     * Returns cached instance if available, otherwise selects new instance based on hash.
+     * 
+     * @param ip IP address
+     * @return Pair of (instance index, API port), or null if no active instances
+     */
+    suspend fun getInstanceForIp(ip: String): Pair<Int, Int>? {
+        if (!prefs.stickyRoutingEnabled) {
+            return getNextInstance()
+        }
+        
+        val activeInstances = getActiveInstances()
+        if (activeInstances.isEmpty()) {
+            return null
+        }
+        
+        // Try to get from cache
+        val cached = routingCache.getInstanceForIp(ip)
+        if (cached != null) {
+            // Verify cached instance is still active
+            val (instanceIndex, apiPort) = cached
+            if (activeInstances.containsKey(instanceIndex) && activeInstances[instanceIndex] == apiPort) {
+                return cached
+            } else {
+                // Cached instance is no longer active, remove from cache
+                Log.d(TAG, "Cached instance $instanceIndex for IP $ip is no longer active, selecting new instance")
+            }
+        }
+        
+        // Select new instance based on hash for deterministic assignment
+        val instanceList = activeInstances.toList().sortedBy { it.first }
+        val instanceIndex = selectInstanceByHash(ip, instanceList.size)
+        val selected = instanceList[instanceIndex]
+        
+        // Cache the selection
+        routingCache.setInstanceForIp(ip, selected.first, selected.second)
+        
+        Log.d(TAG, "Selected instance ${selected.first} (port ${selected.second}) for IP $ip")
+        return selected
+    }
+    
+    /**
+     * Get instance for connection using smart selection based on domain/IP.
+     * Prefers domain over IP if both are available.
+     * 
+     * @param domain Domain name (optional)
+     * @param ip IP address (optional)
+     * @return Pair of (instance index, API port), or null if no active instances
+     */
+    suspend fun getInstanceForConnection(domain: String?, ip: String?): Pair<Int, Int>? {
+        if (!prefs.stickyRoutingEnabled) {
+            return getNextInstance()
+        }
+        
+        // Prefer domain over IP
+        if (domain != null && domain.isNotBlank()) {
+            return getInstanceForDomain(domain)
+        }
+        
+        if (ip != null && ip.isNotBlank()) {
+            return getInstanceForIp(ip)
+        }
+        
+        // Fallback to round-robin if no domain/IP available
+        return getNextInstance()
+    }
+    
+    /**
+     * Select instance index based on hash of key for deterministic assignment.
+     * 
+     * @param key Key to hash (domain or IP)
+     * @param instanceCount Number of active instances
+     * @return Instance index (0-based)
+     */
+    private fun selectInstanceByHash(key: String, instanceCount: Int): Int {
+        val hash = key.hashCode()
+        return Math.abs(hash) % instanceCount
     }
     
     /**
@@ -570,7 +701,30 @@ class MultiXrayCoreManager(private val context: Context) {
         _instancesStatus.value = emptyMap()
         loadBalancerCounter.set(0)
         
+        // Clear routing cache when all instances stop
+        routingCache.clear()
+        
         Log.i(TAG, "All instances stopped (internal)")
+    }
+    
+    /**
+     * Clean up stale routing cache entries.
+     * Should be called periodically to remove expired entries.
+     */
+    suspend fun cleanupRoutingCache() {
+        val removedCount = routingCache.removeStaleEntries()
+        if (removedCount > 0) {
+            Log.d(TAG, "Cleaned up $removedCount stale routing cache entries")
+        }
+    }
+    
+    /**
+     * Get routing cache statistics.
+     * 
+     * @return Pair of (domainCacheSize, ipCacheSize)
+     */
+    fun getRoutingCacheStats(): Pair<Int, Int> {
+        return routingCache.getStats()
     }
     
     private fun findAvailablePort(excludedPorts: Set<Int>): Int? {

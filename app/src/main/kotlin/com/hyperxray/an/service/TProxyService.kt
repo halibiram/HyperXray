@@ -169,6 +169,8 @@ class TProxyService : VpnService() {
     }
 
     private lateinit var logFileManager: LogFileManager
+    
+    private lateinit var prefs: Preferences
 
     @Volatile
     private var xrayProcess: Process? = null
@@ -238,6 +240,7 @@ class TProxyService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        prefs = Preferences(this)
         logFileManager = LogFileManager(this)
         
         // Acquire partial wake lock to prevent system from killing service
@@ -758,6 +761,9 @@ class TProxyService : VpnService() {
                             // This allows browser and other apps to benefit from DNS cache
                             // Root is NOT required - works by parsing Xray DNS logs
                             interceptDnsFromXrayLogs(line)
+                            
+                            // Extract domain/IP for sticky routing
+                            processStickyRoutingFromLog(line)
                         })
                         
                         // Observe instance status changes and broadcast to MainViewModel
@@ -967,6 +973,11 @@ class TProxyService : VpnService() {
                     if (firstPort != null) {
                         prefs.apiPort = firstPort
                         Log.d(TProxyService.TAG, "Set primary API port to $firstPort (from ${startedInstances.size} instances)")
+                    }
+                    
+                    // Start routing cache cleanup for sticky routing
+                    if (startedInstances.isNotEmpty() && prefs.stickyRoutingEnabled) {
+                        startRoutingCacheCleanup()
                     }
                     
                     // Start SOCKS5 readiness check immediately after first instance starts
@@ -4493,6 +4504,88 @@ tunnel:
                 tproxyConf += "  password: '" + prefs.socksPassword + "'\n"
             }
             return tproxyConf
+        }
+    }
+    
+    /**
+     * Process sticky routing from Xray logs.
+     * Extracts domain/IP and updates routing cache.
+     * 
+     * @param logLine Log line from Xray
+     */
+    private fun processStickyRoutingFromLog(logLine: String) {
+        if (!prefs.stickyRoutingEnabled || multiXrayCoreManager == null) {
+            return
+        }
+        
+        try {
+            // Extract domain from SNI or sniffing logs
+            val domain = extractSNI(logLine) ?: extractSniffedDomain(logLine)
+            
+            // Extract IP from log if available
+            val ipPattern = Regex("""\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b""")
+            val ipMatch = ipPattern.find(logLine)
+            val ip = ipMatch?.groupValues?.get(1)
+            
+            // Update sticky routing cache if domain or IP is found
+            if (domain != null || ip != null) {
+                serviceScope.launch {
+                    try {
+                        multiXrayCoreManager?.getInstanceForConnection(domain, ip)?.let { (instanceIndex, apiPort) ->
+                            Log.d(TAG, "Sticky routing: domain=$domain, ip=$ip -> instance $instanceIndex, port $apiPort")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error processing sticky routing from log: ${e.message}")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error extracting domain/IP for sticky routing: ${e.message}")
+        }
+    }
+    
+    /**
+     * Update sticky routing cache for domain-IP mapping.
+     * Called when DNS resolution completes.
+     * 
+     * @param domain Domain name
+     * @param ip IP address
+     */
+    private fun updateStickyRoutingForDomainIp(domain: String, ip: String) {
+        if (!prefs.stickyRoutingEnabled || multiXrayCoreManager == null) {
+            return
+        }
+        
+        serviceScope.launch {
+            try {
+                // Get instance for this domain-IP combination
+                multiXrayCoreManager?.getInstanceForConnection(domain, ip)?.let { (instanceIndex, apiPort) ->
+                    Log.d(TAG, "Sticky routing updated: domain=$domain, ip=$ip -> instance $instanceIndex, port $apiPort")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error updating sticky routing for domain-IP: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Periodic cleanup of stale routing cache entries.
+     * Should be called periodically (e.g., every hour).
+     */
+    private fun startRoutingCacheCleanup() {
+        if (!prefs.stickyRoutingEnabled || multiXrayCoreManager == null) {
+            return
+        }
+        
+        serviceScope.launch {
+            while (isActive && !isStopping) {
+                try {
+                    delay(3600000L) // 1 hour
+                    multiXrayCoreManager?.cleanupRoutingCache()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error in routing cache cleanup: ${e.message}")
+                }
+            }
         }
     }
 }

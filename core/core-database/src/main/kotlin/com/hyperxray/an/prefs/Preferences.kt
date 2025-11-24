@@ -647,6 +647,11 @@ class Preferences(context: Context) {
         const val XRAY_CORE_INSTANCE_COUNT: String = "XrayCoreInstanceCount"
         const val AUTO_START: String = "AutoStart"
         
+        // Sticky routing keys
+        const val STICKY_ROUTING_ENABLED: String = "StickyRoutingEnabled"
+        const val STICKY_ROUTING_CACHE_SIZE: String = "StickyRoutingCacheSize"
+        const val STICKY_ROUTING_TTL_MS: String = "StickyRoutingTtlMs"
+        
         private const val TAG = "Preferences"
     }
     
@@ -655,6 +660,32 @@ class Preferences(context: Context) {
         set(enable) {
             setValueInProvider(AUTO_START, enable)
         }
+    
+    // Sticky routing preferences
+    var stickyRoutingEnabled: Boolean
+        get() = getBooleanPref(STICKY_ROUTING_ENABLED, true)
+        set(enable) {
+            setValueInProvider(STICKY_ROUTING_ENABLED, enable)
+        }
+    
+    var stickyRoutingCacheSize: Int
+        get() {
+            val value = getPrefData(STICKY_ROUTING_CACHE_SIZE).first
+            return value?.toIntOrNull() ?: 1000 // Default 1000 entries
+        }
+        set(size) {
+            setValueInProvider(STICKY_ROUTING_CACHE_SIZE, size)
+        }
+    
+    var stickyRoutingTtlMs: Long
+        get() {
+            val value = getPrefData(STICKY_ROUTING_TTL_MS).first
+            return value?.toLongOrNull() ?: 3600000L // Default 1 hour
+        }
+        set(ttl) {
+            setValueInProvider(STICKY_ROUTING_TTL_MS, ttl)
+        }
 }
+
 
 
