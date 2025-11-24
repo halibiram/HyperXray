@@ -4,6 +4,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
 import android.util.Log
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -11,12 +12,13 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
-import com.hyperxray.an.common.ThemeMode
-import com.hyperxray.an.core.di.AppContainer
-import com.hyperxray.an.core.di.DefaultAppContainer
+import com.hyperxray.an.common.ThemeUtils
 import com.hyperxray.an.feature.profiles.IntentHandler
 import com.hyperxray.an.ui.navigation.AppNavHost
 import com.hyperxray.an.ui.theme.ExpressiveMaterialTheme
@@ -27,26 +29,25 @@ import kotlinx.coroutines.launch
 /**
  * Main activity for HyperXray VPN application.
  * 
- * Responsibilities:
- * - Activity lifecycle management
- * - Theme initialization and configuration changes
- * - Navigation host setup
- * - Intent delegation to feature modules
- * 
- * No business logic - all business logic is in feature modules.
+ * Follows "Dumb Container" / "UI Host" pattern:
+ * - Strictly delegates intents to ViewModel/IntentHandler
+ * - Observes ViewModel state for theme
+ * - No business logic - all logic in ViewModel and feature modules
+ * - Only catches system/framework exceptions (BadTokenException, etc.)
  */
 class MainActivity : ComponentActivity() {
     private val mainViewModel: MainViewModel by viewModels { 
         MainViewModelFactory(application) 
     }
     
-    // DI container (simplified - will be expanded in future phases)
-    private val appContainer: AppContainer by lazy { 
-        DefaultAppContainer(application) 
+    // Intent handler for config sharing (delegates to ViewModel)
+    private val intentHandler: IntentHandler by lazy {
+        IntentHandler { content ->
+            lifecycleScope.launch {
+                mainViewModel.handleSharedContent(content)
+            }
+        }
     }
-    
-    // Intent handler for config sharing (moved to feature-profiles)
-    private lateinit var intentHandler: IntentHandler
 
     public override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -55,67 +56,47 @@ class MainActivity : ComponentActivity() {
             enableEdgeToEdge()
             window.isNavigationBarContrastEnforced = false
 
-            // Initialize intent handler (delegates to MainViewModel for now)
-            try {
-                intentHandler = IntentHandler { content ->
-                    mainViewModel.handleSharedContent(content)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to initialize IntentHandler: ${e.message}", e)
-                // Create a no-op handler to prevent crashes
-                intentHandler = IntentHandler { }
-            }
+            // Initialize system night mode in ViewModel
+            val currentNightMode = ThemeUtils.getSystemNightMode(
+                resources.configuration.uiMode
+            )
+            mainViewModel.updateSystemNightMode(currentNightMode)
 
-            try {
-                mainViewModel.reloadView = { initView() }
-                initView()
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to initialize view: ${e.message}", e)
-                // Show error state or fallback UI
-            }
+            // Initialize view - observes ViewModel state
+            initView()
 
-            // Process share intent (delegated to feature module)
-            try {
-                intent?.let { intentHandler.processShareIntent(it, contentResolver, lifecycleScope) }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to process share intent: ${e.message}", e)
+            // Process initial share intent (strictly delegates to IntentHandler)
+            intent?.let { 
+                intentHandler.processShareIntent(it, contentResolver, lifecycleScope)
             }
             
-            Log.d(TAG, "MainActivity onCreate called.")
-        } catch (e: Exception) {
-            Log.e(TAG, "Critical error in onCreate: ${e.message}", e)
-            // Try to show a basic error UI
-            try {
-                setContent {
-                    Surface(modifier = Modifier.fillMaxSize()) {
-                        // Basic error UI - app will be unusable but won't crash
-                    }
-                }
-            } catch (e2: Exception) {
-                Log.e(TAG, "Failed to show error UI: ${e2.message}", e2)
-            }
+            Log.d(TAG, "MainActivity onCreate completed.")
+        } catch (e: WindowManager.BadTokenException) {
+            // System/framework exception - Activity may be finishing
+            Log.e(TAG, "BadTokenException in onCreate (system exception): ${e.message}", e)
+        } catch (e: IllegalStateException) {
+            // System/framework exception - Activity state issue
+            Log.e(TAG, "IllegalStateException in onCreate (system exception): ${e.message}", e)
         }
     }
 
     private fun initView() {
         try {
-            val insetsController = WindowCompat.getInsetsController(window, window.decorView)
-            val currentNightMode =
-                resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-            val isDark = try {
-                when (mainViewModel.prefs.theme) {
-                    ThemeMode.Light -> false
-                    ThemeMode.Dark -> true
-                    ThemeMode.Auto -> currentNightMode == Configuration.UI_MODE_NIGHT_YES
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to get theme preference: ${e.message}", e)
-                // Default to auto theme
-                currentNightMode == Configuration.UI_MODE_NIGHT_YES
-            }
-            insetsController.isAppearanceLightStatusBars = !isDark
-
             setContent {
+                // Observe ViewModel theme state - Activity is "dumb", just passes state to Compose
+                val isDark by mainViewModel.isDarkTheme.collectAsState()
+                
+                // Update status bar appearance based on theme
+                LaunchedEffect(isDark) {
+                    try {
+                        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+                        insetsController.isAppearanceLightStatusBars = !isDark
+                    } catch (e: WindowManager.BadTokenException) {
+                        // System exception - Activity may be finishing, ignore
+                        Log.d(TAG, "BadTokenException while updating status bar (ignored)")
+                    }
+                }
+
                 ExpressiveMaterialTheme(darkTheme = isDark) {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
@@ -125,22 +106,26 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize view: ${e.message}", e)
-            // Show basic UI as fallback
-            setContent {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    // Basic fallback UI
-                }
-            }
+        } catch (e: WindowManager.BadTokenException) {
+            // System/framework exception - Activity may be finishing
+            Log.e(TAG, "BadTokenException in initView (system exception): ${e.message}", e)
+        } catch (e: IllegalStateException) {
+            // System/framework exception - Activity state issue
+            Log.e(TAG, "IllegalStateException in initView (system exception): ${e.message}", e)
         }
     }
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // Strictly delegate to IntentHandler - no parsing logic in Activity
         intent?.let {
-            intentHandler.processShareIntent(it, contentResolver, lifecycleScope)
+            try {
+                intentHandler.processShareIntent(it, contentResolver, lifecycleScope)
+            } catch (e: WindowManager.BadTokenException) {
+                // System/framework exception - Activity may be finishing
+                Log.d(TAG, "BadTokenException in onNewIntent (ignored)")
+            }
         }
     }
 
@@ -151,15 +136,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        val currentNightMode = newConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        val isDark = when (mainViewModel.prefs.theme) {
-            ThemeMode.Light -> false
-            ThemeMode.Dark -> true
-            ThemeMode.Auto -> currentNightMode == Configuration.UI_MODE_NIGHT_YES
-        }
-        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
-        insetsController.isAppearanceLightStatusBars = !isDark
-        Log.d(TAG, "MainActivity onConfigurationChanged called.")
+        // Strictly delegate to ViewModel - no theme calculation logic in Activity
+        val currentNightMode = ThemeUtils.getSystemNightMode(newConfig.uiMode)
+        mainViewModel.updateSystemNightMode(currentNightMode)
+        // Theme state will update automatically via StateFlow, Compose will recompose
+        Log.d(TAG, "MainActivity onConfigurationChanged - delegated to ViewModel.")
     }
 
     companion object {

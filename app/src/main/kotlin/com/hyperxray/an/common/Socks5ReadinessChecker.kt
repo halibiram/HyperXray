@@ -27,14 +27,18 @@ import java.net.SocketTimeoutException
 object Socks5ReadinessChecker {
     private const val TAG = "Socks5ReadinessChecker"
     
-    // Default timeout for socket connection attempts (optimized for faster failure detection)
-    private const val SOCKET_CONNECT_TIMEOUT_MS = 500L
+    // Default timeout for socket connection attempts
+    // Increased from 500ms to 2000ms to allow more time for connection establishment
+    // This prevents premature failures when SOCKS5 server is starting up
+    private const val SOCKET_CONNECT_TIMEOUT_MS = 2000L
     
-    // Retry interval when waiting for SOCKS5 to become ready (optimized for faster detection)
-    private const val RETRY_INTERVAL_MS = 100L
+    // Retry interval when waiting for SOCKS5 to become ready
+    // Increased from 100ms to 500ms to reduce CPU usage and allow server more time to start
+    private const val RETRY_INTERVAL_MS = 500L
     
     // Maximum wait time before giving up (fallback timeout)
-    private const val MAX_WAIT_TIME_MS = 5000L // 5 seconds
+    // Increased to 20 seconds to allow Xray process more time to start SOCKS5 server
+    private const val MAX_WAIT_TIME_MS = 20000L // 20 seconds
     
     // StateFlow to track SOCKS5 readiness
     private val _isSocks5Ready = MutableStateFlow<Boolean>(false)
@@ -68,10 +72,21 @@ object Socks5ReadinessChecker {
                 true
             }
         } catch (e: SocketTimeoutException) {
-            Log.d(TAG, "SOCKS5 readiness check: port $socksPort not ready (timeout)")
+            Log.d(TAG, "SOCKS5 readiness check: port $socksPort not ready (timeout after ${SOCKET_CONNECT_TIMEOUT_MS}ms)")
+            false
+        } catch (e: java.net.ConnectException) {
+            // Connection refused - server not listening yet
+            val errorMsg = e.message ?: "Unknown connection error"
+            if (errorMsg.contains("ECONNREFUSED", ignoreCase = true) || 
+                errorMsg.contains("Connection refused", ignoreCase = true)) {
+                Log.d(TAG, "SOCKS5 readiness check: port $socksPort not ready (connection refused - server not listening)")
+            } else {
+                Log.d(TAG, "SOCKS5 readiness check: port $socksPort not ready (connect exception: $errorMsg)")
+            }
             false
         } catch (e: Exception) {
-            Log.d(TAG, "SOCKS5 readiness check: port $socksPort not ready (${e.javaClass.simpleName}: ${e.message})")
+            val errorMsg = e.message ?: "Unknown error"
+            Log.d(TAG, "SOCKS5 readiness check: port $socksPort not ready (${e.javaClass.simpleName}: $errorMsg)")
             false
         }
     }
@@ -99,17 +114,25 @@ object Socks5ReadinessChecker {
         
         Log.d(TAG, "Waiting for SOCKS5 to become ready on $socksAddress:$socksPort (max wait: ${maxWaitTimeMs}ms)")
         
+        var attemptCount = 0
         while (System.currentTimeMillis() - startTime < maxWaitTimeMs) {
+            attemptCount++
+            val elapsed = System.currentTimeMillis() - startTime
+            
             if (isSocks5Ready(context, socksAddress, socksPort)) {
                 _isSocks5Ready.value = true
-                Log.i(TAG, "SOCKS5 is ready on $socksAddress:$socksPort")
+                Log.i(TAG, "✅ SOCKS5 is ready on $socksAddress:$socksPort (after ${elapsed}ms, $attemptCount attempts)")
                 return true
             }
             
             // Check if we've exceeded max wait time
-            val elapsed = System.currentTimeMillis() - startTime
             if (elapsed >= maxWaitTimeMs) {
                 break
+            }
+            
+            // Log progress every 5 seconds
+            if (attemptCount % 10 == 0 || elapsed % 5000 < retryIntervalMs) {
+                Log.d(TAG, "SOCKS5 not ready yet (attempt $attemptCount, elapsed: ${elapsed}ms/${maxWaitTimeMs}ms)")
             }
             
             // Wait before retrying
@@ -118,7 +141,8 @@ object Socks5ReadinessChecker {
         }
         
         val elapsed = System.currentTimeMillis() - startTime
-        Log.w(TAG, "SOCKS5 did not become ready within ${elapsed}ms (timeout: ${maxWaitTimeMs}ms)")
+        Log.w(TAG, "❌ SOCKS5 did not become ready within ${elapsed}ms (timeout: ${maxWaitTimeMs}ms, attempts: $attemptCount)")
+        Log.w(TAG, "This may indicate that Xray process has not started SOCKS5 server on $socksAddress:$socksPort")
         _isSocks5Ready.value = false
         return false
     }

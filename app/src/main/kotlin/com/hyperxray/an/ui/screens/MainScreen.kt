@@ -60,12 +60,6 @@ fun MainScreen(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {}
 
-    DisposableEffect(mainViewModel) {
-        mainViewModel.registerTProxyServiceReceivers()
-        onDispose {
-            mainViewModel.unregisterTProxyServiceReceivers()
-        }
-    }
 
     var lastNavigationTime = 0L
 

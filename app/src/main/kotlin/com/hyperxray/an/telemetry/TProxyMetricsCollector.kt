@@ -5,7 +5,8 @@ import android.util.Log
 import com.hyperxray.an.xray.runtime.stats.CoreStatsClient
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.service.TProxyService
-import com.hyperxray.an.service.TProxyService.UdpErrorCategory
+import com.hyperxray.an.service.utils.TProxyUtils.UdpErrorCategory
+import com.hyperxray.an.service.managers.HevSocksManager
 import com.hyperxray.an.viewmodel.CoreStatsState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -43,10 +44,10 @@ class TProxyMetricsCollector(
     /**
      * Get UDP error pattern from TProxyService
      */
-    private fun getUdpErrorPattern(): com.hyperxray.an.service.TProxyService.UdpErrorPattern {
+    private fun getUdpErrorPattern(): com.hyperxray.an.service.utils.TProxyUtils.UdpErrorPattern {
         return try {
             tproxyService?.getUdpErrorPatternForTelemetry()
-                ?: com.hyperxray.an.service.TProxyService.UdpErrorPattern(
+                ?: com.hyperxray.an.service.utils.TProxyUtils.UdpErrorPattern(
                     totalErrors = 0,
                     errorsByCategory = emptyMap(),
                     averageTimeBetweenErrors = 0.0,
@@ -56,7 +57,7 @@ class TProxyMetricsCollector(
                 )
         } catch (e: Exception) {
             Log.w(TAG, "Failed to get UDP error pattern: ${e.message}")
-            com.hyperxray.an.service.TProxyService.UdpErrorPattern(
+            com.hyperxray.an.service.utils.TProxyUtils.UdpErrorPattern(
                 totalErrors = 0,
                 errorsByCategory = emptyMap(),
                 averageTimeBetweenErrors = 0.0,
@@ -157,7 +158,7 @@ class TProxyMetricsCollector(
                 handshakeTime = handshakeTime,
                 loss = loss,
                 udpErrorRate = udpErrorPattern.errorRate,
-                udpErrorCategoryCounts = listOf(
+                udpErrorCategoryCounts = listOf<Int>(
                     udpErrorPattern.errorsByCategory.getOrDefault(UdpErrorCategory.IDLE_TIMEOUT, 0),
                     udpErrorPattern.errorsByCategory.getOrDefault(UdpErrorCategory.SHUTDOWN, 0),
                     udpErrorPattern.errorsByCategory.getOrDefault(UdpErrorCategory.NORMAL_OPERATION, 0),
@@ -188,7 +189,7 @@ class TProxyMetricsCollector(
      */
     private fun collectNativeTProxyStats(): NativeTProxyStats? {
         return try {
-            val statsArray = TProxyService.TProxyGetStats()
+            val statsArray = com.hyperxray.an.service.TProxyService.TProxyGetStats()
             if (statsArray != null && statsArray.size >= 4) {
                 val stats = NativeTProxyStats(
                     txPackets = statsArray[0],
