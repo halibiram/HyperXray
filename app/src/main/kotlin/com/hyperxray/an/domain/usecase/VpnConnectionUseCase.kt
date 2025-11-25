@@ -435,12 +435,18 @@ class VpnConnectionUseCase(
     
     /**
      * Handles retry countdown when connection fails.
-     * Starts 3-second countdown and automatically retries connection.
-     * Buton aktif olduktan sonra countdown başlar.
+     * DISABLED: Automatic retry is disabled to prevent disconnect loops.
+     * Retry should be done manually by the user via UI button.
+     * Buton aktif olduktan sonra countdown başlar ama otomatik retry yapılmaz.
      */
     private fun startRetryCountdown() {
-        Log.i(TAG, "startRetryCountdown: Starting 3-second retry countdown")
+        Log.i(TAG, "startRetryCountdown: Retry countdown disabled to prevent disconnect loops. User must manually retry.")
+        // Automatic retry is disabled to prevent disconnect loops
+        // User must manually retry via UI button
         retryCountdownJob?.cancel()
+        
+        // Optionally show countdown in UI but don't auto-retry
+        // This allows UI to show countdown but prevents automatic reconnection
         retryCountdownJob = scope.launch {
             var countdown = 3
             while (countdown > 0) {
@@ -451,18 +457,18 @@ class VpnConnectionUseCase(
                     return@launch
                 }
                 
-                Log.d(TAG, "startRetryCountdown: Countdown: $countdown seconds remaining")
+                Log.d(TAG, "startRetryCountdown: Countdown: $countdown seconds remaining (auto-retry disabled)")
                 _connectionState.value = currentState.copy(retryCountdownSeconds = countdown)
                 delay(1000L)
                 countdown--
             }
             
-            // Countdown finished, retry connection
+            // Countdown finished, but DO NOT auto-retry
             val finalState = _connectionState.value
             if (finalState is ConnectionState.Failed) {
-                Log.i(TAG, "startRetryCountdown: Countdown finished, attempting to reconnect...")
+                Log.i(TAG, "startRetryCountdown: Countdown finished, but auto-retry is disabled. User must manually retry.")
                 _connectionState.value = finalState.copy(retryCountdownSeconds = null)
-                connect()
+                // DO NOT call connect() here - let user manually retry
             } else {
                 Log.d(TAG, "startRetryCountdown: State is no longer Failed, skipping retry")
             }

@@ -363,17 +363,22 @@ class TProxyService : VpnService() {
     private fun initializeXrayRunner() {
         val instanceCount = session.prefs.xrayCoreInstanceCount
         session.xrayRunner = createXrayRunner(instanceCount)
-        Log.d(TAG, "XrayRunner initialized: ${if (instanceCount > 1) "MultiInstance" else "Legacy"} (instanceCount=$instanceCount)")
+        Log.d(TAG, "XrayRunner initialized: ${if (instanceCount >= 1) "MultiInstance" else "Legacy"} (instanceCount=$instanceCount)")
     }
 
     /**
      * Create XrayRunner instance based on instance count.
+     * 
+     * CRITICAL: Use MultiInstanceXrayRunner for instanceCount >= 1 to maintain consistency.
+     * Even for single instance, MultiXrayCoreManager provides better lifecycle management.
      */
     private fun createXrayRunner(instanceCount: Int): XrayRunner {
         val context = createXrayRunnerContext()
-        return if (instanceCount > 1) {
+        return if (instanceCount >= 1) {
             MultiInstanceXrayRunner(context)
         } else {
+            // Fallback to Legacy only if invalid count (should not happen)
+            Log.w(TAG, "Invalid instance count: $instanceCount, using LegacyXrayRunner as fallback")
             LegacyXrayRunner(context)
         }
     }
@@ -574,6 +579,49 @@ class TProxyService : VpnService() {
             ?: return handleConfigError("Failed to read configuration file.")
         
         val instanceCount = session.prefs.xrayCoreInstanceCount
+        
+        // Check if current xrayRunner is compatible with instance count
+        // If not, recreate it with the correct type
+        // IMPORTANT: Only recreate if runner is NOT running to avoid disrupting active connection
+        val currentRunner = session.xrayRunner
+        // CRITICAL: Use MultiInstanceXrayRunner for instanceCount >= 1
+        val needsMultiInstance = instanceCount >= 1
+        val isCurrentMultiInstance = currentRunner is MultiInstanceXrayRunner
+        val isCurrentLegacy = currentRunner is LegacyXrayRunner
+        val isRunnerRunning = currentRunner?.isRunning() == true
+        
+        // Recreate runner if:
+        // 1. Current runner is null (shouldn't happen, but handle it)
+        // 2. Instance count >= 1 but current runner is Legacy AND runner is NOT running
+        // 3. Instance count < 1 but current runner is MultiInstance AND runner is NOT running (should not happen)
+        // 
+        // If runner is running, we cannot safely recreate it without disrupting the connection.
+        // In this case, log a warning and continue with the existing runner.
+        // The runner will be recreated on the next service restart.
+        if (currentRunner == null) {
+            Log.d(TAG, "xrayRunner is null, creating new runner (instanceCount=$instanceCount)")
+            session.xrayRunner = createXrayRunner(instanceCount)
+            Log.d(TAG, "xrayRunner created: ${if (needsMultiInstance) "MultiInstance" else "Legacy"} (instanceCount=$instanceCount)")
+        } else if ((needsMultiInstance && isCurrentLegacy) || (!needsMultiInstance && isCurrentMultiInstance)) {
+            if (isRunnerRunning) {
+                // Runner is running, cannot safely recreate without disrupting connection
+                Log.w(TAG, "Instance count mismatch detected (current=$instanceCount, runner=${currentRunner.javaClass.simpleName}), " +
+                        "but runner is running. Cannot recreate without disrupting connection. " +
+                        "Runner will be recreated on next service restart. " +
+                        "Consider stopping and restarting the service to apply instance count change.")
+                // Continue with existing runner - it will work but may not be optimal
+            } else {
+                // Runner is not running, safe to recreate
+                Log.w(TAG, "Instance count changed (current=$instanceCount), recreating xrayRunner. " +
+                        "Current type: ${currentRunner.javaClass.simpleName}, " +
+                        "Required type: ${if (needsMultiInstance) "MultiInstance" else "Legacy"}")
+                
+                // Recreate runner with correct type
+                session.xrayRunner = createXrayRunner(instanceCount)
+                Log.d(TAG, "xrayRunner recreated: ${if (needsMultiInstance) "MultiInstance" else "Legacy"} (instanceCount=$instanceCount)")
+            }
+        }
+        
         val config = XrayConfig(
             configFile = configFile,
             configContent = configContent,

@@ -118,8 +118,7 @@ class MultiXrayCoreManager(private val context: Context) {
         configContent: String?,
         excludedPorts: Set<Int> = emptySet()
     ): Map<Int, Int> {
-        // Use mutex only for initial check, then release it to avoid deadlock
-        // when async jobs try to acquire the same mutex
+        // Step 1: Acquire lock -> Check state -> Release lock
         val shouldProceed = mutex.withLock {
             // Prevent concurrent start calls
             if (isStarting) {
@@ -143,16 +142,27 @@ class MultiXrayCoreManager(private val context: Context) {
         }
         
         try {
-            // Check if we have any running instances - if yes, log warning but continue
-            val runningCount = mutex.withLock {
-                instances.values.count { it.isRunning() }
-            }
-            if (runningCount > 0) {
-                Log.w(TAG, "⚠️ Starting new instances while $runningCount instances are still running. Stopping existing instances first.")
+            // Step 2: Check existing instances and log reconfiguration
+            val previousCount: Int
+            val previousPorts: List<Int>
+            mutex.withLock {
+                previousCount = instances.size
+                previousPorts = instancePorts.values.toList()
             }
             
-            // Stop existing instances first (mutex dışında olduğumuz için stopAllInstances kullanıyoruz)
-            stopAllInstances()
+            if (previousCount > 0) {
+                Log.i(TAG, "🔄 Reconfiguring instances from $previousCount to $count (previous ports: $previousPorts)")
+            }
+            
+            // Step 3: Stop existing instances first
+            // Acquire mutex only for the stop operation, then release before starting new instances
+            if (previousCount > 0) {
+                Log.i(TAG, "🛑 Stopping $previousCount existing instances before starting new ones...")
+                mutex.withLock {
+                    stopAllInstancesInternal()
+                }
+                Log.i(TAG, "✅ Existing instances stopped, proceeding with new instance startup")
+            }
             
             Log.i(TAG, "▶️ Starting $count Xray-core instances sequentially")
             Log.d(TAG, "Instance startup configuration: count=$count, configPath=$configPath, excludedPortsCount=${excludedPorts.size}")
@@ -173,7 +183,8 @@ class MultiXrayCoreManager(private val context: Context) {
             Log.i(TAG, "Starting ${count} instances sequentially (sync mode)")
             val servicesToWait = mutableListOf<Pair<Int, XrayRuntimeServiceApi>>()
             
-            // Start each instance sequentially (SYNC MODE)
+            // Step 4: Start each instance sequentially (SYNC MODE)
+            // CRITICAL: Mutex is NOT held during service.start() or waiting for Running state
             for (i in 0 until count) {
                 try {
                     Log.i(TAG, "📋 Starting instance $i (${i + 1}/$count) sequentially...")
@@ -181,13 +192,13 @@ class MultiXrayCoreManager(private val context: Context) {
                     // Check cancellation
                     coroutineContext.ensureActive()
                     
-                    // Check isStarting flag
+                    // Check isStarting flag (no mutex needed for read)
                     if (!isStarting) {
                         Log.w(TAG, "⚠️ Instance $i: Startup cancelled - isStarting flag is false")
                         break
                     }
                     
-                    // Allocate port
+                    // Allocate port (no mutex needed)
                     Log.d(TAG, "Instance $i: Allocating port...")
                     val apiPort: Int? = this@MultiXrayCoreManager.findAvailablePort(allExcludedPorts)
                     
@@ -198,7 +209,7 @@ class MultiXrayCoreManager(private val context: Context) {
                     Log.d(TAG, "Instance $i: Port allocated: $apiPort")
                     allExcludedPorts.add(apiPort)
                     
-                    // Inject API port into config
+                    // Inject API port into config (no mutex needed)
                     Log.d(TAG, "Instance $i: Injecting API port $apiPort into config...")
                     val injectedConfigContent = try {
                         ConfigUtils.injectApiPort(commonConfigContent, apiPort)
@@ -214,12 +225,12 @@ class MultiXrayCoreManager(private val context: Context) {
                         }
                     }
                     
-                    // Create service
+                    // Create service (no mutex needed)
                     Log.d(TAG, "Instance $i: Creating XrayRuntimeService...")
                     val service = XrayRuntimeServiceFactory.create(context)
                     Log.d(TAG, "Instance $i: XrayRuntimeService created successfully")
                     
-                    // Store in instances map
+                    // Step 4a: Acquire Lock -> Reserve Port & Create Service object -> Release Lock
                     mutex.withLock {
                         coroutineContext.ensureActive()
                         instances[i] = service
@@ -227,7 +238,7 @@ class MultiXrayCoreManager(private val context: Context) {
                         Log.d(TAG, "Instance $i: Service and port stored in instances map")
                     }
                     
-                    // Set log callback
+                    // Set log callback (no mutex needed)
                     logLineCallback?.let { baseCallback ->
                         val port = apiPort
                         service.setLogLineCallback(LogLineCallback { line ->
@@ -237,9 +248,10 @@ class MultiXrayCoreManager(private val context: Context) {
                         Log.d(TAG, "Instance $i: Log callback set successfully")
                     }
                     
-                    // Observe status changes in background
+                    // Observe status changes in background (no mutex needed for launch)
                     serviceScope.launch {
                         service.status.collect { status ->
+                            // Only acquire mutex for map update
                             mutex.withLock {
                                 this@MultiXrayCoreManager.updateInstanceStatus(i, status)
                             }
@@ -258,13 +270,14 @@ class MultiXrayCoreManager(private val context: Context) {
                         }
                     }
                     
-                    // Start service
+                    // Step 4b: service.start() - NO MUTEX HERE (IO Operation)
                     Log.i(TAG, "🚀 Instance $i: Starting on port $apiPort (configPath: $configPath)")
                     val startTime = System.currentTimeMillis()
                     val startedPort = try {
                         service.start(configPath, injectedConfigContent, apiPort)
                     } catch (e: Exception) {
                         Log.e(TAG, "❌ Instance $i: Exception during service.start() call", e)
+                        // Acquire lock only for cleanup
                         mutex.withLock {
                             instances.remove(i)
                             instancePorts.remove(i)
@@ -275,6 +288,7 @@ class MultiXrayCoreManager(private val context: Context) {
                     
                     if (startedPort == null) {
                         Log.e(TAG, "❌ Instance $i: service.start() returned null after ${startDuration}ms")
+                        // Acquire lock only for cleanup
                         mutex.withLock {
                             instances.remove(i)
                             instancePorts.remove(i)
@@ -284,7 +298,7 @@ class MultiXrayCoreManager(private val context: Context) {
                     
                     Log.i(TAG, "✅ Instance $i: start() returned port $startedPort after ${startDuration}ms (expected: $apiPort)")
                     
-                    // Wait for instance to reach Running state (SYNC - blocks until running)
+                    // Step 4c: Wait for Running state - NO MUTEX HERE (blocks until running)
                     Log.i(TAG, "⏳ Instance $i: Waiting for Running state (timeout: ${INSTANCE_STARTUP_TIMEOUT_MS}ms)...")
                     val waitStartTime = System.currentTimeMillis()
                     try {
@@ -299,6 +313,7 @@ class MultiXrayCoreManager(private val context: Context) {
                             val waitDuration = System.currentTimeMillis() - waitStartTime
                             when (runningStatus) {
                                 is XrayRuntimeStatus.Running -> {
+                                    // Step 4d: Acquire Lock -> Update instances map & Status -> Release Lock
                                     mutex.withLock {
                                         startedInstances[i] = apiPort
                                     }
@@ -307,6 +322,7 @@ class MultiXrayCoreManager(private val context: Context) {
                                 }
                                 is XrayRuntimeStatus.Error -> {
                                     Log.e(TAG, "❌ Instance $i failed to start: ${runningStatus.message}", runningStatus.throwable)
+                                    // Acquire lock only for cleanup
                                     mutex.withLock {
                                         instances.remove(i)
                                         instancePorts.remove(i)
@@ -314,6 +330,7 @@ class MultiXrayCoreManager(private val context: Context) {
                                 }
                                 is XrayRuntimeStatus.ProcessExited -> {
                                     Log.e(TAG, "❌ Instance $i exited during startup with code ${runningStatus.exitCode}: ${runningStatus.message}")
+                                    // Acquire lock only for cleanup
                                     mutex.withLock {
                                         instances.remove(i)
                                         instancePorts.remove(i)
@@ -321,6 +338,7 @@ class MultiXrayCoreManager(private val context: Context) {
                                 }
                                 else -> {
                                     Log.w(TAG, "⚠️ Instance $i reached unexpected status: $runningStatus")
+                                    // Acquire lock only for cleanup
                                     mutex.withLock {
                                         instances.remove(i)
                                         instancePorts.remove(i)
@@ -337,6 +355,7 @@ class MultiXrayCoreManager(private val context: Context) {
                         } catch (stopException: Exception) {
                             Log.e(TAG, "Error stopping failed instance $i", stopException)
                         }
+                        // Acquire lock only for cleanup
                         mutex.withLock {
                             instances.remove(i)
                             instancePorts.remove(i)
@@ -349,6 +368,7 @@ class MultiXrayCoreManager(private val context: Context) {
                         } catch (stopException: Exception) {
                             Log.e(TAG, "Error stopping cancelled instance $i", stopException)
                         }
+                        // Acquire lock only for cleanup
                         mutex.withLock {
                             instances.remove(i)
                             instancePorts.remove(i)
@@ -427,36 +447,12 @@ class MultiXrayCoreManager(private val context: Context) {
     
     /**
      * Stop all instances.
+     * Thread-safe public method that acquires mutex.
+     * Use stopAllInstancesInternal() when already holding the mutex.
      */
     suspend fun stopAllInstances() {
         mutex.withLock {
-            Log.i(TAG, "Stopping all ${instances.size} instances")
-            
-            instances.values.forEach { service ->
-                try {
-                    service.stop()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error stopping instance", e)
-                }
-            }
-            
-            instances.values.forEach { service ->
-                try {
-                    service.cleanup()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error cleaning up instance", e)
-                }
-            }
-            
-            instances.clear()
-            instancePorts.clear()
-            _instancesStatus.value = emptyMap()
-            loadBalancerCounter.set(0)
-            
-            // Clear routing cache when all instances stop
-            routingCache.clear()
-            
-            Log.i(TAG, "All instances stopped")
+            stopAllInstancesInternal()
         }
     }
     
@@ -675,27 +671,48 @@ class MultiXrayCoreManager(private val context: Context) {
     
     /**
      * Internal version of stopAllInstances that doesn't acquire mutex.
-     * Used when we're already holding the mutex.
+     * Used when we're already holding the mutex or when called from within a locked block.
+     * 
+     * CRITICAL: This method must NOT acquire mutex to prevent deadlock.
+     * It should only be called:
+     * 1. From within a mutex.withLock block
+     * 2. From startInstances() before acquiring mutex for new instances
      */
     private suspend fun stopAllInstancesInternal() {
-        Log.i(TAG, "Stopping all ${instances.size} instances (internal)")
+        val instanceCount = instances.size
+        if (instanceCount == 0) {
+            Log.d(TAG, "No instances to stop")
+            return
+        }
         
-        instances.values.forEach { service ->
+        Log.i(TAG, "Stopping all $instanceCount instances (internal, mutex-free)")
+        
+        // Get snapshot of services to stop (no mutex needed - we're already synchronized or called from safe context)
+        val servicesToStop = instances.values.toList()
+        val portsToStop = instancePorts.values.toList()
+        
+        // Stop services (NO MUTEX HERE - these are IO operations)
+        servicesToStop.forEachIndexed { index, service ->
             try {
+                Log.d(TAG, "Stopping instance $index (port: ${portsToStop.getOrNull(index)})")
                 service.stop()
             } catch (e: Exception) {
-                Log.e(TAG, "Error stopping instance", e)
+                Log.e(TAG, "Error stopping instance $index", e)
             }
         }
         
-        instances.values.forEach { service ->
+        // Cleanup services (NO MUTEX HERE - these are cleanup operations)
+        servicesToStop.forEachIndexed { index, service ->
             try {
                 service.cleanup()
             } catch (e: Exception) {
-                Log.e(TAG, "Error cleaning up instance", e)
+                Log.e(TAG, "Error cleaning up instance $index", e)
             }
         }
         
+        // Clear maps and state (only if we're in a mutex block, otherwise caller should handle)
+        // Since this is called from startInstances() before mutex, we need to clear here
+        // But we need to be careful - if called from within mutex, we're already safe
         instances.clear()
         instancePorts.clear()
         _instancesStatus.value = emptyMap()
@@ -704,7 +721,7 @@ class MultiXrayCoreManager(private val context: Context) {
         // Clear routing cache when all instances stop
         routingCache.clear()
         
-        Log.i(TAG, "All instances stopped (internal)")
+        Log.i(TAG, "All $instanceCount instances stopped (internal)")
     }
     
     /**

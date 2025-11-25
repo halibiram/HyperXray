@@ -45,8 +45,15 @@ class MultiInstanceXrayRunner(
         
         try {
             Log.d(TAG, "Attempting to start xray process(es).")
-            val instanceCount = config.instanceCount
-            Log.i(TAG, "📊 Xray Core Instance Count: $instanceCount (will start ${if (instanceCount > 1) "$instanceCount instances" else "1 instance"})")
+            // CRITICAL: Read instanceCount directly from Preferences to ensure latest value
+            // This ensures settings changes are respected even if config was created with old value
+            val instanceCount = runnerContext.prefs.xrayCoreInstanceCount
+            Log.i(TAG, "📊 Xray Core Instance Count: $instanceCount (from Preferences, will start ${if (instanceCount == 1) "1 instance" else "$instanceCount instances"})")
+            
+            // Validate instanceCount matches config (log warning if mismatch, but use Preferences value)
+            if (config.instanceCount != instanceCount) {
+                Log.w(TAG, "⚠️ Instance count mismatch: config.instanceCount=${config.instanceCount}, Preferences.xrayCoreInstanceCount=$instanceCount. Using Preferences value.")
+            }
             
             // Validate config path is within app's private directory
             val selectedConfigPath = runnerContext.prefs.selectedConfigPath
@@ -144,10 +151,10 @@ class MultiInstanceXrayRunner(
                 Log.d(TAG, "Server address is already an IP: $serverAddress (no DNS resolution needed)")
             }
             
-            // Use MultiXrayCoreManager for multiple instances
-            if (instanceCount > 1) {
-                Log.i(TAG, "🚀 Starting $instanceCount xray-core instances using MultiXrayCoreManager")
-                Log.d(TAG, "Instance count details: requested=$instanceCount, will start multiple instances for load balancing")
+            // Use MultiXrayCoreManager for 1 or more instances (uniform handling)
+            if (instanceCount >= 1) {
+                Log.i(TAG, "🚀 Starting $instanceCount xray-core instance(s) using MultiXrayCoreManager")
+                Log.d(TAG, "Instance count details: requested=$instanceCount, will start ${if (instanceCount == 1) "1 instance" else "$instanceCount instances"} for ${if (instanceCount == 1) "single instance mode" else "load balancing"}")
                 
                 // Initialize MultiXrayCoreManager if not already initialized
                 if (runnerContext.multiXrayCoreManager == null) {
@@ -353,6 +360,7 @@ class MultiInstanceXrayRunner(
                     errorIntent.setPackage(runnerContext.getApplicationPackageName())
                     errorIntent.putExtra(runnerContext.getExtraErrorMessage(), "Failed to start any xray-core instances. Check logs for details.")
                     runnerContext.sendBroadcast(errorIntent)
+                    // CRITICAL: Stop service to prevent "Connecting..." stuck state
                     runnerContext.handler.post {
                         if (!runnerContext.isStopping()) {
                             runnerContext.serviceScope.launch {
@@ -360,7 +368,8 @@ class MultiInstanceXrayRunner(
                             }
                         }
                     }
-                    return
+                    // Explicitly throw exception to prevent continuation
+                    throw IllegalStateException("startInstances() returned empty map. No instances started successfully.")
                 }
                 
                 Log.i(TAG, "Successfully started ${startedInstances.size} out of $instanceCount xray-core instances")
@@ -462,8 +471,20 @@ class MultiInstanceXrayRunner(
                 
                 isRunning = true
             } else {
-                // Fallback to single instance - this should not happen in multi-instance mode
-                Log.w(TAG, "Instance count is 1, but MultiInstanceXrayRunner is being used. This should use LegacyXrayRunner instead.")
+                // This should not happen - instanceCount should be >= 1
+                val errorMessage = "Invalid instance count: $instanceCount (must be >= 1)"
+                Log.e(TAG, errorMessage)
+                val errorIntent = Intent(runnerContext.getActionError())
+                errorIntent.setPackage(runnerContext.getApplicationPackageName())
+                errorIntent.putExtra(runnerContext.getExtraErrorMessage(), errorMessage)
+                runnerContext.sendBroadcast(errorIntent)
+                runnerContext.handler.post {
+                    if (!runnerContext.isStopping()) {
+                        runnerContext.serviceScope.launch {
+                            runnerContext.stopXray("Invalid instance count: $instanceCount")
+                        }
+                    }
+                }
             }
         } catch (e: CancellationException) {
             // Expected cancellation during shutdown - don't log as error

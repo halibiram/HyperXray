@@ -223,10 +223,16 @@ class MainViewModel(
                         
                         // CRITICAL: Start connection process automatically when service starts
                         // This ensures StatusCard updates properly even if connect() wasn't called manually
+                        // BUT: Only if we're not already in a failed state to prevent retry loops
                         delay(500)
-                        if (_isServiceEnabled.value && connectionState.value !is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
+                        val currentState = connectionState.value
+                        if (_isServiceEnabled.value && 
+                            currentState !is com.hyperxray.an.feature.dashboard.ConnectionState.Connected &&
+                            currentState !is com.hyperxray.an.feature.dashboard.ConnectionState.Failed) {
                             Log.d(TAG, "Service started, auto-starting connection process for StatusCard update")
                             vpnConnectionUseCase.connect()
+                        } else if (currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Failed) {
+                            Log.d(TAG, "Service started but connection is in Failed state, skipping auto-connect to prevent retry loop")
                         }
                     }
                     is ServiceEvent.Stopped -> {

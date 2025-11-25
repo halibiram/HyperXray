@@ -92,7 +92,8 @@ class SettingsRepository(
                 )
             ),
             bypassDomains = prefs.bypassDomains,
-            bypassIps = prefs.bypassIps
+            bypassIps = prefs.bypassIps,
+            xrayCoreInstanceCount = prefs.xrayCoreInstanceCount
         )
     }
 
