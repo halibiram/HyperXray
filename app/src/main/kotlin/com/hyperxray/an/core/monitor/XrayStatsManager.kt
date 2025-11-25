@@ -4,9 +4,12 @@ import android.util.Log
 import com.hyperxray.an.viewmodel.CoreStatsState
 import com.hyperxray.an.xray.runtime.stats.CoreStatsClient
 import com.hyperxray.an.xray.runtime.stats.model.TrafficState
+import com.xray.app.stats.command.SysStatsResponse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,17 +25,23 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * Manages Xray-core statistics collection via gRPC.
  * Handles CoreStatsClient lifecycle, retry logic, exponential backoff, and cooldown.
+ * Supports multi-instance aggregation by collecting stats from all active instances.
  * Exposes stats updates via StateFlow for UI consumption.
  */
 class XrayStatsManager(
     private val scope: CoroutineScope,
-    private val apiPortProvider: () -> Int
+    private val apiPortProvider: () -> Int,
+    private val activeInstancesProvider: (suspend () -> Map<Int, Int>)? = null
 ) {
     private val TAG = "XrayStatsManager"
     
     private var coreStatsClient: CoreStatsClient? = null
     private val coreStatsClientMutex = Mutex() // For suspend functions
     private val coreStatsClientLock = Any() // For synchronous operations
+    
+    // Multi-instance client management
+    private val instanceClients: MutableMap<Int, CoreStatsClient> = mutableMapOf()
+    private val instanceClientsMutex = Mutex()
     
     // Client lifecycle state management to prevent rebuild loops
     @Volatile
@@ -140,16 +149,48 @@ class XrayStatsManager(
     /**
      * Updates core statistics from Xray-core via gRPC.
      * Handles client lifecycle, retry logic, and error recovery.
+     * Supports multi-instance aggregation by collecting stats from all active instances.
      */
     suspend fun updateCoreStats() {
         // Check if service is enabled before proceeding
         if (!isServiceEnabled) {
-            // Service is not enabled, ensure client is closed if it exists
+            // Service is not enabled, ensure clients are closed if they exist
             closeCoreStatsClient()
+            closeAllInstanceClients()
             consecutiveFailures = 0
             return
         }
         
+        // Check if we should use multi-instance mode
+        val activeInstances = try {
+            if (activeInstancesProvider != null) {
+                val instances = activeInstancesProvider.invoke()
+                Log.d(TAG, "Active instances provider returned ${instances.size} instances: $instances")
+                instances
+            } else {
+                Log.d(TAG, "Active instances provider is null, using single instance mode")
+                emptyMap()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error getting active instances: ${e.message}", e)
+            emptyMap()
+        }
+        
+        if (activeInstances.isNotEmpty()) {
+            // Multi-instance mode: collect stats from all instances and aggregate
+            Log.d(TAG, "Using multi-instance mode with ${activeInstances.size} instances")
+            updateCoreStatsMultiInstance(activeInstances)
+        } else {
+            // Single instance mode: use legacy apiPortProvider
+            Log.d(TAG, "Using single instance mode (apiPort: ${apiPortProvider()})")
+            updateCoreStatsSingleInstance()
+        }
+    }
+    
+    /**
+     * Updates core statistics from single instance (legacy mode).
+     */
+    private suspend fun updateCoreStatsSingleInstance() {
         // Synchronize access to coreStatsClient to prevent race conditions
         val client = coreStatsClientMutex.withLock {
             // Check if we can recreate client (cooldown and state checks)
@@ -215,43 +256,28 @@ class XrayStatsManager(
         // Validate client was created
         if (client == null) {
             Log.w(TAG, "CoreStatsClient is null, cannot update stats - will retry on next call")
-            // Don't return immediately - update state with safe fallback values
-            // This allows UI to show "connecting" or "unavailable" state
             val currentState = _statsState.value
-            _statsState.value = currentState.copy(
-                // Preserve existing values, don't reset to zero
-                // UI can show these as "last known" or "unavailable"
-            )
+            _statsState.value = currentState.copy()
             return
         }
         
-        // Use withTimeoutOrNull to prevent hanging if Xray crashes or is unresponsive
-        // Timeout of 5 seconds should be sufficient for gRPC calls
+        // Get stats from single instance
         val statsResult = withTimeoutOrNull(5000L) {
             try {
-                // Check if service is still enabled before making gRPC call
-                if (!isServiceEnabled) {
-                    return@withTimeoutOrNull null
-                }
-                // Make gRPC call - may throw exception or timeout
+                if (!isServiceEnabled) return@withTimeoutOrNull null
                 client.getSystemStats()
             } catch (e: Exception) {
-                // Exception occurred during gRPC call - log it
                 Log.e(TAG, "Error getting system stats: ${e.message}", e)
                 null
             }
         }
         
-        // Handle timeout, exception, or service disabled
         if (statsResult == null) {
-            // Timeout, exception, or service disabled occurred
             Log.w(TAG, "Stats query failed (timeout/exception/disabled)")
-            // Only close client if service is disabled or we've had multiple failures
             if (!isServiceEnabled) {
                 closeCoreStatsClient()
                 consecutiveFailures = 0
             } else {
-                // Service is enabled but query failed - increment failure count
                 consecutiveFailures++
                 if (consecutiveFailures >= 3) {
                     Log.w(TAG, "Multiple consecutive failures ($consecutiveFailures), closing client")
@@ -259,14 +285,11 @@ class XrayStatsManager(
                         clientState = ClientState.FAILED
                     }
                     closeCoreStatsClient()
-                } else {
-                    Log.d(TAG, "Stats query failed but keeping client (failures: $consecutiveFailures)")
                 }
             }
             return
         }
         
-        // Success: reset failure count
         consecutiveFailures = 0
         synchronized(coreStatsClientLock) {
             if (clientState != ClientState.READY) {
@@ -274,7 +297,6 @@ class XrayStatsManager(
             }
         }
         
-        // Check if service is still enabled after first gRPC call
         if (!isServiceEnabled) {
             Log.d(TAG, "Service disabled during stats update, skipping")
             closeCoreStatsClient()
@@ -283,31 +305,20 @@ class XrayStatsManager(
         
         val trafficResult = withTimeoutOrNull(5000L) {
             try {
-                // Check if service is still enabled before making gRPC call
-                if (!isServiceEnabled) {
-                    return@withTimeoutOrNull null
-                }
-                // Make gRPC call - may throw exception or timeout
+                if (!isServiceEnabled) return@withTimeoutOrNull null
                 client.getTraffic()
             } catch (e: Exception) {
-                // Exception occurred during gRPC call - log it
                 Log.e(TAG, "Error getting traffic stats: ${e.message}", e)
                 null
             }
         }
         
-        // Handle timeout, exception, or service disabled
         if (trafficResult == null) {
-            // Timeout, exception, or service disabled occurred
             Log.w(TAG, "Traffic query failed (timeout/exception/disabled)")
-            // Don't close client immediately - it might recover on next call
-            // Only close if service is disabled
             if (!isServiceEnabled) {
                 closeCoreStatsClient()
                 consecutiveFailures = 0
             } else {
-                // Increment failure count but don't close immediately
-                // Traffic failures are less critical than system stats failures
                 consecutiveFailures++
                 if (consecutiveFailures >= 5) {
                     Log.w(TAG, "Multiple consecutive failures ($consecutiveFailures), closing client")
@@ -317,11 +328,9 @@ class XrayStatsManager(
                     closeCoreStatsClient()
                 }
             }
-            // Preserve existing traffic values instead of returning
             return
         }
         
-        // Success: reset failure count
         consecutiveFailures = 0
         synchronized(coreStatsClientLock) {
             if (clientState != ClientState.READY) {
@@ -329,52 +338,251 @@ class XrayStatsManager(
             }
         }
         
-        // Check if service is still enabled after both gRPC calls
         if (!isServiceEnabled) {
             Log.d(TAG, "Service disabled during stats update, skipping")
             closeCoreStatsClient()
             return
         }
         
-        val stats = statsResult
-        val traffic = trafficResult
+        updateStatsState(statsResult, trafficResult)
+    }
+    
+    /**
+     * Updates core statistics from multiple instances and aggregates them.
+     */
+    private suspend fun updateCoreStatsMultiInstance(activeInstances: Map<Int, Int>) {
+        Log.d(TAG, "Collecting stats from ${activeInstances.size} active instances: ${activeInstances.values}")
         
-        // Preserve existing traffic values if new traffic data is null
+        // Ensure clients exist for all active instances
+        instanceClientsMutex.withLock {
+            // Remove clients for instances that are no longer active
+            val instancesToRemove = instanceClients.keys.filter { it !in activeInstances }
+            instancesToRemove.forEach { index ->
+                instanceClients[index]?.close()
+                instanceClients.remove(index)
+                Log.d(TAG, "Removed client for inactive instance $index")
+            }
+            
+            // Create clients for new instances
+            activeInstances.forEach { (index, port) ->
+                if (index !in instanceClients) {
+                    try {
+                        val client = CoreStatsClient.create("127.0.0.1", port)
+                        if (client != null) {
+                            instanceClients[index] = client
+                            Log.d(TAG, "Created client for instance $index on port $port")
+                        } else {
+                            Log.w(TAG, "Failed to create client for instance $index on port $port")
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Exception creating client for instance $index: ${e.message}", e)
+                    }
+                }
+            }
+        }
+        
+        // Collect stats from all instances in parallel
+        val statsResults = withContext(Dispatchers.IO) {
+            activeInstances.map { (index, port) ->
+                async {
+                    val client = instanceClientsMutex.withLock { instanceClients[index] }
+                    if (client == null) {
+                        Log.w(TAG, "Client for instance $index is null, skipping")
+                        return@async Pair(index, null as SysStatsResponse?)
+                    }
+                    
+                    try {
+                        val stats = withTimeoutOrNull(3000L) {
+                            if (!isServiceEnabled) return@withTimeoutOrNull null
+                            client.getSystemStats()
+                        }
+                        Pair(index, stats)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error getting system stats from instance $index: ${e.message}", e)
+                        Pair(index, null)
+                    }
+                }
+            }.awaitAll()
+        }
+        
+        val trafficResults = withContext(Dispatchers.IO) {
+            activeInstances.map { (index, port) ->
+                async {
+                    val client = instanceClientsMutex.withLock { instanceClients[index] }
+                    if (client == null) {
+                        Log.w(TAG, "Client for instance $index is null, skipping traffic")
+                        return@async Pair(index, null as TrafficState?)
+                    }
+                    
+                    try {
+                        val traffic = withTimeoutOrNull(3000L) {
+                            if (!isServiceEnabled) return@withTimeoutOrNull null
+                            client.getTraffic()
+                        }
+                        Pair(index, traffic)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error getting traffic stats from instance $index: ${e.message}", e)
+                        Pair(index, null)
+                    }
+                }
+            }.awaitAll()
+        }
+        
+        // Aggregate stats from all instances
+        var totalUplink = 0L
+        var totalDownlink = 0L
+        var totalNumGoroutine = 0
+        var totalNumGC = 0
+        var totalAlloc = 0L
+        var totalTotalAlloc = 0L
+        var totalSys = 0L
+        var totalMallocs = 0L
+        var totalFrees = 0L
+        var totalLiveObjects = 0L
+        var totalPauseTotalNs = 0L
+        var maxUptime = 0
+        
+        var successfulInstances = 0
+        
+        trafficResults.forEach { (index, traffic) ->
+            if (traffic != null) {
+                totalUplink += traffic.uplink
+                totalDownlink += traffic.downlink
+                successfulInstances++
+                Log.d(TAG, "Instance $index: uplink=${formatBytes(traffic.uplink)}, downlink=${formatBytes(traffic.downlink)}")
+                
+                // Validate download data - log warning if suspicious
+                if (traffic.downlink == 0L && traffic.uplink > 0L) {
+                    Log.w(TAG, "⚠️ Instance $index: Downlink is 0 but uplink is ${formatBytes(traffic.uplink)} - possible data issue")
+                }
+            } else {
+                Log.w(TAG, "Instance $index: traffic stats unavailable")
+            }
+        }
+        
+        statsResults.forEach { (index, stats) ->
+            if (stats != null) {
+                totalNumGoroutine += stats.numGoroutine
+                totalNumGC += stats.numGC
+                totalAlloc += stats.alloc
+                totalTotalAlloc += stats.totalAlloc
+                totalSys += stats.sys
+                totalMallocs += stats.mallocs
+                totalFrees += stats.frees
+                totalLiveObjects += stats.liveObjects
+                totalPauseTotalNs += stats.pauseTotalNs
+                if (stats.uptime > maxUptime) {
+                    maxUptime = stats.uptime
+                }
+            }
+        }
+        
+        if (successfulInstances == 0) {
+            Log.w(TAG, "No successful instance stats collected")
+            return
+        }
+        
+        // Validate aggregated data before updating state
+        if (totalDownlink == 0L && totalUplink > 0L) {
+            Log.w(TAG, "⚠️ Warning: Total downlink is 0 but total uplink is ${formatBytes(totalUplink)} - possible data collection issue")
+        }
+        
+        Log.d(TAG, "Aggregated stats from $successfulInstances instances: totalUplink=${formatBytes(totalUplink)}, totalDownlink=${formatBytes(totalDownlink)}")
+        
+        // Create aggregated stats objects
+        val aggregatedStats = SysStatsResponse.newBuilder()
+            .setNumGoroutine(totalNumGoroutine)
+            .setNumGC(totalNumGC)
+            .setAlloc(totalAlloc)
+            .setTotalAlloc(totalTotalAlloc)
+            .setSys(totalSys)
+            .setMallocs(totalMallocs)
+            .setFrees(totalFrees)
+            .setLiveObjects(totalLiveObjects)
+            .setPauseTotalNs(totalPauseTotalNs)
+            .setUptime(maxUptime)
+            .build()
+        
+        val aggregatedTraffic = TrafficState(
+            uplink = totalUplink,
+            downlink = totalDownlink
+        )
+        
+        updateStatsState(aggregatedStats, aggregatedTraffic)
+    }
+    
+    /**
+     * Updates the stats state with new values and calculates throughput.
+     */
+    private suspend fun updateStatsState(
+        stats: SysStatsResponse?,
+        traffic: TrafficState?
+    ) {
         val currentState = _statsState.value
         val newUplink = traffic?.uplink ?: currentState.uplink
         val newDownlink = traffic?.downlink ?: currentState.downlink
         
-        // Calculate throughput (bytes per second) with minimum time delta guard
-        // This prevents artificial spikes when updateCoreStats() is called too frequently
+        // Validate data consistency - detect if downlink stat is stuck
+        val isDownlinkStuck = newDownlink == currentState.downlink && newUplink != currentState.uplink && currentState.downlink > 0L
+        
+        if (isDownlinkStuck) {
+            Log.w(TAG, "⚠️ Downlink stat appears stuck at ${formatBytes(newDownlink)} (uplink changed: ${formatBytes(currentState.uplink)} -> ${formatBytes(newUplink)})")
+            // Reset lastDownlink to current value to prevent false throughput calculation
+            // This handles the case where Xray-core's downlink stat is not updating
+            lastDownlink = newDownlink
+        }
+        
+        // Handle negative deltas (shouldn't happen but protect against it)
         val now = System.currentTimeMillis()
-        var uplinkThroughput = currentState.uplinkThroughput // Preserve previous values
-        var downlinkThroughput = currentState.downlinkThroughput // Preserve previous values
+        var uplinkThroughput = currentState.uplinkThroughput
+        var downlinkThroughput = currentState.downlinkThroughput
         
         if (lastStatsTime > 0 && now > lastStatsTime) {
-            val timeDelta = (now - lastStatsTime) / 1000.0 // Convert to seconds
+            val timeDelta = (now - lastStatsTime) / 1000.0
             
-            // Minimum time delta guard: only recalculate if >500ms has passed
-            // This prevents artificial throughput spikes from double polling or rapid updates
             if (timeDelta >= 0.5) {
                 val uplinkDelta = newUplink - lastUplink
                 val downlinkDelta = newDownlink - lastDownlink
                 
-                uplinkThroughput = uplinkDelta / timeDelta
-                downlinkThroughput = downlinkDelta / timeDelta
+                // Protect against negative deltas (can happen if stats reset or instance restarts)
+                if (uplinkDelta >= 0) {
+                    uplinkThroughput = uplinkDelta / timeDelta
+                } else {
+                    Log.w(TAG, "⚠️ Negative uplink delta detected: $uplinkDelta (new=${formatBytes(newUplink)}, last=${formatBytes(lastUplink)}) - resetting baseline")
+                    uplinkThroughput = 0.0
+                    lastUplink = newUplink // Reset baseline
+                }
                 
-                Log.d(TAG, "Throughput calculated: uplink=${formatThroughput(uplinkThroughput)}, downlink=${formatThroughput(downlinkThroughput)}, timeDelta=${timeDelta}s")
+                // Handle stuck downlink stat: if delta is 0 but uplink changed, keep previous throughput
+                // This prevents showing 0 B/s when downlink stat is stuck in Xray-core
+                if (downlinkDelta > 0) {
+                    downlinkThroughput = downlinkDelta / timeDelta
+                } else if (downlinkDelta == 0L && uplinkDelta > 0 && isDownlinkStuck) {
+                    // Downlink stat is stuck - preserve previous throughput instead of showing 0
+                    Log.d(TAG, "Downlink stat stuck, preserving previous throughput: ${formatThroughput(downlinkThroughput)}")
+                    // Don't reset lastDownlink here - already reset above
+                } else if (downlinkDelta < 0) {
+                    Log.w(TAG, "⚠️ Negative downlink delta detected: $downlinkDelta (new=${formatBytes(newDownlink)}, last=${formatBytes(lastDownlink)}) - resetting baseline")
+                    downlinkThroughput = 0.0
+                    lastDownlink = newDownlink // Reset baseline
+                } else {
+                    // Delta is 0 and not stuck - normal idle state
+                    downlinkThroughput = 0.0
+                }
+                
+                Log.d(TAG, "Throughput calculated: uplink=${formatThroughput(uplinkThroughput)}, downlink=${formatThroughput(downlinkThroughput)}, timeDelta=${timeDelta}s, uplinkDelta=${formatBytes(uplinkDelta)}, downlinkDelta=${formatBytes(downlinkDelta)}")
             } else {
-                // Time delta too small - keep previous throughput values
                 Log.d(TAG, "Time delta too small (${timeDelta}s < 0.5s), preserving previous throughput values")
             }
         } else if (lastStatsTime == 0L) {
-            // First measurement - initialize baseline
-            Log.d(TAG, "First throughput measurement - initializing baseline")
+            Log.d(TAG, "First throughput measurement - initializing baseline: uplink=${formatBytes(newUplink)}, downlink=${formatBytes(newDownlink)}")
         }
         
-        // Update last values for next calculation
         lastUplink = newUplink
-        lastDownlink = newDownlink
+        // Only update lastDownlink if it's not stuck (already updated above if stuck)
+        if (!isDownlinkStuck) {
+            lastDownlink = newDownlink
+        }
         lastStatsTime = now
         
         _statsState.value = CoreStatsState(
@@ -517,11 +725,31 @@ class XrayStatsManager(
     }
     
     /**
+     * Closes all instance clients.
+     */
+    private suspend fun closeAllInstanceClients() {
+        instanceClientsMutex.withLock {
+            instanceClients.forEach { (index, client) ->
+                try {
+                    client.close()
+                    Log.d(TAG, "Closed client for instance $index")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error closing client for instance $index: ${e.message}", e)
+                }
+            }
+            instanceClients.clear()
+        }
+    }
+    
+    /**
      * Cleans up resources. Should be called when manager is no longer needed.
      */
     fun cleanup() {
         stopMonitoring()
         closeCoreStatsClient()
+        kotlinx.coroutines.runBlocking {
+            closeAllInstanceClients()
+        }
     }
 }
 

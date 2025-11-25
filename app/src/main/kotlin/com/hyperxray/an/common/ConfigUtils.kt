@@ -50,9 +50,13 @@ object ConfigUtils {
      */
     @Throws(JSONException::class)
     fun injectCommonConfig(prefs: Preferences, configContent: String): String {
+        val startTime = System.currentTimeMillis()
+        val configSize = configContent.length
         Log.d(TAG, "=== Starting common config injection ===")
+        Log.d(TAG, "Config size: $configSize bytes")
         Log.d(TAG, "Aggressive optimizations: ${prefs.aggressiveSpeedOptimizations}")
         Log.d(TAG, "Extreme optimizations: ${prefs.extremeRamCpuOptimizations}")
+        AiLogHelper.i(TAG, "🔧 CONFIG INJECT: Starting common config injection (size: ${configSize} bytes, aggressive: ${prefs.aggressiveSpeedOptimizations}, extreme: ${prefs.extremeRamCpuOptimizations})")
         
         val jsonObject = JSONObject(configContent)
         
@@ -63,53 +67,83 @@ object ConfigUtils {
             val versionValue = jsonObject.get("version")
             if (versionValue is String) {
                 Log.w(TAG, "⚠️ Found invalid version field (string): '$versionValue' - removing (Xray will use default)")
+                AiLogHelper.w(TAG, "⚠️ CONFIG INJECT: Found invalid version field (string): '$versionValue' - removing")
                 jsonObject.remove("version")
             } else if (versionValue is JSONObject) {
                 // Version is already an object - keep it
                 Log.d(TAG, "Version field is valid object format, keeping")
+                AiLogHelper.d(TAG, "✅ CONFIG INJECT: Version field is valid object format, keeping")
             } else {
                 // Unknown format - remove it
                 Log.w(TAG, "⚠️ Found invalid version field type: ${versionValue.javaClass.simpleName} - removing")
+                AiLogHelper.w(TAG, "⚠️ CONFIG INJECT: Found invalid version field type: ${versionValue.javaClass.simpleName} - removing")
                 jsonObject.remove("version")
             }
+        } else {
+            AiLogHelper.d(TAG, "✅ CONFIG INJECT: No version field found, using Xray default")
         }
 
         // Stats object (API object will be added later with port-specific injection)
+        val statsStartTime = System.currentTimeMillis()
         jsonObject.put("stats", JSONObject())
+        val statsDuration = System.currentTimeMillis() - statsStartTime
+        AiLogHelper.d(TAG, "✅ CONFIG INJECT: Stats object added (duration: ${statsDuration}ms)")
 
+        val policyStartTime = System.currentTimeMillis()
         val policyObject = JSONObject()
         val systemObject = JSONObject()
         systemObject.put("statsOutboundUplink", true)
         systemObject.put("statsOutboundDownlink", true)
         policyObject.put("system", systemObject)
-
         jsonObject.put("policy", policyObject)
+        val policyDuration = System.currentTimeMillis() - policyStartTime
+        AiLogHelper.d(TAG, "✅ CONFIG INJECT: Policy object added (duration: ${policyDuration}ms)")
 
         // Enable debug logging for detailed troubleshooting
         // We need to see all logs to properly diagnose UDP closed pipe issues
+        val logStartTime = System.currentTimeMillis()
         val logObject = jsonObject.optJSONObject("log") ?: JSONObject()
         logObject.put("logLevel", "debug")
         jsonObject.put("log", logObject)
+        val logDuration = System.currentTimeMillis() - logStartTime
+        AiLogHelper.d(TAG, "✅ CONFIG INJECT: Debug logging enabled (duration: ${logDuration}ms)")
 
         // Enable sniffing for domain and protocol detection
+        val sniffingStartTime = System.currentTimeMillis()
         enableSniffing(jsonObject)
+        val sniffingDuration = System.currentTimeMillis() - sniffingStartTime
+        AiLogHelper.d(TAG, "✅ CONFIG INJECT: Sniffing enabled (duration: ${sniffingDuration}ms)")
 
         // Enable DNS cache and resolver logging
+        val dnsStartTime = System.currentTimeMillis()
         enableDnsLogging(jsonObject)
+        val dnsDuration = System.currentTimeMillis() - dnsStartTime
+        AiLogHelper.d(TAG, "✅ CONFIG INJECT: DNS logging enabled (duration: ${dnsDuration}ms)")
 
         // Apply aggressive speed optimizations
+        val speedOptStartTime = System.currentTimeMillis()
         applySpeedOptimizations(prefs, jsonObject)
+        val speedOptDuration = System.currentTimeMillis() - speedOptStartTime
+        AiLogHelper.d(TAG, "✅ CONFIG INJECT: Speed optimizations applied (duration: ${speedOptDuration}ms)")
 
         // Apply extreme RAM/CPU optimizations if enabled
         if (prefs.extremeRamCpuOptimizations) {
             Log.d(TAG, "Extreme RAM/CPU optimizations ENABLED - applying...")
+            AiLogHelper.i(TAG, "🔧 CONFIG INJECT: Extreme RAM/CPU optimizations ENABLED - applying...")
+            val extremeOptStartTime = System.currentTimeMillis()
             applyExtremeRamCpuOptimizations(prefs, jsonObject)
+            val extremeOptDuration = System.currentTimeMillis() - extremeOptStartTime
+            AiLogHelper.i(TAG, "✅ CONFIG INJECT: Extreme RAM/CPU optimizations applied (duration: ${extremeOptDuration}ms)")
         } else {
             Log.d(TAG, "Extreme RAM/CPU optimizations DISABLED")
+            AiLogHelper.d(TAG, "ℹ️ CONFIG INJECT: Extreme RAM/CPU optimizations DISABLED")
         }
 
         // Apply bypass domain/IP routing rules
+        val bypassStartTime = System.currentTimeMillis()
         applyBypassRoutingRules(prefs, jsonObject)
+        val bypassDuration = System.currentTimeMillis() - bypassStartTime
+        AiLogHelper.d(TAG, "✅ CONFIG INJECT: Bypass routing rules applied (duration: ${bypassDuration}ms)")
 
         // Ensure all outbounds have tags for stats collection
         ensureOutboundTags(jsonObject)
@@ -125,9 +159,15 @@ object ConfigUtils {
         // NOTE: Port 53 routing rule removal disabled - causes startup issues
         // removePort53DnsRoutingRule(jsonObject)
         
+        val serializeStartTime = System.currentTimeMillis()
         val finalConfig = jsonObject.toString(2)
+        val serializeDuration = System.currentTimeMillis() - serializeStartTime
+        val finalConfigSize = finalConfig.length
+        val totalDuration = System.currentTimeMillis() - startTime
         Log.d(TAG, "=== Common config injection completed ===")
-        Log.d(TAG, "Final config size: ${finalConfig.length} bytes")
+        Log.d(TAG, "Final config size: $finalConfigSize bytes")
+        Log.d(TAG, "Total injection duration: ${totalDuration}ms")
+        AiLogHelper.i(TAG, "✅ CONFIG INJECT COMPLETE: Common config injection completed (final size: ${finalConfigSize} bytes, serialize: ${serializeDuration}ms, total: ${totalDuration}ms)")
         
         // Log a sample of the final config to verify optimizations
         try {
@@ -141,12 +181,15 @@ object ConfigUtils {
             Log.d(TAG, "Config verification:")
             Log.d(TAG, "  - Policy.levels.0.connection: ${connection?.toString()}")
             Log.d(TAG, "  - Policy.levels.0.buffer: ${buffer?.toString()}")
+            AiLogHelper.d(TAG, "🔍 CONFIG INJECT: Verification - Policy.levels.0.connection: ${connection?.toString()}, buffer: ${buffer?.toString()}")
             
             val dns = finalJson.optJSONObject("dns")
             val dnsCache = dns?.optJSONObject("cache")
             Log.d(TAG, "  - DNS cache: ${dnsCache?.toString()}")
+            AiLogHelper.d(TAG, "🔍 CONFIG INJECT: Verification - DNS cache: ${dnsCache?.toString()}")
         } catch (e: Exception) {
             Log.e(TAG, "Error verifying config", e)
+            AiLogHelper.e(TAG, "❌ CONFIG INJECT: Error verifying config: ${e.message}", e)
         }
 
         return finalConfig
@@ -164,6 +207,8 @@ object ConfigUtils {
      */
     @Throws(JSONException::class)
     fun injectApiPort(configContent: String, apiPort: Int): String {
+        val startTime = System.currentTimeMillis()
+        AiLogHelper.d(TAG, "🔧 CONFIG API PORT: Injecting API port: $apiPort")
         val jsonObject = JSONObject(configContent)
         
         val apiObject = JSONObject()
@@ -175,7 +220,10 @@ object ConfigUtils {
 
         jsonObject.put("api", apiObject)
 
-        return jsonObject.toString(2)
+        val finalConfig = jsonObject.toString(2)
+        val duration = System.currentTimeMillis() - startTime
+        AiLogHelper.d(TAG, "✅ CONFIG API PORT: API port injected (port: $apiPort, duration: ${duration}ms)")
+        return finalConfig
     }
 
     /**

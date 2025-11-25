@@ -193,7 +193,11 @@ fun DnsCacheCard(
                                 fontFamily = FontFamily.Monospace
                             )
                             Text(
-                                text = "${String.format("%.2f", stats.avgHitLatencyMs)}ms avg",
+                                text = if (stats.avgHitLatencyMs > 0.0 && !stats.avgHitLatencyMs.isNaN()) {
+                                    "${String.format("%.1f", stats.avgHitLatencyMs)}ms avg"
+                                } else {
+                                    "N/A"
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color(0xFF808080)
                             )
@@ -231,7 +235,11 @@ fun DnsCacheCard(
                                 fontFamily = FontFamily.Monospace
                             )
                             Text(
-                                text = "${String.format("%.2f", stats.avgMissLatencyMs)}ms avg",
+                                text = if (stats.avgMissLatencyMs > 0.0 && !stats.avgMissLatencyMs.isNaN()) {
+                                    "${String.format("%.1f", stats.avgMissLatencyMs)}ms avg"
+                                } else {
+                                    "N/A"
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color(0xFF808080)
                             )

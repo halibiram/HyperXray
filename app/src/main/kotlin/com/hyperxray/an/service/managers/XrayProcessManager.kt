@@ -79,15 +79,20 @@ class XrayProcessManager(private val context: Context) {
         instanceCount: Int,
         logCallback: LogLineCallback?
     ): Map<Int, Int>? {
+        val startTime = System.currentTimeMillis()
+        AiLogHelper.i(TAG, "🚀 XRAY PROCESS START: Starting Xray process (instances: $instanceCount, config: $configPath)")
+        
         // Prevent duplicate start calls
         val shouldProceed = mutex.withLock {
             if (isStarting) {
                 Log.d(TAG, "startProcess() already in progress, ignoring duplicate call")
+                AiLogHelper.w(TAG, "⚠️ XRAY PROCESS START: Already in progress, ignoring duplicate call")
                 return null
             }
             
             if (isStopping) {
                 Log.w(TAG, "startProcess() called while stopping, ignoring")
+                AiLogHelper.w(TAG, "⚠️ XRAY PROCESS START: Called while stopping, ignoring")
                 return null
             }
             
@@ -101,41 +106,68 @@ class XrayProcessManager(private val context: Context) {
         
         try {
             // Ensure directories exist
+            val dirStartTime = System.currentTimeMillis()
             ensureDirectories()
+            val dirDuration = System.currentTimeMillis() - dirStartTime
+            AiLogHelper.d(TAG, "✅ XRAY PROCESS START: Directories ensured (duration: ${dirDuration}ms)")
             
             // Validate config path
+            val validateStartTime = System.currentTimeMillis()
             val configFile = validateConfigPath(configPath)
+            val validateDuration = System.currentTimeMillis() - validateStartTime
             if (configFile == null) {
                 Log.e(TAG, "Invalid configuration file: path validation failed")
+                AiLogHelper.e(TAG, "❌ XRAY PROCESS START: Invalid configuration file: path validation failed (duration: ${validateDuration}ms)")
                 return null
             }
+            AiLogHelper.d(TAG, "✅ XRAY PROCESS START: Config path validated (path: $configPath, size: ${configFile.length()} bytes, duration: ${validateDuration}ms)")
             
             // Read config content securely
+            val readStartTime = System.currentTimeMillis()
             val finalConfigContent = configContent ?: readConfigContentSecurely(configFile)
+            val readDuration = System.currentTimeMillis() - readStartTime
             if (finalConfigContent == null) {
                 Log.e(TAG, "Failed to read configuration file")
+                AiLogHelper.e(TAG, "❌ XRAY PROCESS START: Failed to read configuration file (duration: ${readDuration}ms)")
                 return null
             }
+            AiLogHelper.d(TAG, "✅ XRAY PROCESS START: Config content read (size: ${finalConfigContent.length} bytes, duration: ${readDuration}ms)")
             
             // Pre-resolve server address if needed (using system DNS, not VPN DNS)
+            val resolveStartTime = System.currentTimeMillis()
             preResolveServerAddress(finalConfigContent)
+            val resolveDuration = System.currentTimeMillis() - resolveStartTime
+            AiLogHelper.d(TAG, "✅ XRAY PROCESS START: Server address pre-resolved (duration: ${resolveDuration}ms)")
             
             // Use MultiXrayCoreManager for multiple instances, or fallback to single process
             if (instanceCount > 1) {
-                return startMultiInstance(
+                AiLogHelper.i(TAG, "🔧 XRAY PROCESS START: Using MultiXrayCoreManager for $instanceCount instances")
+                val multiStartTime = System.currentTimeMillis()
+                val result = startMultiInstance(
                     configPath = configPath,
                     configContent = finalConfigContent,
                     excludedPorts = excludedPorts,
                     instanceCount = instanceCount,
                     logCallback = logCallback
                 )
+                val multiDuration = System.currentTimeMillis() - multiStartTime
+                val totalDuration = System.currentTimeMillis() - startTime
+                if (result != null) {
+                    AiLogHelper.i(TAG, "✅ XRAY PROCESS START SUCCESS: Multi-instance started (instances: ${result.size}, duration: ${multiDuration}ms, total: ${totalDuration}ms)")
+                } else {
+                    AiLogHelper.e(TAG, "❌ XRAY PROCESS START FAILED: Multi-instance startup failed (duration: ${multiDuration}ms, total: ${totalDuration}ms)")
+                }
+                return result
             } else {
                 // Single process mode (legacy, not currently used but kept for compatibility)
                 Log.w(TAG, "Single process mode is deprecated. Use MultiXrayCoreManager with instanceCount=1.")
+                AiLogHelper.w(TAG, "⚠️ XRAY PROCESS START: Single process mode is deprecated. Use MultiXrayCoreManager with instanceCount=1.")
                 return null
             }
         } catch (e: Exception) {
+            val totalDuration = System.currentTimeMillis() - startTime
             Log.e(TAG, "Error starting Xray process: ${e.message}", e)
+            AiLogHelper.e(TAG, "❌ XRAY PROCESS START ERROR: Error starting Xray process (duration: ${totalDuration}ms): ${e.message}", e)
             return null
         } finally {
             mutex.withLock {
@@ -154,37 +186,64 @@ class XrayProcessManager(private val context: Context) {
         instanceCount: Int,
         logCallback: LogLineCallback?
     ): Map<Int, Int>? {
+        val startTime = System.currentTimeMillis()
         Log.i(TAG, "🚀 Starting $instanceCount xray-core instances using MultiXrayCoreManager")
+        AiLogHelper.i(TAG, "🚀 XRAY MULTI INSTANCE: Starting $instanceCount xray-core instances using MultiXrayCoreManager")
         
         // Initialize MultiXrayCoreManager if not already initialized
+        val initStartTime = System.currentTimeMillis()
         val manager = mutex.withLock {
             if (multiXrayCoreManager == null) {
+                AiLogHelper.d(TAG, "🔧 XRAY MULTI INSTANCE: Initializing MultiXrayCoreManager...")
                 multiXrayCoreManager = MultiXrayCoreManager.getInstance(context)
             }
             multiXrayCoreManager
         } ?: run {
             Log.e(TAG, "Failed to initialize MultiXrayCoreManager")
+            AiLogHelper.e(TAG, "❌ XRAY MULTI INSTANCE: Failed to initialize MultiXrayCoreManager")
             return null
         }
+        val initDuration = System.currentTimeMillis() - initStartTime
+        AiLogHelper.d(TAG, "✅ XRAY MULTI INSTANCE: MultiXrayCoreManager initialized (duration: ${initDuration}ms)")
         
         // Set log callback
+        val callbackStartTime = System.currentTimeMillis()
         logCallback?.let { callback ->
             manager.setLogLineCallback(callback)
+            AiLogHelper.d(TAG, "✅ XRAY MULTI INSTANCE: Log callback set")
+        } ?: run {
+            AiLogHelper.d(TAG, "ℹ️ XRAY MULTI INSTANCE: No log callback provided")
         }
+        val callbackDuration = System.currentTimeMillis() - callbackStartTime
         
         // Extract excluded ports from config
+        val extractStartTime = System.currentTimeMillis()
         val allExcludedPorts = excludedPorts + extractPortsFromJson(configContent)
+        val extractDuration = System.currentTimeMillis() - extractStartTime
+        AiLogHelper.d(TAG, "✅ XRAY MULTI INSTANCE: Excluded ports extracted (count: ${allExcludedPorts.size}, duration: ${extractDuration}ms)")
         
         // Start instances
+        val instancesStartTime = System.currentTimeMillis()
         return try {
-            manager.startInstances(
+            val result = manager.startInstances(
                 count = instanceCount,
                 configPath = configPath,
                 configContent = configContent,
                 excludedPorts = allExcludedPorts
             )
+            val instancesDuration = System.currentTimeMillis() - instancesStartTime
+            val totalDuration = System.currentTimeMillis() - startTime
+            if (result != null) {
+                AiLogHelper.i(TAG, "✅ XRAY MULTI INSTANCE SUCCESS: Started ${result.size} instances (instances duration: ${instancesDuration}ms, total: ${totalDuration}ms, ports: ${result.values.joinToString()})")
+            } else {
+                AiLogHelper.e(TAG, "❌ XRAY MULTI INSTANCE FAILED: Failed to start instances (duration: ${instancesDuration}ms, total: ${totalDuration}ms)")
+            }
+            result
         } catch (e: Exception) {
+            val instancesDuration = System.currentTimeMillis() - instancesStartTime
+            val totalDuration = System.currentTimeMillis() - startTime
             Log.e(TAG, "Error starting instances: ${e.message}", e)
+            AiLogHelper.e(TAG, "❌ XRAY MULTI INSTANCE ERROR: Error starting instances (duration: ${instancesDuration}ms, total: ${totalDuration}ms): ${e.message}", e)
             null
         }
     }
@@ -195,9 +254,11 @@ class XrayProcessManager(private val context: Context) {
      * @param reason Optional reason for stopping
      */
     suspend fun stopProcess(reason: String? = null) {
+        val startTime = System.currentTimeMillis()
         val shouldProceed = mutex.withLock {
             if (isStopping) {
                 Log.d(TAG, "stopProcess() already in progress, ignoring duplicate call")
+                AiLogHelper.w(TAG, "⚠️ XRAY PROCESS STOP: Already in progress, ignoring duplicate call")
                 return
             }
             isStopping = true
@@ -211,42 +272,68 @@ class XrayProcessManager(private val context: Context) {
         try {
             val reasonMsg = reason ?: "No reason provided"
             Log.i(TAG, "stopProcess() called. Reason: $reasonMsg")
+            AiLogHelper.i(TAG, "🛑 XRAY PROCESS STOP: Stopping Xray process (reason: $reasonMsg)")
             
             // Stop MultiXrayCoreManager instances
+            val managerStopStartTime = System.currentTimeMillis()
             val manager = multiXrayCoreManager
             if (manager != null) {
                 try {
                     Log.d(TAG, "Stopping MultiXrayCoreManager instances...")
+                    AiLogHelper.d(TAG, "🔧 XRAY PROCESS STOP: Stopping MultiXrayCoreManager instances...")
                     manager.stopAllInstances()
+                    val managerStopDuration = System.currentTimeMillis() - managerStopStartTime
                     Log.d(TAG, "MultiXrayCoreManager instances stopped.")
+                    AiLogHelper.i(TAG, "✅ XRAY PROCESS STOP: MultiXrayCoreManager instances stopped (duration: ${managerStopDuration}ms)")
                 } catch (e: Exception) {
+                    val managerStopDuration = System.currentTimeMillis() - managerStopStartTime
                     Log.e(TAG, "Error stopping MultiXrayCoreManager instances", e)
+                    AiLogHelper.e(TAG, "❌ XRAY PROCESS STOP: Error stopping MultiXrayCoreManager instances (duration: ${managerStopDuration}ms): ${e.message}", e)
                 }
+            } else {
+                AiLogHelper.d(TAG, "ℹ️ XRAY PROCESS STOP: No MultiXrayCoreManager to stop")
             }
             
             // Stop single process if exists
+            val processStopStartTime = System.currentTimeMillis()
             val processToDestroy = xrayProcess
             if (processToDestroy != null && processToDestroy.isAlive) {
                 try {
+                    AiLogHelper.d(TAG, "🔧 XRAY PROCESS STOP: Stopping single process (graceful shutdown)...")
                     // Try graceful termination first
                     processToDestroy.destroy()
                     Thread.sleep(2000) // Wait for graceful shutdown
                     // Force kill if still alive
                     if (processToDestroy.isAlive) {
                         Log.d(TAG, "Process still alive after graceful shutdown, forcing destroy.")
+                        AiLogHelper.w(TAG, "⚠️ XRAY PROCESS STOP: Process still alive after graceful shutdown, forcing destroy")
                         processToDestroy.destroyForcibly()
                     }
+                    val processStopDuration = System.currentTimeMillis() - processStopStartTime
+                    AiLogHelper.i(TAG, "✅ XRAY PROCESS STOP: Single process stopped (duration: ${processStopDuration}ms)")
                 } catch (e: Exception) {
+                    val processStopDuration = System.currentTimeMillis() - processStopStartTime
                     Log.e(TAG, "Error destroying xray process", e)
+                    AiLogHelper.e(TAG, "❌ XRAY PROCESS STOP: Error destroying xray process (duration: ${processStopDuration}ms): ${e.message}", e)
                 }
                 xrayProcess = null
+            } else {
+                AiLogHelper.d(TAG, "ℹ️ XRAY PROCESS STOP: No single process to stop")
             }
             
             // Cancel coroutine scope
+            val cancelStartTime = System.currentTimeMillis()
             serviceScope.cancel()
+            val cancelDuration = System.currentTimeMillis() - cancelStartTime
+            AiLogHelper.d(TAG, "✅ XRAY PROCESS STOP: Coroutine scope cancelled (duration: ${cancelDuration}ms)")
+            
+            val totalDuration = System.currentTimeMillis() - startTime
+            AiLogHelper.i(TAG, "✅ XRAY PROCESS STOP COMPLETE: Process stopped (total duration: ${totalDuration}ms)")
             
         } catch (e: Exception) {
+            val totalDuration = System.currentTimeMillis() - startTime
             Log.e(TAG, "Error during stopProcess cleanup", e)
+            AiLogHelper.e(TAG, "❌ XRAY PROCESS STOP ERROR: Error during stopProcess cleanup (duration: ${totalDuration}ms): ${e.message}", e)
         } finally {
             mutex.withLock {
                 isStopping = false

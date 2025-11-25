@@ -109,7 +109,7 @@ def pull_log_file(device_path: str, local_name: str, check_exists: bool = True) 
         return None
 
 
-def collect_logcat(tag_filters: List[str] = None, lines: int = 100000) -> Optional[Path]:
+def collect_logcat(tag_filters: List[str] = None, lines: int = 500000) -> Optional[Path]:
     """Logcat'ten logları detaylı topla (artırılmış satır limiti)."""
     local_path = OUTPUT_DIR / "logcat.txt"
 
@@ -117,7 +117,7 @@ def collect_logcat(tag_filters: List[str] = None, lines: int = 100000) -> Option
     # -d: dump and exit, -v time: timestamp ekle
     command = ["logcat", "-d", "-v", "time"]
 
-    # Son N satırı al (artırıldı: 100000)
+    # Son N satırı al (artırıldı: 500000 - daha detaylı rapor için)
     command.extend(["-t", str(lines)])
 
     result = run_adb_command(command)
@@ -695,7 +695,7 @@ def analyze_logcat(log_file: Path) -> Dict[str, Any]:
     }
 
 
-def generate_report(analyses: Dict[str, Any]) -> str:
+def generate_report(analyses: Dict[str, Any], system_info: Dict[str, Any] = None) -> str:
     """Markdown formatında rapor oluştur."""
     report = []
 
@@ -1013,27 +1013,123 @@ def generate_report(analyses: Dict[str, Any]) -> str:
 
         report.append("\n")
 
-    # Sonuç ve Öneriler
-    report.append("## 💡 Sonuç ve Öneriler\n")
+    # Sistem Bilgileri
+    report.append("## 🖥️ Sistem Bilgileri\n")
+    
+    if system_info:
+        if system_info.get("device_model"):
+            report.append(f"- **Cihaz Modeli:** {system_info['device_model']}\n")
+        if system_info.get("android_version"):
+            report.append(f"- **Android Sürümü:** {system_info['android_version']}\n")
+        if system_info.get("sdk_version"):
+            report.append(f"- **SDK Sürümü:** {system_info['sdk_version']}\n")
+        if system_info.get("app_version"):
+            report.append(f"- **Uygulama Versiyonu:** {system_info['app_version']}\n")
+    else:
+        report.append("- Sistem bilgileri alınamadı\n")
+    
+    report.append("\n")
 
+    # Performans Metrikleri Özeti
+    report.append("## 📈 Performans Metrikleri Özeti\n")
+    
+    # Learner ve Runtime metrikleri
+    learner_analysis = analyses.get("learner_log", {})
+    runtime_analysis = analyses.get("runtime_log", {})
+    
+    if learner_analysis.get("status") == "analyzed":
+        report.append("### Öğrenme Sistemi Metrikleri\n")
+        report.append(f"- **Toplam Kayıt:** {learner_analysis.get('total_entries', 0):,}\n")
+        report.append(f"- **Başarı Oranı:** %{learner_analysis.get('success_rate', 0):.2f}\n")
+        report.append(f"- **Ortalama Gecikme:** {learner_analysis.get('avg_latency_ms', 0):.2f} ms\n")
+        report.append(f"- **Ortalama Bant Genişliği:** {learner_analysis.get('avg_throughput_kbps', 0):.2f} kbps\n")
+        report.append("\n")
+    
+    if runtime_analysis.get("status") == "analyzed":
+        report.append("### Runtime Metrikleri\n")
+        report.append(f"- **Toplam Kayıt:** {runtime_analysis.get('total_entries', 0):,}\n")
+        report.append(f"- **Başarı Oranı:** %{runtime_analysis.get('success_rate', 0):.2f}\n")
+        report.append(f"- **Ortalama Gecikme:** {runtime_analysis.get('avg_latency_ms', 0):.2f} ms\n")
+        report.append(f"- **Ortalama Bant Genişliği:** {runtime_analysis.get('avg_throughput_kbps', 0):.2f} kbps\n")
+        report.append("\n")
+    
+    # DNS Metrikleri
+    dns_analysis = analyses.get("dns_logs", {})
+    if dns_analysis.get("status") == "analyzed":
+        report.append("### DNS Performans Metrikleri\n")
+        report.append(f"- **Cache Hit Rate:** %{dns_analysis.get('cache_hit_rate', 0):.2f}\n")
+        if dns_analysis.get("latency_stats"):
+            lat_stats = dns_analysis["latency_stats"]
+            report.append(f"- **Ortalama DNS Latency:** {lat_stats.get('avg_ms', 0):.2f} ms\n")
+        report.append(f"- **Benzersiz Domain Sayısı:** {dns_analysis.get('unique_domains', 0):,}\n")
+        report.append("\n")
+
+    # Hata Analizi
+    report.append("## ⚠️ Hata Analizi\n")
+    
     total_errors = sum(
         a.get("error_count", 0) for a in analyses.values()
         if isinstance(a, dict) and "error_count" in a
     )
-
-    if total_errors > 0:
-        report.append(
-            f"⚠️  **{total_errors} hata tespit edildi.** Detaylı inceleme önerilir.\n")
+    
+    dns_errors = analyses.get("dns_logs", {}).get("errors", 0)
+    telegram_errors = analyses.get("telegram_logs", {}).get("error_count", 0)
+    app_log_errors = analyses.get("app_log", {}).get("error_count", 0)
+    logcat_fatals = len(analyses.get("logcat", {}).get("fatal_errors", []))
+    
+    report.append(f"- **Toplam Hata Sayısı:** {total_errors + dns_errors + telegram_errors + logcat_fatals:,}\n")
+    report.append(f"  - App Log Hataları: {app_log_errors:,}\n")
+    report.append(f"  - DNS Hataları: {dns_errors:,}\n")
+    report.append(f"  - Telegram Hataları: {telegram_errors:,}\n")
+    report.append(f"  - Logcat Fatal Hatalar: {logcat_fatals:,}\n")
+    
+    if total_errors + dns_errors + telegram_errors + logcat_fatals > 0:
+        report.append("\n⚠️  **Hatalar tespit edildi.** Detaylı inceleme önerilir.\n")
     else:
-        report.append("✅ **Kritik hata tespit edilmedi.**\n")
+        report.append("\n✅ **Kritik hata tespit edilmedi.**\n")
+    
+    report.append("\n")
 
-    report.append("\n### Öneriler:\n")
+    # Sonuç ve Öneriler
+    report.append("## 💡 Sonuç ve Öneriler\n")
+
+    report.append("### Öneriler:\n")
     report.append("1. Log dosyalarını düzenli olarak temizleyin\n")
     report.append("2. Hata loglarını düzenli olarak inceleyin\n")
     report.append("3. Performance metriklerini takip edin\n")
     report.append("4. Log rotation ayarlarını kontrol edin\n")
+    report.append("5. DNS cache hit rate'i optimize edin\n")
+    report.append("6. Network latency metriklerini izleyin\n")
+    
+    # Rapor İstatistikleri
+    report.append("\n### Rapor İstatistikleri\n")
+    report.append(f"- **Rapor Oluşturulma Tarihi:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    report.append(f"- **Analiz Edilen Log Tipi:** {len([a for a in analyses.values() if a.get('status') == 'analyzed'])}\n")
+    report.append(f"- **Toplam Log Dosyası:** {len([f for f in analyses.values() if f.get('status') in ['analyzed', 'not_found']])}\n")
 
     return "".join(report)
+
+
+def delete_previous_reports():
+    """Önceki rapor dosyalarını sil."""
+    deleted_count = 0
+    deleted_size = 0
+    
+    if not OUTPUT_DIR.exists():
+        return 0, 0
+    
+    # Tüm .md rapor dosyalarını bul ve sil
+    for report_file in OUTPUT_DIR.glob("log_report_*.md"):
+        try:
+            size = report_file.stat().st_size
+            report_file.unlink()
+            deleted_count += 1
+            deleted_size += size
+            print(f"  🗑️  Silindi: {report_file.name} ({size:,} bytes)")
+        except Exception as e:
+            print(f"  ⚠️  Silinemedi: {report_file.name} - {e}")
+    
+    return deleted_count, deleted_size
 
 
 def main():
@@ -1041,6 +1137,15 @@ def main():
     print("=" * 60)
     print("HyperXray Log Collector ve Rapor Oluşturucu")
     print("=" * 60)
+    print()
+
+    # Önceki raporları sil
+    print("🗑️  Önceki raporlar temizleniyor...")
+    deleted_count, deleted_size = delete_previous_reports()
+    if deleted_count > 0:
+        print(f"✅ {deleted_count} rapor silindi (toplam {deleted_size:,} bytes)")
+    else:
+        print("ℹ️  Silinecek rapor bulunamadı")
     print()
 
     # ADB bağlantısını kontrol et
@@ -1162,8 +1267,32 @@ def main():
 
     print("\n📝 Rapor oluşturuluyor...\n")
 
+    # Sistem bilgilerini topla
+    system_info = {}
+    device_info = run_adb_command(["shell", "getprop", "ro.product.model"])
+    android_version = run_adb_command(["shell", "getprop", "ro.build.version.release"])
+    sdk_version = run_adb_command(["shell", "getprop", "ro.build.version.sdk"])
+    
+    if device_info:
+        system_info["device_model"] = device_info.strip()
+    if android_version:
+        system_info["android_version"] = android_version.strip()
+    if sdk_version:
+        system_info["sdk_version"] = sdk_version.strip()
+    
+    # Uygulama versiyonu
+    app_version_result = run_adb_command(["shell", "dumpsys", "package", PACKAGE_NAME])
+    if app_version_result:
+        # versionName'i parse et
+        for line in app_version_result.split("\n"):
+            if "versionName" in line:
+                parts = line.split("=")
+                if len(parts) > 1:
+                    system_info["app_version"] = parts[1].strip()
+                    break
+
     # Rapor oluştur
-    report = generate_report(analyses)
+    report = generate_report(analyses, system_info)
     REPORT_FILE.write_text(report, encoding="utf-8")
 
     print(f"✅ Rapor oluşturuldu: {REPORT_FILE}")

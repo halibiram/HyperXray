@@ -73,6 +73,9 @@ object HttpClientFactory {
                 Log.w(TAG, "❌ Failed to initialize DNS cache manager", e)
             }
             // Install Conscrypt as security provider for TLS acceleration
+            // Note: Hidden API access warnings may appear in logcat but are non-critical
+            // These warnings occur because Conscrypt uses reflection to access internal Android APIs
+            // Updated Conscrypt version (2.6.2+) should minimize these warnings
             if (!Conscrypt.isAvailable()) {
                 Log.w(TAG, "Conscrypt not available on this device")
             } else {
@@ -85,8 +88,14 @@ object HttpClientFactory {
                     conscryptSslContext?.init(null, null, null)
                     
                     Log.d(TAG, "Conscrypt installed as security provider with TLS acceleration")
+                } catch (e: SecurityException) {
+                    // SecurityException may occur due to hidden API restrictions on Android 9+
+                    // This is non-critical - Conscrypt will fall back to standard TLS implementation
+                    Log.w(TAG, "Conscrypt installation blocked by security restrictions (non-critical)", e)
+                    conscryptInstalled = false
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to install Conscrypt", e)
+                    conscryptInstalled = false
                 }
             }
             

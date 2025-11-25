@@ -191,9 +191,25 @@ class MainViewModel(
         Log.d(TAG, "MainViewModel initialized.")
         
         // Initialize XrayStatsManager - needs viewModelScope which is only available here
+        // Support multi-instance stats collection
+        // Use instancesStatus StateFlow to get active instance ports (updated from service via broadcast)
         xrayStatsManager = XrayStatsManager(
             scope = viewModelScope,
-            apiPortProvider = { prefs.apiPort }
+            apiPortProvider = { prefs.apiPort },
+            activeInstancesProvider = {
+                // Extract active instance ports from instancesStatus StateFlow
+                // This works across process boundaries (service -> UI via broadcast)
+                _instancesStatus.value
+                    .filter { (_, status) -> status is com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Running }
+                    .mapNotNull { (index, status) ->
+                        if (status is com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Running) {
+                            index to status.apiPort
+                        } else {
+                            null
+                        }
+                    }
+                    .toMap()
+            }
         )
         
         // Initialize coreStatsState after XrayStatsManager is created

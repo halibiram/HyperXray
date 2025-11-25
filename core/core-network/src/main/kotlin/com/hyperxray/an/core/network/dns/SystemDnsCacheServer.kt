@@ -123,30 +123,41 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
      * Tries port 53 first (may require root), falls back to 5353 (no root required)
      */
     fun start(port: Int = DNS_PORT): Boolean {
+        val startTime = System.currentTimeMillis()
+        Log.i(TAG, "🔧 DNS SERVER START: Starting DNS cache server (requested port: $port)")
+        
         if (isRunning.get()) {
-            Log.w(TAG, "DNS cache server is already running")
+            Log.w(TAG, "⚠️ DNS SERVER START: DNS cache server is already running")
             return false
         }
         
         // Ensure DnsCacheManager is initialized
+        val initStartTime = System.currentTimeMillis()
         DnsCacheManager.initialize(context)
+        val initDuration = System.currentTimeMillis() - initStartTime
+        Log.d(TAG, "✅ DNS SERVER START: DnsCacheManager initialized (duration: ${initDuration}ms)")
         
         // CRITICAL: Try port 53 first - VpnService may allow this without root
-        Log.i(TAG, "🚀 Attempting to start DNS cache server on port 53 (root not required with VpnService)")
+        Log.i(TAG, "🚀 DNS SERVER START: Attempting to start DNS cache server on port 53 (root not required with VpnService)")
+        val port53StartTime = System.currentTimeMillis()
         
         if (tryStartOnPort(DNS_PORT)) {
-            Log.i(TAG, "✅ DNS cache server started on port 53 (modem compatible, no root required)")
+            val port53Duration = System.currentTimeMillis() - port53StartTime
+            val totalDuration = System.currentTimeMillis() - startTime
+            Log.i(TAG, "✅ DNS SERVER START SUCCESS: DNS cache server started on port 53 (modem compatible, no root required, port53: ${port53Duration}ms, total: ${totalDuration}ms)")
             return true
         }
-        
-        // If port 53 fails, warn user about modem compatibility
-        Log.w(TAG, "⚠️ Port 53 not available - trying alternative port $DNS_PORT_ALT")
-        Log.w(TAG, "⚠️ Modem DNS queries will fail unless modem is configured to use port $DNS_PORT_ALT")
+        val port53Duration = System.currentTimeMillis() - port53StartTime
+        Log.w(TAG, "⚠️ DNS SERVER START: Port 53 not available (duration: ${port53Duration}ms) - trying alternative port $DNS_PORT_ALT")
+        Log.w(TAG, "⚠️ DNS SERVER START: Modem DNS queries will fail unless modem is configured to use port $DNS_PORT_ALT")
         
         // Try alternative port as fallback
         if (port == DNS_PORT) {
+            val altPortStartTime = System.currentTimeMillis()
             if (tryStartOnPort(DNS_PORT_ALT)) {
-                Log.w(TAG, "⚠️ DNS cache server started on port $DNS_PORT_ALT (modem configuration required)")
+                val altPortDuration = System.currentTimeMillis() - altPortStartTime
+                val totalDuration = System.currentTimeMillis() - startTime
+                Log.w(TAG, "⚠️ DNS SERVER START SUCCESS: DNS cache server started on port $DNS_PORT_ALT (modem configuration required, altPort: ${altPortDuration}ms, total: ${totalDuration}ms)")
                 return true
             }
         }
@@ -226,45 +237,69 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     suspend fun resolveDomain(domain: String): List<InetAddress> {
         return withContext(Dispatchers.IO) {
             val startTime = System.currentTimeMillis()
+            Log.d(TAG, "🔍 DNS RESOLVE START: Resolving domain: $domain")
             try {
                 // Check cache first
+                val cacheCheckStartTime = System.currentTimeMillis()
                 val cached = DnsCacheManager.getFromCache(domain)
+                val cacheCheckDuration = System.currentTimeMillis() - cacheCheckStartTime
                 if (cached != null && cached.isNotEmpty()) {
                     val elapsed = System.currentTimeMillis() - startTime
-                    Log.d(TAG, "✅ DNS CACHE HIT (resolveDomain): $domain -> ${cached.map { it.hostAddress }} (${elapsed}ms)")
+                    Log.d(TAG, "✅ DNS RESOLVE CACHE HIT: $domain -> ${cached.map { it.hostAddress }} (cache check: ${cacheCheckDuration}ms, total: ${elapsed}ms)")
                     // Track domain access for warmup manager
                     warmupManager.trackDomainAccess(domain)
                     return@withContext cached
                 }
-                
-                // Cache miss - resolve from upstream DNS
-                Log.d(TAG, "⚠️ DNS CACHE MISS (resolveDomain): $domain, resolving from upstream...")
+                Log.d(TAG, "⚠️ DNS RESOLVE CACHE MISS: $domain (cache check: ${cacheCheckDuration}ms), resolving from upstream...")
                 
                 // Build DNS query packet
-                val queryData = DnsResponseBuilder.buildQuery(domain) ?: return@withContext emptyList()
+                val queryBuildStartTime = System.currentTimeMillis()
+                val queryData = DnsResponseBuilder.buildQuery(domain) ?: run {
+                    val queryBuildDuration = System.currentTimeMillis() - queryBuildStartTime
+                    Log.e(TAG, "❌ DNS RESOLVE ERROR: Failed to build query packet for $domain (duration: ${queryBuildDuration}ms)")
+                    return@withContext emptyList()
+                }
+                val queryBuildDuration = System.currentTimeMillis() - queryBuildStartTime
+                Log.d(TAG, "✅ DNS RESOLVE: Query packet built (size: ${queryData.size} bytes, duration: ${queryBuildDuration}ms)")
                 
                 // Forward to upstream DNS servers with Happy Eyeballs
+                val upstreamStartTime = System.currentTimeMillis()
                 val responseData = upstreamClient.forwardQuery(queryData, domain)
+                val upstreamDuration = System.currentTimeMillis() - upstreamStartTime
                 if (responseData != null) {
-                // Parse response with TTL
-                val parseResult = DnsResponseParser.parseResponseWithTtl(responseData, domain)
-                if (parseResult.addresses.isNotEmpty()) {
-                    // Save to cache with actual TTL from DNS response
-                    val ttl = parseResult.ttl ?: null // Use null to fallback to optimized TTL
-                    DnsCacheManager.saveToCache(domain, parseResult.addresses, ttl)
-                    Log.i(TAG, "✅ DNS resolved and cached (resolveDomain): $domain -> ${parseResult.addresses.map { it.hostAddress ?: "unknown" }} (TTL: ${parseResult.ttl ?: "N/A"}s)")
+                    Log.d(TAG, "✅ DNS RESOLVE: Upstream query completed (response size: ${responseData.size} bytes, duration: ${upstreamDuration}ms)")
+                    // Parse response with TTL
+                    val parseStartTime = System.currentTimeMillis()
+                    val parseResult = DnsResponseParser.parseResponseWithTtl(responseData, domain)
+                    val parseDuration = System.currentTimeMillis() - parseStartTime
+                    if (parseResult.addresses.isNotEmpty()) {
+                        // Save to cache with actual TTL from DNS response
+                        val cacheSaveStartTime = System.currentTimeMillis()
+                        val ttl = parseResult.ttl ?: null // Use null to fallback to optimized TTL
+                        DnsCacheManager.saveToCache(domain, parseResult.addresses, ttl)
+                        val cacheSaveDuration = System.currentTimeMillis() - cacheSaveStartTime
+                        val totalDuration = System.currentTimeMillis() - startTime
+                        Log.i(TAG, "✅ DNS RESOLVE SUCCESS: $domain -> ${parseResult.addresses.map { it.hostAddress ?: "unknown" }} (TTL: ${parseResult.ttl ?: "N/A"}s, parse: ${parseDuration}ms, cache save: ${cacheSaveDuration}ms, total: ${totalDuration}ms)")
                         // Track domain access for warmup manager
                         warmupManager.trackDomainAccess(domain)
                         return@withContext parseResult.addresses
                     } else if (parseResult.isNxDomain) {
+                        val totalDuration = System.currentTimeMillis() - startTime
                         // NXDOMAIN - don't cache negative results
-                        Log.d(TAG, "✅ NXDOMAIN for $domain (not cached)")
+                        Log.d(TAG, "✅ DNS RESOLVE NXDOMAIN: $domain (not cached, parse: ${parseDuration}ms, total: ${totalDuration}ms)")
+                    } else {
+                        val totalDuration = System.currentTimeMillis() - startTime
+                        Log.w(TAG, "⚠️ DNS RESOLVE: Empty addresses in response for $domain (parse: ${parseDuration}ms, total: ${totalDuration}ms)")
                     }
+                } else {
+                    val totalDuration = System.currentTimeMillis() - startTime
+                    Log.e(TAG, "❌ DNS RESOLVE FAILED: Upstream query returned null for $domain (upstream: ${upstreamDuration}ms, total: ${totalDuration}ms)")
                 }
                 
                 emptyList()
             } catch (e: Exception) {
-                Log.e(TAG, "Error resolving domain: $domain", e)
+                val totalDuration = System.currentTimeMillis() - startTime
+                Log.e(TAG, "❌ DNS RESOLVE ERROR: Error resolving domain: $domain (duration: ${totalDuration}ms)", e)
                 emptyList()
             }
         }

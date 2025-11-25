@@ -228,14 +228,23 @@ class HevSocksManager(private val context: Context) {
         // Use fd immediately after extraction (minimize race window)
         val nativeStartTime = System.currentTimeMillis()
         AiLogHelper.d(TAG, "🔧 TPROXY START: Calling native TProxyStartService...")
-        synchronized(tunFdLock) {
-            com.hyperxray.an.service.TProxyService.TProxyStartService(tproxyFile.absolutePath, fd)
+        AiLogHelper.d(TAG, "📋 TPROXY START: Native call parameters - config: ${tproxyFile.absolutePath}, fd: $fd, config size: ${tproxyFile.length()} bytes")
+        try {
+            synchronized(tunFdLock) {
+                com.hyperxray.an.service.TProxyService.TProxyStartService(tproxyFile.absolutePath, fd)
+            }
+            val nativeStartDuration = System.currentTimeMillis() - nativeStartTime
+            isRunningRef.set(true)
+            val totalDuration = System.currentTimeMillis() - startTime
+            Log.d(TAG, "Native TProxy service started.")
+            AiLogHelper.i(TAG, "✅ TPROXY START SUCCESS: Native TProxy service started (native call: ${nativeStartDuration}ms, total: ${totalDuration}ms)")
+        } catch (e: Exception) {
+            val nativeStartDuration = System.currentTimeMillis() - nativeStartTime
+            val totalDuration = System.currentTimeMillis() - startTime
+            Log.e(TAG, "Error calling native TProxyStartService", e)
+            AiLogHelper.e(TAG, "❌ TPROXY START FAILED: Error calling native TProxyStartService (native call: ${nativeStartDuration}ms, total: ${totalDuration}ms): ${e.message}", e)
+            throw e
         }
-        val nativeStartDuration = System.currentTimeMillis() - nativeStartTime
-        isRunningRef.set(true)
-        val totalDuration = System.currentTimeMillis() - startTime
-        Log.d(TAG, "Native TProxy service started.")
-        AiLogHelper.i(TAG, "✅ TPROXY START SUCCESS: Native TProxy service started (native call: ${nativeStartDuration}ms, total: ${totalDuration}ms)")
 
         // Start AI-powered TProxy optimization
         val optimizer = tproxyAiOptimizer

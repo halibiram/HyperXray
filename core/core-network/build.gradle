@@ -78,7 +78,8 @@ dependencies {
     implementation 'org.chromium.net:cronet-embedded:119.6045.31'
     
     // Conscrypt for TLS acceleration
-    implementation 'org.conscrypt:conscrypt-android:2.5.2'
+    // Updated to 2.5.3 (latest available) to minimize hidden API access issues on Android 9+
+    implementation 'org.conscrypt:conscrypt-android:2.5.3'
     
     // Android core
     implementation 'androidx.core:core-ktx:1.16.0'

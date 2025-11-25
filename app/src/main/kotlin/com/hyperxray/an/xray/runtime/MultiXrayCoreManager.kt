@@ -488,6 +488,8 @@ class MultiXrayCoreManager(private val context: Context) {
      * @return Map of instance index to API port
      */
     fun getActiveInstances(): Map<Int, Int> {
+        Log.d(TAG, "getActiveInstances() called - Total instances: ${instances.size}, Total ports: ${instancePorts.size}")
+        
         val activeInstances = instancePorts.filter { (index, _) ->
             val service = instances[index]
             val isRunning = service != null && service.isRunning()
@@ -495,7 +497,11 @@ class MultiXrayCoreManager(private val context: Context) {
             if (!isRunning && service != null) {
                 // Log why instance is not considered active
                 val status = service.status.value
-                Log.d(TAG, "Instance $index is not active: status=$status, isAlive=${service.getProcessId() != null}")
+                val port = instancePorts[index]
+                Log.d(TAG, "Instance $index (port $port) is not active: status=$status, isRunning=$isRunning, isAlive=${service.getProcessId() != null}")
+            } else if (isRunning) {
+                val port = instancePorts[index]
+                Log.d(TAG, "Instance $index (port $port) is active and running")
             }
             
             isRunning
@@ -503,12 +509,16 @@ class MultiXrayCoreManager(private val context: Context) {
         
         if (activeInstances.isEmpty() && instancePorts.isNotEmpty()) {
             // Log detailed status of all instances for debugging
-            Log.w(TAG, "No active instances found. Total instances: ${instances.size}, Ports: ${instancePorts.size}")
+            Log.w(TAG, "⚠️ No active instances found. Total instances: ${instances.size}, Ports: ${instancePorts.size}")
             instances.forEach { (index, service) ->
                 val status = service.status.value
                 val port = instancePorts[index]
                 Log.w(TAG, "Instance $index: port=$port, status=$status, isRunning=${service.isRunning()}, processId=${service.getProcessId()}")
             }
+        } else if (activeInstances.isNotEmpty()) {
+            Log.d(TAG, "✅ Found ${activeInstances.size} active instances: ${activeInstances.map { "Instance-${it.key}:Port-${it.value}" }}")
+        } else {
+            Log.d(TAG, "No instances configured yet (instances=${instances.size}, ports=${instancePorts.size})")
         }
         
         return activeInstances

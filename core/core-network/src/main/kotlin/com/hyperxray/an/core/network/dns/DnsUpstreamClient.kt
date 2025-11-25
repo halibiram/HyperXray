@@ -250,49 +250,72 @@ class DnsUpstreamClient(
         pendingQueries[lowerHostname] = PendingQuery(deferred)
         
         // Use supervisorScope to ensure one child's failure doesn't crash siblings
+        val startTime = System.currentTimeMillis()
         return supervisorScope {
             try {
-                val startTime = System.currentTimeMillis()
+                Log.d(TAG, "🔍 DNS UPSTREAM QUERY START: $hostname (query size: ${queryData.size} bytes, timeout: ${timeoutMs}ms)")
                 
                 // Try UDP first with Happy Eyeballs
+                val udpStartTime = System.currentTimeMillis()
                 val result = forwardToUpstreamDnsWithHappyEyeballs(queryData, hostname, timeoutMs)
+                val udpDuration = System.currentTimeMillis() - udpStartTime
                 
                 if (result != null) {
-                    Log.d(TAG, "✅ DNS resolved via UDP for $hostname (${System.currentTimeMillis() - startTime}ms)")
+                    val totalDuration = System.currentTimeMillis() - startTime
+                    Log.d(TAG, "✅ DNS UPSTREAM QUERY SUCCESS (UDP): $hostname -> ${result.size} bytes (UDP: ${udpDuration}ms, total: ${totalDuration}ms)")
                     deferred.complete(result)
                     pendingQueries.remove(lowerHostname)
                     return@supervisorScope result
                 }
+                Log.d(TAG, "⚠️ DNS UPSTREAM QUERY UDP FAILED: $hostname (UDP: ${udpDuration}ms), trying DoT fallback...")
                 
                 // Try DoT fallback if UDP failed
+                val dotStartTime = System.currentTimeMillis()
                 val dotResult = tryDoTFallback(queryData, hostname)
+                val dotDuration = System.currentTimeMillis() - dotStartTime
                 if (dotResult != null) {
+                    val totalDuration = System.currentTimeMillis() - startTime
+                    Log.d(TAG, "✅ DNS UPSTREAM QUERY SUCCESS (DoT): $hostname -> ${dotResult.size} bytes (DoT: ${dotDuration}ms, total: ${totalDuration}ms)")
                     deferred.complete(dotResult)
                     pendingQueries.remove(lowerHostname)
                     return@supervisorScope dotResult
                 }
+                Log.d(TAG, "⚠️ DNS UPSTREAM QUERY DoT FAILED: $hostname (DoT: ${dotDuration}ms), trying DoH fallback...")
                 
                 // Try DoH fallback if DoT failed
+                val dohStartTime = System.currentTimeMillis()
                 val dohResult = tryDoHFallback(hostname)
+                val dohDuration = System.currentTimeMillis() - dohStartTime
                 if (dohResult != null) {
+                    val totalDuration = System.currentTimeMillis() - startTime
+                    Log.d(TAG, "✅ DNS UPSTREAM QUERY SUCCESS (DoH): $hostname -> ${dohResult.size} bytes (DoH: ${dohDuration}ms, total: ${totalDuration}ms)")
                     deferred.complete(dohResult)
                     pendingQueries.remove(lowerHostname)
                     return@supervisorScope dohResult
                 }
+                Log.d(TAG, "⚠️ DNS UPSTREAM QUERY DoH FAILED: $hostname (DoH: ${dohDuration}ms), trying TCP fallback...")
                 
                 // Try TCP DNS fallback if DoH failed
+                val tcpStartTime = System.currentTimeMillis()
                 val tcpResult = tryTcpDnsFallback(queryData, hostname)
+                val tcpDuration = System.currentTimeMillis() - tcpStartTime
                 if (tcpResult != null) {
+                    val totalDuration = System.currentTimeMillis() - startTime
+                    Log.d(TAG, "✅ DNS UPSTREAM QUERY SUCCESS (TCP): $hostname -> ${tcpResult.size} bytes (TCP: ${tcpDuration}ms, total: ${totalDuration}ms)")
                     deferred.complete(tcpResult)
                     pendingQueries.remove(lowerHostname)
                     return@supervisorScope tcpResult
                 }
                 
                 // Complete with null on failure
+                val totalDuration = System.currentTimeMillis() - startTime
+                Log.e(TAG, "❌ DNS UPSTREAM QUERY FAILED: All methods failed for $hostname (UDP: ${udpDuration}ms, DoT: ${dotDuration}ms, DoH: ${dohDuration}ms, TCP: ${tcpDuration}ms, total: ${totalDuration}ms)")
                 deferred.complete(null)
                 pendingQueries.remove(lowerHostname)
                 null
             } catch (e: Exception) {
+                val totalDuration = System.currentTimeMillis() - startTime
+                Log.e(TAG, "❌ DNS UPSTREAM QUERY ERROR: Exception for $hostname (duration: ${totalDuration}ms)", e)
                 deferred.completeExceptionally(e)
                 pendingQueries.remove(lowerHostname)
                 throw e

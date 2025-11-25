@@ -101,6 +101,15 @@
 -keep interface org.conscrypt.** { *; }
 -dontwarn org.conscrypt.**
 
+# Allow Conscrypt to access hidden APIs (for educational purposes)
+# Note: This may not work on Android 10+ due to stricter restrictions
+-keepclassmembers class * {
+    @androidx.annotation.Keep <methods>;
+}
+-keepclassmembers class java.net.InetAddress$InetAddressHolder {
+    <methods>;
+}
+
 # ============================================================================
 # Cronet: Keep Cronet classes for HTTP/3 networking
 # ============================================================================
