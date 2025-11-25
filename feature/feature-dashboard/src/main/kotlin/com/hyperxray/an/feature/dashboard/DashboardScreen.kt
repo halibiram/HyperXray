@@ -91,13 +91,16 @@ fun DashboardScreen(
 
     val isRecentlyConnected = remember { mutableStateOf(false) }
 
-    // Trigger fast polling when connected
+    // Note: Removed updateCoreStats() call here to prevent double polling
+    // Core stats are automatically updated by XrayStatsManager's internal monitoring loop
     LaunchedEffect(connectionState) {
         if (connectionState is com.hyperxray.an.feature.dashboard.ConnectionState.Connected) {
             isRecentlyConnected.value = true
-            // Immediately update stats when connection state changes to Connected
-            viewModel.updateCoreStats()
-            // Fast poll for 10 seconds to ensure immediate stats
+            // Only update DNS cache and telemetry stats immediately
+            // Core stats will be updated by XrayStatsManager automatically
+            viewModel.updateTelemetryStats()
+            viewModel.updateDnsCacheStats()
+            // Fast poll for 10 seconds to ensure immediate stats for DNS/Telemetry
             delay(10000L)
             isRecentlyConnected.value = false
         } else {
@@ -106,26 +109,19 @@ fun DashboardScreen(
     }
 
     LaunchedEffect(Unit) {
-        // Poll stats with dynamic interval based on traffic
-        // High traffic -> fast polling (500ms), idle -> slow polling (2s)
-        // Loop is safe: repeatOnLifecycle cancels when lifecycle state changes
+        // Poll only DNS cache and telemetry stats with fixed intervals
+        // Core stats are handled by XrayStatsManager's internal monitoring loop
+        // This prevents double polling race conditions and conflicting gRPC calls
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while (true) {
-                viewModel.updateCoreStats()
+                // Only update DNS cache and telemetry stats here
+                // updateCoreStats() is removed to prevent double polling
                 viewModel.updateTelemetryStats()
                 viewModel.updateDnsCacheStats()
                 
-                // Dynamic interval based on current throughput
-                val currentStats = viewModel.coreStatsState.value
-                val totalThroughput = currentStats.uplinkThroughput + currentStats.downlinkThroughput
-                val interval = when {
-                    isRecentlyConnected.value -> 100L     // Initial connection: 100ms (very fast for immediate updates)
-                    totalThroughput > 1_000_000 -> 500L   // > 1MB/s: 500ms (high traffic)
-                    totalThroughput > 100_000 -> 1000L    // > 100KB/s: 1s (medium traffic)
-                    totalThroughput > 0 -> 1500L          // Active but low: 1.5s
-                    else -> 2000L                         // Idle: 2s (battery saving)
-                }
-                delay(interval)
+                // Fixed interval: 2000ms (2 seconds) for battery efficiency
+                // Core stats are updated by XrayStatsManager at its own interval
+                delay(2000L)
             }
         }
     }

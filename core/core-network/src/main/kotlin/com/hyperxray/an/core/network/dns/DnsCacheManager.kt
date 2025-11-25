@@ -317,10 +317,42 @@ object DnsCacheManager {
     }
 
     /**
-     * Get cache statistics
+     * Structured DNS cache statistics data class
+     */
+    data class DnsCacheStatsData(
+        val entryCount: Int,
+        val hits: Long,
+        val misses: Long,
+        val hitRate: Int // 0-100 percentage
+    )
+
+    /**
+     * Get cache statistics as structured data
+     * This is the preferred method for programmatic access
+     */
+    fun getStatsStructured(): DnsCacheStatsData {
+        return cacheLock.read {
+            val totalQueries = cacheHits + cacheMisses
+            val hitRate = if (totalQueries > 0) {
+                (cacheHits * 100.0 / totalQueries).toInt()
+            } else {
+                0
+            }
+            DnsCacheStatsData(
+                entryCount = cache.size,
+                hits = cacheHits,
+                misses = cacheMisses,
+                hitRate = hitRate
+            )
+        }
+    }
+
+    /**
+     * Get cache statistics as string (for backward compatibility and logging)
      */
     fun getStats(): String {
-        return "DNS Cache: ${cache.size} entries, hits=$cacheHits, misses=$cacheMisses, hitRate=${if (cacheHits + cacheMisses > 0) (cacheHits * 100.0 / (cacheHits + cacheMisses)).toInt() else 0}%"
+        val stats = getStatsStructured()
+        return "DNS Cache: ${stats.entryCount} entries, hits=${stats.hits}, misses=${stats.misses}, hitRate=${stats.hitRate}%"
     }
 
     /**

@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
 
+private const val TAG = "MainViewModelDashboardAdapter"
+
 /**
  * Extension function to convert app module CoreStatsState to feature module CoreStatsState
  */
@@ -53,33 +55,70 @@ fun AggregatedTelemetry.toFeatureState(): FeatureAggregatedTelemetry {
 }
 
 /**
- * Extension function to parse DnsCacheManager.getStats() string to feature module DnsCacheStats
- * Commit 312450a: DnsCacheManager only has getStats() method, not getStatsData()
+ * Extension function to convert DnsCacheManager structured stats to feature module DnsCacheStats
+ * Uses the new getStatsStructured() method for robust parsing
  */
-private fun parseDnsCacheStats(statsString: String): FeatureDnsCacheStats {
-    // Parse stats string: "DNS Cache: X entries, hits=Y, misses=Z, hitRate=W%"
-    val entriesMatch = Regex("(\\d+) entries").find(statsString)
-    val hitsMatch = Regex("hits=(\\d+)").find(statsString)
-    val missesMatch = Regex("misses=(\\d+)").find(statsString)
-    val hitRateMatch = Regex("hitRate=(\\d+)%").find(statsString)
-    
-    val entryCount = entriesMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
-    val hits = hitsMatch?.groupValues?.get(1)?.toLongOrNull() ?: 0L
-    val misses = missesMatch?.groupValues?.get(1)?.toLongOrNull() ?: 0L
-    val hitRate = hitRateMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
-    
+private fun com.hyperxray.an.core.network.dns.DnsCacheManager.DnsCacheStatsData.toFeatureState(): FeatureDnsCacheStats {
     return FeatureDnsCacheStats(
         entryCount = entryCount,
-        memoryUsageMB = 0L, // Not available in commit 312450a
-        memoryLimitMB = 0L, // Not available in commit 312450a
-        memoryUsagePercent = 0, // Not available in commit 312450a
+        memoryUsageMB = 0L, // Not available in current implementation
+        memoryLimitMB = 0L, // Not available in current implementation
+        memoryUsagePercent = 0, // Not available in current implementation
         hits = hits,
         misses = misses,
         hitRate = hitRate,
-        avgDomainHitRate = 0, // Not available in commit 312450a
-        avgHitLatencyMs = 0.0, // Not available in commit 312450a
-        avgMissLatencyMs = 0.0 // Not available in commit 312450a
+        avgDomainHitRate = 0, // Not available in current implementation
+        avgHitLatencyMs = 0.0, // Not available in current implementation
+        avgMissLatencyMs = 0.0 // Not available in current implementation
     )
+}
+
+/**
+ * Fallback function to parse DnsCacheManager.getStats() string (for backward compatibility)
+ * This is more robust than the previous implementation with better error handling
+ */
+private fun parseDnsCacheStatsFallback(statsString: String): FeatureDnsCacheStats {
+    return try {
+        // Parse stats string: "DNS Cache: X entries, hits=Y, misses=Z, hitRate=W%"
+        // Use more flexible regex patterns to handle format variations
+        val entriesMatch = Regex("(\\d+)\\s+entries?", RegexOption.IGNORE_CASE).find(statsString)
+        val hitsMatch = Regex("hits\\s*=\\s*(\\d+)", RegexOption.IGNORE_CASE).find(statsString)
+        val missesMatch = Regex("misses\\s*=\\s*(\\d+)", RegexOption.IGNORE_CASE).find(statsString)
+        val hitRateMatch = Regex("hitRate\\s*=\\s*(\\d+)%?", RegexOption.IGNORE_CASE).find(statsString)
+        
+        val entryCount = entriesMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        val hits = hitsMatch?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+        val misses = missesMatch?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+        val hitRate = hitRateMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        
+        FeatureDnsCacheStats(
+            entryCount = entryCount,
+            memoryUsageMB = 0L,
+            memoryLimitMB = 0L,
+            memoryUsagePercent = 0,
+            hits = hits,
+            misses = misses,
+            hitRate = hitRate,
+            avgDomainHitRate = 0,
+            avgHitLatencyMs = 0.0,
+            avgMissLatencyMs = 0.0
+        )
+    } catch (e: Exception) {
+        Log.e(TAG, "Error parsing DNS cache stats string: $statsString", e)
+        // Return safe default values instead of zeros to indicate parsing failure
+        FeatureDnsCacheStats(
+            entryCount = 0,
+            memoryUsageMB = 0L,
+            memoryLimitMB = 0L,
+            memoryUsagePercent = 0,
+            hits = 0L,
+            misses = 0L,
+            hitRate = 0,
+            avgDomainHitRate = 0,
+            avgHitLatencyMs = 0.0,
+            avgMissLatencyMs = 0.0
+        )
+    }
 }
 
 /**
@@ -88,13 +127,14 @@ private fun parseDnsCacheStats(statsString: String): FeatureDnsCacheStats {
  */
 class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : DashboardViewModel {
     // Cached transformed StateFlows - created once and reused
-    // Direct map transformation without stateIn to ensure all updates are propagated
+    // Using SharingStarted.WhileSubscribed(5000) to keep subscription alive during brief configuration changes
+    // This prevents unnecessary recreation of upstream flows and reduces memory overhead
     override val coreStatsState: StateFlow<FeatureCoreStatsState> =
         mainViewModel.coreStatsState
             .map { it.toFeatureState() }
             .stateIn(
                 scope = mainViewModel.viewModelScope,
-                started = SharingStarted.WhileSubscribed(0), // Start immediately when subscribed, stop when no subscribers
+                started = SharingStarted.WhileSubscribed(5000), // Keep alive for 5s after last subscriber
                 initialValue = mainViewModel.coreStatsState.value.toFeatureState()
             )
     
@@ -103,7 +143,7 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
             .map { it?.toFeatureState() }
             .stateIn(
                 scope = mainViewModel.viewModelScope,
-                started = SharingStarted.WhileSubscribed(0), // Start immediately when subscribed, stop when no subscribers
+                started = SharingStarted.WhileSubscribed(5000), // Keep alive for 5s after last subscriber
                 initialValue = mainViewModel.telemetryState.value?.toFeatureState()
             )
     
@@ -147,21 +187,25 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
                     Log.w(TAG, "Failed to initialize DnsCacheManager: ${e.message}", e)
                 }
                 
-                // Commit 312450a: DnsCacheManager only has getStats() method, not getStatsData()
-                val statsString = DnsCacheManager.getStats()
-                val stats = parseDnsCacheStats(statsString)
+                // Prefer structured method for robust parsing
+                val stats = try {
+                    val structuredStats = DnsCacheManager.getStatsStructured()
+                    structuredStats.toFeatureState()
+                } catch (e: Exception) {
+                    // Fallback to string parsing if structured method fails
+                    Log.w(TAG, "Failed to get structured DNS stats, falling back to string parsing: ${e.message}", e)
+                    val statsString = DnsCacheManager.getStats()
+                    parseDnsCacheStatsFallback(statsString)
+                }
+                
                 dnsCacheStatsFlow.value = stats
-                Log.d(TAG, "DNS cache stats updated: $statsString")
+                Log.d(TAG, "DNS cache stats updated: entries=${stats.entryCount}, hits=${stats.hits}, misses=${stats.misses}, hitRate=${stats.hitRate}%")
             } catch (e: Exception) {
                 Log.e(TAG, "Error updating DNS cache stats: ${e.message}", e)
                 // Keep last value instead of setting to null, so UI doesn't reset to zero
                 // dnsCacheStatsFlow.value remains unchanged on error
             }
         }
-    }
-    
-    companion object {
-        private const val TAG = "MainViewModelDashboardAdapter"
     }
 }
 

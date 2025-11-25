@@ -87,11 +87,21 @@ class XrayStatsManager(
         
         Log.d(TAG, "Starting Xray stats monitoring")
         
-        // Start monitoring loop
+        // Start monitoring loop with dynamic interval based on traffic load
         monitoringJob = scope.launch {
             while (isActive && isMonitoring) {
                 updateCoreStats()
-                delay(1000L) // Default polling interval, can be adjusted
+                
+                // Dynamic interval based on current throughput
+                // High traffic -> fast polling (1s), low traffic -> slow polling (2s)
+                val currentStats = _statsState.value
+                val totalThroughput = currentStats.uplinkThroughput + currentStats.downlinkThroughput
+                val interval = when {
+                    totalThroughput > 1_000_000 -> 1000L   // > 1MB/s: 1s (high traffic)
+                    totalThroughput > 100_000 -> 1500L     // > 100KB/s: 1.5s (medium traffic)
+                    else -> 2000L                          // Low/Idle: 2s (battery saving)
+                }
+                delay(interval)
             }
         }
     }
@@ -334,15 +344,18 @@ class XrayStatsManager(
         val newUplink = traffic?.uplink ?: currentState.uplink
         val newDownlink = traffic?.downlink ?: currentState.downlink
         
-        // Calculate throughput (bytes per second)
+        // Calculate throughput (bytes per second) with minimum time delta guard
+        // This prevents artificial spikes when updateCoreStats() is called too frequently
         val now = System.currentTimeMillis()
-        var uplinkThroughput = 0.0
-        var downlinkThroughput = 0.0
+        var uplinkThroughput = currentState.uplinkThroughput // Preserve previous values
+        var downlinkThroughput = currentState.downlinkThroughput // Preserve previous values
         
         if (lastStatsTime > 0 && now > lastStatsTime) {
             val timeDelta = (now - lastStatsTime) / 1000.0 // Convert to seconds
             
-            if (timeDelta > 0) {
+            // Minimum time delta guard: only recalculate if >500ms has passed
+            // This prevents artificial throughput spikes from double polling or rapid updates
+            if (timeDelta >= 0.5) {
                 val uplinkDelta = newUplink - lastUplink
                 val downlinkDelta = newDownlink - lastDownlink
                 
@@ -350,6 +363,9 @@ class XrayStatsManager(
                 downlinkThroughput = downlinkDelta / timeDelta
                 
                 Log.d(TAG, "Throughput calculated: uplink=${formatThroughput(uplinkThroughput)}, downlink=${formatThroughput(downlinkThroughput)}, timeDelta=${timeDelta}s")
+            } else {
+                // Time delta too small - keep previous throughput values
+                Log.d(TAG, "Time delta too small (${timeDelta}s < 0.5s), preserving previous throughput values")
             }
         } else if (lastStatsTime == 0L) {
             // First measurement - initialize baseline
