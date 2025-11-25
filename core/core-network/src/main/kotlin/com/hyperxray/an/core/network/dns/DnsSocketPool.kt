@@ -18,6 +18,8 @@ import kotlin.concurrent.write
 private const val TAG = "DnsSocketPool"
 private const val SOCKET_POOL_TIMEOUT_MS = 10000L // 10 seconds - sockets expire after 10s of inactivity
 private const val SOCKET_POOL_CLEANUP_INTERVAL_MS = 30000L // Cleanup every 30 seconds
+private const val SOCKET_STALENESS_THRESHOLD_MS = 60000L // 60 seconds - NAT timeout threshold
+private const val METRICS_LOG_INTERVAL_MS = 5 * 60 * 1000L // 5 minutes
 
 /**
  * Safe socket wrapper that prevents "Closed Pipe" crashes
@@ -36,18 +38,22 @@ class SafeSocket(
             socket.send(packet)
             true
         } catch (e: SocketException) {
-            // Socket closed or network error - ignore during cancellation
+            // Socket closed or network error - record error and ignore during cancellation
+            SocketMetrics.recordPacketError()
             Log.w(TAG, "SocketException during send: ${e.message}")
             false
         } catch (e: ClosedChannelException) {
-            // Socket closed - ignore during cancellation
+            // Socket closed - record error and ignore during cancellation
+            SocketMetrics.recordPacketError()
             Log.w(TAG, "ClosedChannelException during send: ${e.message}")
             false
         } catch (e: InterruptedIOException) {
-            // Interrupted - ignore during cancellation
+            // Interrupted - record error and ignore during cancellation
+            SocketMetrics.recordPacketError()
             Log.w(TAG, "InterruptedIOException during send: ${e.message}")
             false
         } catch (e: Exception) {
+            SocketMetrics.recordPacketError()
             Log.e(TAG, "Unexpected error during send: ${e.message}", e)
             false
         }
@@ -62,18 +68,22 @@ class SafeSocket(
             socket.receive(packet)
             true
         } catch (e: SocketException) {
-            // Socket closed or network error - ignore during cancellation
+            // Socket closed or network error - record error and ignore during cancellation
+            SocketMetrics.recordPacketError()
             Log.w(TAG, "SocketException during receive: ${e.message}")
             false
         } catch (e: ClosedChannelException) {
-            // Socket closed - ignore during cancellation
+            // Socket closed - record error and ignore during cancellation
+            SocketMetrics.recordPacketError()
             Log.w(TAG, "ClosedChannelException during receive: ${e.message}")
             false
         } catch (e: InterruptedIOException) {
-            // Interrupted - ignore during cancellation
+            // Interrupted - record error and ignore during cancellation
+            SocketMetrics.recordPacketError()
             Log.w(TAG, "InterruptedIOException during receive: ${e.message}")
             false
         } catch (e: Exception) {
+            SocketMetrics.recordPacketError()
             Log.e(TAG, "Unexpected error during receive: ${e.message}", e)
             false
         }
@@ -115,13 +125,22 @@ class SafeSocket(
 }
 
 /**
- * Pooled socket data class
+ * Pooled socket data class with activity tracking
  */
 private data class PooledSocket(
     val safeSocket: SafeSocket,
     val lastUsed: AtomicLong = AtomicLong(System.currentTimeMillis()),
+    val lastActivityTimestamp: AtomicLong = AtomicLong(System.currentTimeMillis()), // Track last send/receive activity
     val vpnInterfaceIp: String? = null // Track which VPN IP this socket was bound to
-)
+) {
+    /**
+     * Update activity timestamp (called on send/receive)
+     */
+    fun updateActivity() {
+        lastActivityTimestamp.set(System.currentTimeMillis())
+        lastUsed.set(System.currentTimeMillis())
+    }
+}
 
 /**
  * DNS Socket Pool Manager
@@ -148,6 +167,14 @@ class DnsSocketPool(
             while (isActive) {
                 delay(SOCKET_POOL_CLEANUP_INTERVAL_MS)
                 cleanupExpiredSockets()
+            }
+        }
+        
+        // Start periodic metrics logging
+        scope.launch {
+            while (isActive) {
+                delay(METRICS_LOG_INTERVAL_MS)
+                SocketMetrics.logSnapshot()
             }
         }
     }
@@ -180,6 +207,7 @@ class DnsSocketPool(
                     if (pooledSocket != null) {
                         try {
                             pooledSocket.safeSocket.close()
+                            SocketMetrics.decrementActiveSocketCount()
                             Log.d(TAG, "🧹 Cleaned up expired socket for $key (age: ${now - pooledSocket.lastUsed.get()}ms)")
                         } catch (e: Exception) {
                             // Ignore close errors
@@ -191,7 +219,43 @@ class DnsSocketPool(
     }
     
     /**
-     * Get or create socket from pool
+     * Check if socket is healthy (lightweight check without network I/O)
+     * 
+     * @param pooledSocket The pooled socket to check
+     * @return true if socket is healthy, false otherwise
+     */
+    private fun isSocketHealthy(pooledSocket: PooledSocket): Boolean {
+        return try {
+            val socket = pooledSocket.safeSocket.getSocket()
+            val isNotClosed = !socket.isClosed
+            val isBound = socket.isBound
+            
+            // Check staleness: if socket hasn't had activity in >60 seconds, consider it stale
+            val now = System.currentTimeMillis()
+            val timeSinceLastActivity = now - pooledSocket.lastActivityTimestamp.get()
+            val isNotStale = timeSinceLastActivity <= SOCKET_STALENESS_THRESHOLD_MS
+            
+            val healthy = isNotClosed && isBound && isNotStale
+            
+            if (!healthy) {
+                val reasons = mutableListOf<String>()
+                if (socket.isClosed) reasons.add("closed")
+                if (!socket.isBound) reasons.add("not bound")
+                if (timeSinceLastActivity > SOCKET_STALENESS_THRESHOLD_MS) {
+                    reasons.add("stale (${timeSinceLastActivity}ms since last activity)")
+                }
+                Log.d(TAG, "Socket unhealthy: ${reasons.joinToString(", ")}")
+            }
+            
+            healthy
+        } catch (e: Exception) {
+            Log.w(TAG, "Error checking socket health: ${e.message}")
+            false
+        }
+    }
+    
+    /**
+     * Get or create socket from pool with health check and auto-refresh
      */
     fun getPooledSocket(server: InetAddress, timeoutMs: Long): SafeSocket {
         val serverKey = server.hostAddress
@@ -202,16 +266,18 @@ class DnsSocketPool(
             
             if (pooled != null) {
                 val age = System.currentTimeMillis() - pooled.lastUsed.get()
-                // Check if VPN IP changed or socket is not bound to current VPN IP
+                // Check if VPN IP changed
                 val vpnIpChanged = pooled.vpnInterfaceIp != vpnInterfaceIp
-                // Also check if socket is still valid
-                val socketValid = pooled.safeSocket.isValid()
                 
-                if (age < SOCKET_POOL_TIMEOUT_MS && !vpnIpChanged && socketValid) {
-                    pooled.lastUsed.set(System.currentTimeMillis())
+                // Perform health check (lightweight, no network I/O)
+                val isHealthy = isSocketHealthy(pooled)
+                
+                if (age < SOCKET_POOL_TIMEOUT_MS && !vpnIpChanged && isHealthy) {
+                    // Socket is healthy - update activity and return
+                    pooled.updateActivity()
                     return pooled.safeSocket
                 } else {
-                    // Socket expired, VPN IP changed, or socket invalid - will be removed below
+                    // Socket expired, VPN IP changed, or unhealthy - will be removed below
                 }
             }
         }
@@ -223,16 +289,24 @@ class DnsSocketPool(
             if (pooled != null) {
                 val age = System.currentTimeMillis() - pooled.lastUsed.get()
                 val vpnIpChanged = pooled.vpnInterfaceIp != vpnInterfaceIp
-                val socketValid = pooled.safeSocket.isValid()
+                val isHealthy = isSocketHealthy(pooled)
                 
-                if (age < SOCKET_POOL_TIMEOUT_MS && !vpnIpChanged && socketValid) {
-                    pooled.lastUsed.set(System.currentTimeMillis())
+                if (age < SOCKET_POOL_TIMEOUT_MS && !vpnIpChanged && isHealthy) {
+                    // Socket is healthy - update activity and return
+                    pooled.updateActivity()
                     return@write pooled.safeSocket
                 } else {
-                    // Remove expired/invalid socket
+                    // Remove expired/invalid/unhealthy socket
                     socketPool.remove(serverKey)
                     try {
                         pooled.safeSocket.close()
+                        SocketMetrics.decrementActiveSocketCount()
+                        
+                        // Record health check failure if socket was unhealthy
+                        if (!isHealthy) {
+                            SocketMetrics.recordHealthCheckFailure()
+                            Log.d(TAG, "🔄 Discarded unhealthy socket for $serverKey (health check failed)")
+                        }
                     } catch (e: Exception) {
                         // Ignore close errors
                     }
@@ -244,7 +318,11 @@ class DnsSocketPool(
             val safeSocket = SafeSocket(newSocket, server)
             
             // Add to pool with VPN IP tracking
-            socketPool[serverKey] = PooledSocket(safeSocket, vpnInterfaceIp = vpnInterfaceIp)
+            socketPool[serverKey] = PooledSocket(
+                safeSocket,
+                vpnInterfaceIp = vpnInterfaceIp
+            )
+            SocketMetrics.incrementActiveSocketCount()
             Log.d(TAG, "✅ Created new pooled socket for $serverKey (pool size: ${socketPool.size})")
             safeSocket
         }
@@ -355,6 +433,7 @@ class DnsSocketPool(
             socketsToClose.forEach { pooledSocket ->
                 try {
                     pooledSocket.safeSocket.close()
+                    SocketMetrics.decrementActiveSocketCount()
                 } catch (e: Exception) {
                     // Ignore close errors
                 }
@@ -369,7 +448,7 @@ class DnsSocketPool(
      */
     fun getStats(): String {
         return poolLock.read {
-            "Socket Pool: ${socketPool.size} active sockets"
+            "Socket Pool: ${socketPool.size} active sockets | ${SocketMetrics.getSnapshot()}"
         }
     }
 }

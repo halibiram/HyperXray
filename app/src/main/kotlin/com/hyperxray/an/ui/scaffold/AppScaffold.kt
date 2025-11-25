@@ -28,11 +28,15 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
+import com.hyperxray.an.ui.theme.HyperIcons
+import com.hyperxray.an.ui.components.HyperTopAppBar
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenu
@@ -50,6 +54,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -87,11 +92,16 @@ import com.hyperxray.an.common.ROUTE_LOG
 import com.hyperxray.an.common.ROUTE_UTILS
 import com.hyperxray.an.common.ROUTE_SETTINGS
 import com.hyperxray.an.common.ROUTE_STATS
+import com.hyperxray.an.common.ROUTE_MAIN
+import com.hyperxray.an.common.ROUTE_CONFIG_EDIT
+import com.hyperxray.an.common.ROUTE_APP_LIST
+import com.hyperxray.an.common.ROUTE_AI_INSIGHTS
 import com.hyperxray.an.viewmodel.LogViewModel
 import com.hyperxray.an.viewmodel.MainViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppScaffold(
     navController: NavHostController,
@@ -114,6 +124,20 @@ fun AppScaffold(
     var isLogSearching by remember { mutableStateOf(false) }
     val logSearchQuery by logViewModel.searchQuery.collectAsState()
     val focusRequester = remember { FocusRequester() }
+
+    // Define root screens (screens that don't show back button)
+    val rootScreens = remember {
+        setOf(ROUTE_STATS, ROUTE_CONFIG, ROUTE_LOG, ROUTE_UTILS, ROUTE_SETTINGS, ROUTE_MAIN)
+    }
+    val isRootScreen = currentRoute in rootScreens
+
+    // Initialize scroll behavior for "Enter Always" animation
+    val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
+
+    // Reset scroll behavior when route changes
+    LaunchedEffect(currentRoute) {
+        scrollBehavior.state.contentOffset = 0f
+    }
 
     LaunchedEffect(isLogSearching) {
         if (isLogSearching) {
@@ -143,21 +167,26 @@ fun AppScaffold(
         )
         
         Scaffold(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(scrollBehavior.nestedScrollConnection),
             containerColor = Color.Transparent, // Transparent to show obsidian background
             snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             AppTopAppBar(
-                currentRoute,
-                onCreateNewConfigFileAndEdit,
-                onImportConfigFromClipboard,
-                onPerformExport,
-                onPerformBackup,
-                onPerformRestore,
-                onSwitchVpnService,
-                mainViewModel.controlMenuClickable.collectAsState().value,
-                mainViewModel.isServiceEnabled.collectAsState().value,
-                logViewModel,
+                currentRoute = currentRoute,
+                scrollBehavior = scrollBehavior,
+                isRootScreen = isRootScreen,
+                navController = navController,
+                onCreateNewConfigFileAndEdit = onCreateNewConfigFileAndEdit,
+                onImportConfigFromClipboard = onImportConfigFromClipboard,
+                onPerformExport = onPerformExport,
+                onPerformBackup = onPerformBackup,
+                onPerformRestore = onPerformRestore,
+                onSwitchVpnService = onSwitchVpnService,
+                controlMenuClickable = mainViewModel.controlMenuClickable.collectAsState().value,
+                isServiceEnabled = mainViewModel.isServiceEnabled.collectAsState().value,
+                logViewModel = logViewModel,
                 logListState = logListState,
                 configListState = configListState,
                 settingsScrollState = settingsScrollState,
@@ -202,6 +231,9 @@ fun AppScaffold(
 @Composable
 fun AppTopAppBar(
     currentRoute: String?,
+    scrollBehavior: TopAppBarScrollBehavior,
+    isRootScreen: Boolean,
+    navController: NavHostController,
     onCreateNewConfigFileAndEdit: () -> Unit,
     onImportConfigFromClipboard: () -> Unit,
     onPerformExport: () -> Unit,
@@ -222,171 +254,193 @@ fun AppTopAppBar(
     mainViewModel: MainViewModel
 ) {
     val title = when (currentRoute) {
-        "stats" -> stringResource(R.string.core_stats_title)
-        "config" -> stringResource(R.string.configuration)
-        "log" -> stringResource(R.string.log)
-        "utils" -> "Utils"
-        "settings" -> stringResource(R.string.settings)
+        ROUTE_STATS -> stringResource(R.string.core_stats_title)
+        ROUTE_CONFIG -> stringResource(R.string.configuration)
+        ROUTE_LOG -> stringResource(R.string.log)
+        ROUTE_UTILS -> "Utils"
+        ROUTE_SETTINGS -> stringResource(R.string.settings)
+        ROUTE_CONFIG_EDIT -> stringResource(R.string.configuration)
+        ROUTE_APP_LIST -> "App List"
+        ROUTE_AI_INSIGHTS -> "AI Insights"
         else -> stringResource(R.string.app_name)
     }
 
-    val showScrolledColor by remember(
-        currentRoute,
-        logListState,
-        configListState,
-        settingsScrollState
-    ) {
-        derivedStateOf {
-            when (currentRoute) {
-                "log" -> logListState.firstVisibleItemIndex > 0 || logListState.firstVisibleItemScrollOffset > 0
-                "config" -> configListState.firstVisibleItemIndex > 0 || configListState.firstVisibleItemScrollOffset > 0
-                "utils" -> false // Utils screen might scroll, but let's keep it false for now or update later
-                "settings" -> settingsScrollState.value > 0
-                else -> false
+    val colorScheme = MaterialTheme.colorScheme
+
+    // Handle navigation icon click
+    val onNavigationIconClick: (() -> Unit)? = when {
+        // Log search mode: close search
+        currentRoute == ROUTE_LOG && isLogSearching -> {
+            {
+                onLogSearchingChange(false)
+                onLogSearchQueryChange("")
             }
+        }
+        // Detail screens: show back button
+        !isRootScreen -> {
+            { navController.popBackStack() }
+        }
+        // Root screens: no navigation icon (or could show menu if you have a drawer)
+        else -> null
+    }
+
+    // Custom title for log search mode
+    val titleContent: @Composable () -> Unit = {
+        if (currentRoute == ROUTE_LOG && isLogSearching) {
+            TextField(
+                value = logSearchQuery,
+                onValueChange = onLogSearchQueryChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester),
+                placeholder = { 
+                    Text(
+                        text = stringResource(R.string.search),
+                        style = MaterialTheme.typography.bodyLarge
+                    ) 
+                },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    fontWeight = FontWeight.Medium
+                ),
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    disabledContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent,
+                    focusedTextColor = colorScheme.onSurface,
+                    unfocusedTextColor = colorScheme.onSurface,
+                    focusedPlaceholderColor = colorScheme.onSurfaceVariant,
+                    unfocusedPlaceholderColor = colorScheme.onSurfaceVariant
+                )
+            )
+        } else {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = (-0.3).sp
+                ),
+                color = Color.White
+            )
         }
     }
 
-    // Animated elevation for modern look
-    val elevation by animateFloatAsState(
-        targetValue = if (showScrolledColor) 3f else 0f,
-        animationSpec = tween(durationMillis = 300),
-        label = "topbar_elevation"
-    )
-
-    // Animated container color transition
-    val containerColor by animateFloatAsState(
-        targetValue = if (showScrolledColor) 1f else 0f,
-        animationSpec = tween(durationMillis = 300),
-        label = "topbar_color"
-    )
-
-    val colorScheme = MaterialTheme.colorScheme
-    val animatedContainerColor = androidx.compose.ui.graphics.lerp(
-        Color(0xFF000000).copy(alpha = 0.7f), // Obsidian glass base
-        Color(0xFF0A0A0A).copy(alpha = 0.8f), // Slightly more opaque when scrolled
-        containerColor
-    )
-
-    val appBarColors = TopAppBarDefaults.topAppBarColors(
-        containerColor = animatedContainerColor,
-        scrolledContainerColor = animatedContainerColor,
-        navigationIconContentColor = Color.White,
-        titleContentColor = Color.White,
-        actionIconContentColor = Color.White
-    )
-
-    val roundedShape = remember(showScrolledColor) {
-        RoundedCornerShape(
-            bottomStart = if (showScrolledColor) 16.dp else 0.dp,
-            bottomEnd = if (showScrolledColor) 16.dp else 0.dp
-        )
+    // Custom actions
+    val actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
+        if (currentRoute == ROUTE_LOG && isLogSearching) {
+            if (logSearchQuery.isNotEmpty()) {
+                IconButton(
+                    onClick = { onLogSearchQueryChange("") },
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                ) {
+                    Icon(
+                        HyperIcons.Clear,
+                        contentDescription = stringResource(R.string.clear_search),
+                        tint = colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        } else {
+            TopAppBarActions(
+                currentRoute = currentRoute,
+                onCreateNewConfigFileAndEdit = onCreateNewConfigFileAndEdit,
+                onImportConfigFromClipboard = onImportConfigFromClipboard,
+                onPerformExport = onPerformExport,
+                onPerformBackup = onPerformBackup,
+                onPerformRestore = onPerformRestore,
+                onSwitchVpnService = onSwitchVpnService,
+                controlMenuClickable = controlMenuClickable,
+                isServiceEnabled = isServiceEnabled,
+                logViewModel = logViewModel,
+                onLogSearchingChange = onLogSearchingChange,
+                mainViewModel = mainViewModel
+            )
+        }
     }
 
-    Surface(
-        modifier = Modifier
-            .shadow(
-                elevation = elevation.dp,
-                shape = roundedShape,
-                spotColor = colorScheme.primary.copy(alpha = 0.1f),
-                ambientColor = colorScheme.primary.copy(alpha = 0.05f)
-            ),
-        color = animatedContainerColor,
-        tonalElevation = if (showScrolledColor) 2.dp else 0.dp,
-        shape = roundedShape
-    ) {
-        CenterAlignedTopAppBar(
-            title = {
-                if (currentRoute == "log" && isLogSearching) {
-                    TextField(
-                        value = logSearchQuery,
-                        onValueChange = onLogSearchQueryChange,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(focusRequester),
-                        placeholder = { 
-                            Text(
-                                text = stringResource(R.string.search),
-                                style = MaterialTheme.typography.bodyLarge
-                            ) 
-                        },
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(
-                            fontWeight = FontWeight.Medium
-                        ),
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent,
-                            disabledContainerColor = Color.Transparent,
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent,
-                            disabledIndicatorColor = Color.Transparent,
-                            focusedTextColor = colorScheme.onSurface,
-                            unfocusedTextColor = colorScheme.onSurface,
-                            focusedPlaceholderColor = colorScheme.onSurfaceVariant,
-                            unfocusedPlaceholderColor = colorScheme.onSurfaceVariant
-                        )
-                    )
-                } else {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.SemiBold,
-                            letterSpacing = (-0.3).sp
-                        ),
-                        color = Color.White // High contrast on obsidian
-                    )
-                }
-            },
-            navigationIcon = {
-                if (currentRoute == "log" && isLogSearching) {
-                    IconButton(
-                        onClick = {
-                            onLogSearchingChange(false)
-                            onLogSearchQueryChange("")
-                        },
-                        modifier = Modifier.padding(horizontal = 4.dp)
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.close_search),
-                            tint = colorScheme.onSurface
-                        )
-                    }
-                }
-            },
-            actions = {
-                if (currentRoute == "log" && isLogSearching) {
-                    if (logSearchQuery.isNotEmpty()) {
-                        IconButton(
-                            onClick = { onLogSearchQueryChange("") },
-                            modifier = Modifier.padding(horizontal = 4.dp)
-                        ) {
+    // Use HyperTopAppBar for standard cases, but handle log search specially
+    if (currentRoute == ROUTE_LOG && isLogSearching) {
+        // Special case: log search mode - use custom implementation
+        val showScrolledColor = remember(
+            logListState
+        ) {
+            derivedStateOf {
+                logListState.firstVisibleItemIndex > 0 || logListState.firstVisibleItemScrollOffset > 0
+            }
+        }
+
+        val elevation by animateFloatAsState(
+            targetValue = if (showScrolledColor.value) 3f else 0f,
+            animationSpec = tween(durationMillis = 300),
+            label = "topbar_elevation"
+        )
+
+        val containerColor by animateFloatAsState(
+            targetValue = if (showScrolledColor.value) 1f else 0f,
+            animationSpec = tween(durationMillis = 300),
+            label = "topbar_color"
+        )
+
+        val animatedContainerColor = androidx.compose.ui.graphics.lerp(
+            Color(0xFF000000).copy(alpha = 0.7f),
+            Color(0xFF0A0A0A).copy(alpha = 0.8f),
+            containerColor
+        )
+
+        val roundedShape = remember(showScrolledColor.value) {
+            RoundedCornerShape(
+                bottomStart = if (showScrolledColor.value) 16.dp else 0.dp,
+                bottomEnd = if (showScrolledColor.value) 16.dp else 0.dp
+            )
+        }
+
+        Surface(
+            modifier = Modifier
+                .shadow(
+                    elevation = elevation.dp,
+                    shape = roundedShape,
+                    spotColor = colorScheme.primary.copy(alpha = 0.1f),
+                    ambientColor = colorScheme.primary.copy(alpha = 0.05f)
+                ),
+            color = animatedContainerColor,
+            tonalElevation = if (showScrolledColor.value) 2.dp else 0.dp,
+            shape = roundedShape
+        ) {
+            CenterAlignedTopAppBar(
+                title = titleContent,
+                navigationIcon = {
+                    onNavigationIconClick?.let {
+                        IconButton(onClick = it) {
                             Icon(
-                                Icons.Default.Clear,
-                                contentDescription = stringResource(R.string.clear_search),
-                                tint = colorScheme.onSurfaceVariant
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(R.string.close_search),
+                                tint = Color.White
                             )
                         }
                     }
-                } else {
-                    TopAppBarActions(
-                        currentRoute = currentRoute,
-                        onCreateNewConfigFileAndEdit = onCreateNewConfigFileAndEdit,
-                        onImportConfigFromClipboard = onImportConfigFromClipboard,
-                        onPerformExport = onPerformExport,
-                        onPerformBackup = onPerformBackup,
-                        onPerformRestore = onPerformRestore,
-                        onSwitchVpnService = onSwitchVpnService,
-                        controlMenuClickable = controlMenuClickable,
-                        isServiceEnabled = isServiceEnabled,
-                        logViewModel = logViewModel,
-                        onLogSearchingChange = onLogSearchingChange,
-                        mainViewModel = mainViewModel
-                    )
-                }
-            },
-            colors = appBarColors
+                },
+                actions = actions,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = animatedContainerColor,
+                    scrolledContainerColor = animatedContainerColor,
+                    navigationIconContentColor = Color.White,
+                    titleContentColor = Color.White,
+                    actionIconContentColor = Color.White
+                ),
+                scrollBehavior = scrollBehavior
+            )
+        }
+    } else {
+        // Standard case: use HyperTopAppBar
+        HyperTopAppBar(
+            title = title,
+            scrollBehavior = scrollBehavior,
+            onNavigationIconClick = onNavigationIconClick,
+            isBackEnabled = !isRootScreen,
+            actions = actions
         )
     }
 }
@@ -471,7 +525,7 @@ private fun ConfigActions(
         }
     ) {
         Icon(
-            Icons.Default.MoreVert,
+            HyperIcons.MoreVert,
             contentDescription = stringResource(R.string.more)
         )
     }
@@ -538,7 +592,7 @@ private fun LogActions(
         enabled = hasLogs
     ) {
         Icon(
-            Icons.Default.Delete,
+            HyperIcons.Delete,
             contentDescription = "Clear logs"
         )
     }
@@ -549,7 +603,7 @@ private fun LogActions(
         }
     ) {
         Icon(
-            Icons.Default.MoreVert,
+            HyperIcons.MoreVert,
             contentDescription = stringResource(R.string.more)
         )
     }
@@ -609,7 +663,7 @@ private fun SettingsActions(
         }
     ) {
         Icon(
-            Icons.Default.MoreVert,
+            HyperIcons.MoreVert,
             contentDescription = stringResource(R.string.more)
         )
     }
@@ -667,7 +721,7 @@ private fun StatsActions(
         }
     ) {
         Icon(
-            Icons.Default.MoreVert,
+            HyperIcons.MoreVert,
             contentDescription = stringResource(R.string.more)
         )
     }

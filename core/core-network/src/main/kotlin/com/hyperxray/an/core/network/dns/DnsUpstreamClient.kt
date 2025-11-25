@@ -7,6 +7,7 @@ import kotlinx.coroutines.CompletableDeferred
 import okhttp3.OkHttpClient
 import okhttp3.dnsoverhttps.DnsOverHttps
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -507,7 +508,7 @@ class DnsUpstreamClient(
     }
     
     /**
-     * Query a single DNS server via UDP
+     * Query a single DNS server via UDP with retry logic
      * Uses SafeSocket to prevent "Closed Pipe" crashes
      */
     private suspend fun queryDnsServerUdp(
@@ -517,61 +518,66 @@ class DnsUpstreamClient(
         timeoutMs: Long
     ): ByteArray? {
         return supervisorScope {
-            // Use ephemeral socket for this query to avoid race conditions
-            val safeSocket = socketPool.createEphemeralSocket(timeoutMs)
-            
+            // Wrap critical DNS query with retry logic
             try {
-                // Compress DNS query if possible
-                val compressedQuery = DnsCompression.compressQuery(queryData, hostname)
-                
-                val requestPacket = java.net.DatagramPacket(
-                    compressedQuery,
-                    compressedQuery.size,
-                    InetSocketAddress(dnsServer, DNS_PORT)
-                )
-                
-                val sendStart = System.currentTimeMillis()
-                
-                // Robust send with error handling
-                if (!safeSocket.send(requestPacket)) {
-                    return@supervisorScope null
+                retryWithBackoff(times = 3, initialDelay = 100, factor = 2.0) {
+                    // Use ephemeral socket for this query to avoid race conditions
+                    val safeSocket = socketPool.createEphemeralSocket(timeoutMs)
+                    
+                    try {
+                        // Compress DNS query if possible
+                        val compressedQuery = DnsCompression.compressQuery(queryData, hostname)
+                        
+                        val requestPacket = java.net.DatagramPacket(
+                            compressedQuery,
+                            compressedQuery.size,
+                            InetSocketAddress(dnsServer, DNS_PORT)
+                        )
+                        
+                        val sendStart = System.currentTimeMillis()
+                        
+                        // Robust send with error handling
+                        if (!safeSocket.send(requestPacket)) {
+                            throw IOException("Failed to send DNS query packet")
+                        }
+                        
+                        // Robust receive with error handling
+                        val responseBuffer = ByteArray(BUFFER_SIZE)
+                        val responsePacket = java.net.DatagramPacket(responseBuffer, responseBuffer.size)
+                        
+                        if (!safeSocket.receive(responsePacket)) {
+                            throw IOException("Failed to receive DNS response packet")
+                        }
+                        
+                        val response = ByteArray(responsePacket.length)
+                        System.arraycopy(responsePacket.data, 0, response, 0, responsePacket.length)
+                        
+                        val elapsed = System.currentTimeMillis() - sendStart
+                        Log.d(TAG, "📥 [DIRECT] DNS response received via direct UDP from ${dnsServer.hostAddress}: ${response.size} bytes (${elapsed}ms)")
+                        
+                        // Update adaptive timeout based on performance
+                        val currentTimeout = adaptiveTimeouts[dnsServer.hostAddress] ?: DEFAULT_TIMEOUT_MS
+                        val newTimeout = when {
+                            elapsed < currentTimeout * 0.7 -> (currentTimeout * 0.9).toLong().coerceAtLeast((DEFAULT_TIMEOUT_MS * 0.5).toLong())
+                            elapsed > currentTimeout * 1.5 -> (currentTimeout * 1.2).toLong().coerceAtMost(MAX_TIMEOUT_MS)
+                            else -> currentTimeout
+                        }
+                        adaptiveTimeouts[dnsServer.hostAddress] = newTimeout
+                        
+                        // Update performance stats for this DNS server (success)
+                        updateDnsServerStats(dnsServer, elapsed, success = true)
+                        
+                        response
+                    } finally {
+                        safeSocket.close()
+                    }
                 }
-                
-                // Robust receive with error handling
-                val responseBuffer = ByteArray(BUFFER_SIZE)
-                val responsePacket = java.net.DatagramPacket(responseBuffer, responseBuffer.size)
-                
-                if (!safeSocket.receive(responsePacket)) {
-                    return@supervisorScope null
-                }
-                
-                val response = ByteArray(responsePacket.length)
-                System.arraycopy(responsePacket.data, 0, response, 0, responsePacket.length)
-                
-                val elapsed = System.currentTimeMillis() - sendStart
-                Log.d(TAG, "📥 [DIRECT] DNS response received via direct UDP from ${dnsServer.hostAddress}: ${response.size} bytes (${elapsed}ms)")
-                
-                // Update adaptive timeout based on performance
-                val currentTimeout = adaptiveTimeouts[dnsServer.hostAddress] ?: DEFAULT_TIMEOUT_MS
-                val newTimeout = when {
-                    elapsed < currentTimeout * 0.7 -> (currentTimeout * 0.9).toLong().coerceAtLeast((DEFAULT_TIMEOUT_MS * 0.5).toLong())
-                    elapsed > currentTimeout * 1.5 -> (currentTimeout * 1.2).toLong().coerceAtMost(MAX_TIMEOUT_MS)
-                    else -> currentTimeout
-                }
-                adaptiveTimeouts[dnsServer.hostAddress] = newTimeout
-                
-                // Update performance stats for this DNS server (success)
-                updateDnsServerStats(dnsServer, elapsed, success = true)
-                
-                response
             } catch (e: CancellationException) {
                 null
             } catch (e: Exception) {
-                // Try SOCKS5 fallback if available
-                Log.d(TAG, "⚠️ [DIRECT] Direct UDP failed for ${dnsServer.hostAddress}: ${e.message}, trying SOCKS5 fallback...")
+                // Try SOCKS5 fallback if available after retries exhausted
+                Log.d(TAG, "⚠️ [DIRECT] Direct UDP failed for ${dnsServer.hostAddress} after retries: ${e.message}, trying SOCKS5 fallback...")
                 trySocks5Fallback(queryData, hostname, dnsServer, timeoutMs)
-            } finally {
-                safeSocket.close()
             }
         }
     }

@@ -61,15 +61,23 @@ fun AggregatedTelemetry.toFeatureState(): FeatureAggregatedTelemetry {
 private fun com.hyperxray.an.core.network.dns.DnsCacheManager.DnsCacheMetrics.toFeatureState(): FeatureDnsCacheStats {
     return FeatureDnsCacheStats(
         entryCount = entryCount,
-        memoryUsageMB = memoryUsageBytes / (1024 * 1024), // Convert bytes to MB
-        memoryLimitMB = memoryLimitBytes / (1024 * 1024), // Convert bytes to MB
+        memoryUsageMB = (memoryUsageBytes / (1024 * 1024)).toLong(), // Convert bytes to MB
+        memoryLimitMB = (memoryLimitBytes / (1024 * 1024)).toLong(), // Convert bytes to MB
         memoryUsagePercent = memoryUsagePercent,
         hits = hits,
         misses = misses,
         hitRate = hitRate,
         avgDomainHitRate = avgDomainHitRate,
         avgHitLatencyMs = avgHitLatencyMs,
-        avgMissLatencyMs = avgMissLatencyMs
+        avgMissLatencyMs = avgMissLatencyMs,
+        avgTtlSeconds = avgTtlSeconds,
+        activeEntries = activeEntries.map { entry ->
+            com.hyperxray.an.feature.dashboard.DnsCacheEntryUiModel(
+                domain = entry.domain,
+                ips = entry.ips,
+                expiryTime = entry.expiryTime
+            )
+        }
     )
 }
 
@@ -100,6 +108,9 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
             )
     
     // Connect directly to DnsCacheManager's StateFlow and map to feature state
+    // CRITICAL: Error handling returns default "zero" state instead of null to prevent flow termination
+    // CRITICAL: Using SharingStarted.Lazily to keep subscription alive - metrics job runs continuously
+    // and we want to ensure StateFlow updates are always available when UI subscribes
     override val dnsCacheStats: StateFlow<FeatureDnsCacheStats?> =
         DnsCacheManager.dashboardStats
             .map { metrics ->
@@ -107,17 +118,45 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
                     metrics.toFeatureState()
                 } catch (e: Exception) {
                     Log.e(TAG, "Error converting DNS cache metrics to feature state", e)
-                    null
+                    // Return default "zero" state instead of null to prevent flow termination
+                    FeatureDnsCacheStats(
+                        entryCount = 0,
+                        memoryUsageMB = 0L,
+                        memoryLimitMB = 0L,
+                        memoryUsagePercent = 0,
+                        hits = 0L,
+                        misses = 0L,
+                        hitRate = 0,
+                        avgDomainHitRate = 0,
+                        avgHitLatencyMs = 0.0,
+                        avgMissLatencyMs = 0.0,
+                        avgTtlSeconds = 0L,
+                        activeEntries = emptyList()
+                    )
                 }
             }
             .stateIn(
                 scope = mainViewModel.viewModelScope,
-                started = SharingStarted.WhileSubscribed(5000),
+                started = SharingStarted.Lazily, // Keep subscription alive - metrics job runs continuously
                 initialValue = try {
                     DnsCacheManager.dashboardStats.value.toFeatureState()
                 } catch (e: Exception) {
                     Log.e(TAG, "Error getting initial DNS cache metrics", e)
-                    null
+                    // Return default "zero" state instead of null
+                    FeatureDnsCacheStats(
+                        entryCount = 0,
+                        memoryUsageMB = 0L,
+                        memoryLimitMB = 0L,
+                        memoryUsagePercent = 0,
+                        hits = 0L,
+                        misses = 0L,
+                        hitRate = 0,
+                        avgDomainHitRate = 0,
+                        avgHitLatencyMs = 0.0,
+                        avgMissLatencyMs = 0.0,
+                        avgTtlSeconds = 0L,
+                        activeEntries = emptyList()
+                    )
                 }
             )
     
@@ -152,10 +191,17 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
                 // Use prefs to get context (prefs has access to Application)
                 val context = mainViewModel.prefs.getContext()
                 try {
+                    // Initialize if not already initialized
                     DnsCacheManager.initialize(context)
-                    // StateFlow is automatically updated by DnsCacheManager's metrics update job
-                    // No manual update needed - the StateFlow connection handles it
-                    Log.d(TAG, "DNS cache stats StateFlow connected and will update automatically")
+                    
+                    // CRITICAL: Ensure metrics job is running even if already initialized
+                    // This handles the case where the job was cancelled or failed
+                    // and the UI is resubscribing after being away
+                    DnsCacheManager.ensureMetricsJobRunning()
+                    
+                    // Get current metrics to verify StateFlow is working
+                    val currentMetrics = DnsCacheManager.dashboardStats.value
+                    Log.i(TAG, "✅ DNS cache stats StateFlow connected: entries=${currentMetrics.entryCount}, hits=${currentMetrics.hits}, misses=${currentMetrics.misses}, hitRate=${currentMetrics.hitRate}%")
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to initialize DnsCacheManager: ${e.message}", e)
                 }

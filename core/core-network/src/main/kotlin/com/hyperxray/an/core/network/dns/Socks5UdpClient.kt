@@ -4,6 +4,7 @@ import android.util.Log
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.io.IOException
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -91,6 +92,7 @@ class Socks5UdpClient(
     /**
      * Establish SOCKS5 connection and get UDP relay endpoint
      * Also starts background response listener
+     * Uses exponential backoff retry for network resilience
      */
     suspend fun establish(): Boolean = withContext(Dispatchers.IO) {
         if (isShuttingDown.get()) {
@@ -98,79 +100,81 @@ class Socks5UdpClient(
             return@withContext false
         }
         
-        try {
-            // Close existing connection if any
-            closeInternal()
-            
-            // Connect to SOCKS5 proxy via TCP
-            tcpSocket = Socket().apply {
-                soTimeout = 10000 // 10 seconds
-                connect(InetSocketAddress(proxyAddress, proxyPort), 10000)
+        return@withContext try {
+            retryWithBackoff(times = 3, initialDelay = 200, factor = 2.0) {
+                // Close existing connection if any
+                closeInternal()
+                
+                // Connect to SOCKS5 proxy via TCP
+                tcpSocket = Socket().apply {
+                    soTimeout = 10000 // 10 seconds
+                    connect(InetSocketAddress(proxyAddress, proxyPort), 10000)
+                }
+                
+                val input = tcpSocket!!.getInputStream()
+                val output = tcpSocket!!.getOutputStream()
+                
+                // SOCKS5 handshake: No authentication
+                // Send: VER(1) + NMETHODS(1) + METHODS(1) = [0x05, 0x01, 0x00]
+                output.write(byteArrayOf(0x05, 0x01, 0x00))
+                output.flush()
+                
+                // Receive: VER(1) + METHOD(1) = [0x05, 0x00]
+                val handshakeResponse = ByteArray(2)
+                input.read(handshakeResponse)
+                if (handshakeResponse[0] != 0x05.toByte() || handshakeResponse[1] != 0x00.toByte()) {
+                    Log.e(TAG, "SOCKS5 handshake failed: ${handshakeResponse.joinToString { "%02x".format(it) }}")
+                    throw IOException("SOCKS5 handshake failed: ${handshakeResponse.joinToString { "%02x".format(it) }}")
+                }
+                
+                // UDP ASSOCIATE request
+                // Send: VER(1) + CMD(1) + RSV(1) + ATYP(1) + ADDR(4) + PORT(2)
+                // CMD = 0x03 (UDP ASSOCIATE), ATYP = 0x01 (IPv4), ADDR = 0.0.0.0, PORT = 0
+                val udpAssociateRequest = byteArrayOf(
+                    0x05, // VER
+                    0x03, // CMD: UDP ASSOCIATE
+                    0x00, // RSV
+                    0x01, // ATYP: IPv4
+                    0x00, 0x00, 0x00, 0x00, // ADDR: 0.0.0.0
+                    0x00, 0x00 // PORT: 0
+                )
+                output.write(udpAssociateRequest)
+                output.flush()
+                
+                // Receive UDP ASSOCIATE response
+                // VER(1) + REP(1) + RSV(1) + ATYP(1) + BND.ADDR(4) + BND.PORT(2)
+                val udpAssociateResponse = ByteArray(10)
+                input.read(udpAssociateResponse)
+                
+                if (udpAssociateResponse[0] != 0x05.toByte() || udpAssociateResponse[1] != 0x00.toByte()) {
+                    Log.e(TAG, "SOCKS5 UDP ASSOCIATE failed: REP=${udpAssociateResponse[1]}")
+                    throw IOException("SOCKS5 UDP ASSOCIATE failed: REP=${udpAssociateResponse[1]}")
+                }
+                
+                // Extract UDP relay endpoint
+                val addrBytes = udpAssociateResponse.sliceArray(4..7)
+                udpRelayAddress = InetAddress.getByAddress(addrBytes)
+                udpRelayPort = ((udpAssociateResponse[8].toInt() and 0xFF) shl 8) or (udpAssociateResponse[9].toInt() and 0xFF)
+                
+                // Create UDP socket for SOCKS5 relay
+                udpSocket = DatagramSocket().apply {
+                    soTimeout = 5000 // Default timeout for receive operations
+                }
+                
+                // Start background response listener
+                startResponseListener()
+                
+                // Start keep-alive monitor
+                startKeepAliveMonitor()
+                
+                isEstablished.set(true)
+                Log.i(TAG, "✅ SOCKS5 UDP ASSOCIATE established: ${udpRelayAddress?.hostAddress}:$udpRelayPort")
+                true
             }
-            
-            val input = tcpSocket!!.getInputStream()
-            val output = tcpSocket!!.getOutputStream()
-            
-            // SOCKS5 handshake: No authentication
-            // Send: VER(1) + NMETHODS(1) + METHODS(1) = [0x05, 0x01, 0x00]
-            output.write(byteArrayOf(0x05, 0x01, 0x00))
-            output.flush()
-            
-            // Receive: VER(1) + METHOD(1) = [0x05, 0x00]
-            val handshakeResponse = ByteArray(2)
-            input.read(handshakeResponse)
-            if (handshakeResponse[0] != 0x05.toByte() || handshakeResponse[1] != 0x00.toByte()) {
-                Log.e(TAG, "SOCKS5 handshake failed: ${handshakeResponse.joinToString { "%02x".format(it) }}")
-                return@withContext false
-            }
-            
-            // UDP ASSOCIATE request
-            // Send: VER(1) + CMD(1) + RSV(1) + ATYP(1) + ADDR(4) + PORT(2)
-            // CMD = 0x03 (UDP ASSOCIATE), ATYP = 0x01 (IPv4), ADDR = 0.0.0.0, PORT = 0
-            val udpAssociateRequest = byteArrayOf(
-                0x05, // VER
-                0x03, // CMD: UDP ASSOCIATE
-                0x00, // RSV
-                0x01, // ATYP: IPv4
-                0x00, 0x00, 0x00, 0x00, // ADDR: 0.0.0.0
-                0x00, 0x00 // PORT: 0
-            )
-            output.write(udpAssociateRequest)
-            output.flush()
-            
-            // Receive UDP ASSOCIATE response
-            // VER(1) + REP(1) + RSV(1) + ATYP(1) + BND.ADDR(4) + BND.PORT(2)
-            val udpAssociateResponse = ByteArray(10)
-            input.read(udpAssociateResponse)
-            
-            if (udpAssociateResponse[0] != 0x05.toByte() || udpAssociateResponse[1] != 0x00.toByte()) {
-                Log.e(TAG, "SOCKS5 UDP ASSOCIATE failed: REP=${udpAssociateResponse[1]}")
-                return@withContext false
-            }
-            
-            // Extract UDP relay endpoint
-            val addrBytes = udpAssociateResponse.sliceArray(4..7)
-            udpRelayAddress = InetAddress.getByAddress(addrBytes)
-            udpRelayPort = ((udpAssociateResponse[8].toInt() and 0xFF) shl 8) or (udpAssociateResponse[9].toInt() and 0xFF)
-            
-            // Create UDP socket for SOCKS5 relay
-            udpSocket = DatagramSocket().apply {
-                soTimeout = 5000 // Default timeout for receive operations
-            }
-            
-            // Start background response listener
-            startResponseListener()
-            
-            // Start keep-alive monitor
-            startKeepAliveMonitor()
-            
-            isEstablished.set(true)
-            Log.i(TAG, "✅ SOCKS5 UDP ASSOCIATE established: ${udpRelayAddress?.hostAddress}:$udpRelayPort")
-            return@withContext true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to establish SOCKS5 UDP proxy: ${e.message}", e)
+            Log.e(TAG, "Failed to establish SOCKS5 UDP proxy after retries: ${e.message}", e)
             closeInternal()
-            return@withContext false
+            false
         }
     }
     
@@ -433,12 +437,9 @@ class Socks5UdpClient(
             val relayAddr = udpRelayAddress!!
             val relayPort = udpRelayPort
             
-            // Send with mutex protection (serialize writes)
-            var sendSuccess = false
-            var retries = 0
-            
-            while (!sendSuccess && retries <= MAX_RETRIES) {
-                try {
+            // Send with mutex protection and retry logic
+            try {
+                retryWithBackoff(times = 3, initialDelay = 100, factor = 2.0) {
                     writeMutex.withLock {
                         val socket = udpSocket
                         if (socket == null || socket.isClosed) {
@@ -447,24 +448,12 @@ class Socks5UdpClient(
                         
                         val packet = DatagramPacket(wrapped, wrapped.size, relayAddr, relayPort)
                         socket.send(packet)
-                        sendSuccess = true
                         Log.d(TAG, "📤 Sent DNS query via SOCKS5: TXID=0x%04x, ${data.size} bytes".format(transactionId))
                     }
-                } catch (e: SocketException) {
-                    retries++
-                    if (retries <= MAX_RETRIES) {
-                        Log.w(TAG, "Send failed (attempt $retries/$MAX_RETRIES), reconnecting...")
-                        if (!ensureConnection()) {
-                            throw e
-                        }
-                        delay(100) // Brief delay before retry
-                    } else {
-                        throw e
-                    }
                 }
-            }
-            
-            if (!sendSuccess) {
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send UDP packet after retries: ${e.message}")
+                SocketMetrics.recordPacketError()
                 pendingResponses.remove(transactionId)
                 return@withContext null
             }
@@ -483,6 +472,7 @@ class Socks5UdpClient(
             return@withContext response
         } catch (e: Exception) {
             Log.e(TAG, "Error in sendUdpAndReceive: ${e.message}", e)
+            SocketMetrics.recordPacketError()
             pendingResponses.remove(transactionId)
             return@withContext null
         } finally {
@@ -519,6 +509,7 @@ class Socks5UdpClient(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send UDP through SOCKS5: ${e.message}", e)
+            SocketMetrics.recordPacketError()
             false
         }
     }

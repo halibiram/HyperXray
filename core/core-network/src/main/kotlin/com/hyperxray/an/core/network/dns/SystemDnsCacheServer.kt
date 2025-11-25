@@ -246,12 +246,13 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                 // Forward to upstream DNS servers with Happy Eyeballs
                 val responseData = upstreamClient.forwardQuery(queryData, domain)
                 if (responseData != null) {
-                    // Parse response with TTL
-                    val parseResult = DnsResponseParser.parseResponseWithTtl(responseData, domain)
-                    if (parseResult.addresses.isNotEmpty()) {
-                        // Save to cache
-                        DnsCacheManager.saveToCache(domain, parseResult.addresses)
-                        Log.i(TAG, "✅ DNS resolved and cached (resolveDomain): $domain -> ${parseResult.addresses.map { it.hostAddress ?: "unknown" }} (TTL: ${parseResult.ttl ?: "N/A"}s)")
+                // Parse response with TTL
+                val parseResult = DnsResponseParser.parseResponseWithTtl(responseData, domain)
+                if (parseResult.addresses.isNotEmpty()) {
+                    // Save to cache with actual TTL from DNS response
+                    val ttl = parseResult.ttl ?: null // Use null to fallback to optimized TTL
+                    DnsCacheManager.saveToCache(domain, parseResult.addresses, ttl)
+                    Log.i(TAG, "✅ DNS resolved and cached (resolveDomain): $domain -> ${parseResult.addresses.map { it.hostAddress ?: "unknown" }} (TTL: ${parseResult.ttl ?: "N/A"}s)")
                         // Track domain access for warmup manager
                         warmupManager.trackDomainAccess(domain)
                         return@withContext parseResult.addresses
@@ -407,8 +408,9 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
                 // Parse upstream response with TTL
                 val parseResult = DnsResponseParser.parseResponseWithTtl(upstreamResponse, hostname)
                 if (parseResult.addresses.isNotEmpty()) {
-                    // Save to cache
-                    DnsCacheManager.saveToCache(hostname, parseResult.addresses)
+                    // Save to cache with actual TTL from DNS response
+                    val ttl = parseResult.ttl ?: null // Use null to fallback to optimized TTL
+                    DnsCacheManager.saveToCache(hostname, parseResult.addresses, ttl)
                     Log.i(TAG, "✅ DNS resolved from upstream and cached: $hostname -> ${parseResult.addresses.map { it.hostAddress ?: "unknown" }} (TTL: ${parseResult.ttl ?: "N/A"}s)")
                     
                     // Send response to client

@@ -1051,7 +1051,9 @@ fun DashboardScreen(
                     hitRate = 0,
                     avgDomainHitRate = 0,
                     avgHitLatencyMs = 0.0,
-                    avgMissLatencyMs = 0.0
+                    avgMissLatencyMs = 0.0,
+                    avgTtlSeconds = 0L,
+                    activeEntries = emptyList()
                 ),
                 gradientColors = dnsCacheGradient
             )

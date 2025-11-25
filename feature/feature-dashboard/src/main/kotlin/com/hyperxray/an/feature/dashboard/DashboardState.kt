@@ -54,6 +54,15 @@ data class AggregatedTelemetry(
 )
 
 /**
+ * DNS Cache entry UI model
+ */
+data class DnsCacheEntryUiModel(
+    val domain: String,
+    val ips: List<String>,
+    val expiryTime: Long // Unix timestamp in seconds when entry expires
+)
+
+/**
  * DNS Cache statistics
  */
 data class DnsCacheStats(
@@ -66,7 +75,9 @@ data class DnsCacheStats(
     val hitRate: Int,
     val avgDomainHitRate: Int,
     val avgHitLatencyMs: Double,
-    val avgMissLatencyMs: Double
+    val avgMissLatencyMs: Double,
+    val avgTtlSeconds: Long, // Average TTL of cached entries
+    val activeEntries: List<DnsCacheEntryUiModel> // Top 100 most recently updated entries
 )
 
 /**

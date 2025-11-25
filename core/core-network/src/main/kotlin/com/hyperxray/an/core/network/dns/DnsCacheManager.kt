@@ -16,6 +16,8 @@ import kotlin.concurrent.write
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 private const val TAG = "DnsCacheManager"
 private const val CACHE_FILE_NAME = "dns_cache.json"
@@ -66,6 +68,10 @@ object DnsCacheManager {
     private val cacheHits = AtomicLong(0L)
     private val cacheMisses = AtomicLong(0L)
     
+    // TTL tracking for average calculation
+    private val totalTtlSeconds = AtomicLong(0L)
+    private val ttlSampleCount = AtomicLong(0L)
+    
     // Latency tracking using exponential moving average (prevents overflow)
     // avgHitLatency: Average latency for cache hits (in milliseconds)
     // avgMissLatency: Average latency for cache misses (in milliseconds)
@@ -93,7 +99,9 @@ object DnsCacheManager {
             avgHitLatencyMs = 0.0,
             avgMissLatencyMs = 0.0,
             avgDomainHitRate = 0,
-            topDomains = emptyList()
+            topDomains = emptyList(),
+            avgTtlSeconds = 0L,
+            activeEntries = emptyList()
         )
     )
     
@@ -103,12 +111,22 @@ object DnsCacheManager {
     // Metrics update job
     private var metricsUpdateJob: Job? = null
     private val metricsScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val metricsJobMutex = Mutex() // Thread-safe job management
     
     // Debounced cache I/O: Channel for triggering saves, Flow for debouncing
     private val saveTriggerChannel = Channel<Unit>(Channel.UNLIMITED)
     private var saveJob: Job? = null
     private val saveScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    /**
+     * DNS cache entry UI model for displaying cached records
+     */
+    data class DnsCacheEntryUiModel(
+        val domain: String,
+        val ips: List<String>,
+        val expiryTime: Long // Unix timestamp in seconds when entry expires
+    )
+    
     /**
      * Comprehensive DNS cache metrics data class
      * Contains all statistics needed for dashboard display
@@ -125,7 +143,9 @@ object DnsCacheManager {
         val avgHitLatencyMs: Double,
         val avgMissLatencyMs: Double,
         val avgDomainHitRate: Int, // 0-100 percentage (average hit rate across top domains)
-        val topDomains: List<DomainHitRate> // Top N domains by access count
+        val topDomains: List<DomainHitRate>, // Top N domains by access count
+        val avgTtlSeconds: Long, // Average TTL of cached entries
+        val activeEntries: List<DnsCacheEntryUiModel> // Top 100 most recently updated entries
     )
     
     /**
@@ -173,7 +193,16 @@ object DnsCacheManager {
      */
     fun initialize(context: Context) {
         if (isInitialized) {
-            Log.d(TAG, "DnsCacheManager already initialized")
+            Log.d(TAG, "DnsCacheManager already initialized, ensuring metrics job is running...")
+            // Ensure metrics job is running even if already initialized
+            // This handles cases where the job was cancelled or failed
+            try {
+                CoroutineScope(Dispatchers.Default).launch {
+                    ensureMetricsJobRunning()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to ensure metrics job running", e)
+            }
             return
         }
 
@@ -191,7 +220,7 @@ object DnsCacheManager {
             updateMetrics()
             
             isInitialized = true
-            Log.d(TAG, "DnsCacheManager initialized: ${cache.size} entries loaded, hits=${cacheHits.get()}, misses=${cacheMisses.get()}")
+            Log.i(TAG, "✅ DnsCacheManager initialized: ${cache.size} entries loaded, hits=${cacheHits.get()}, misses=${cacheMisses.get()}, metrics job started")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize DnsCacheManager", e)
             isInitialized = true // Allow operation even if cache file fails
@@ -222,14 +251,44 @@ object DnsCacheManager {
     private fun startMetricsUpdateJob() {
         metricsUpdateJob?.cancel()
         metricsUpdateJob = metricsScope.launch {
+            Log.i(TAG, "📊 Metrics update job started (updates every 500ms)")
+            var updateCount = 0
             while (isActive) {
                 try {
                     updateMetrics()
+                    updateCount++
+                    // Log every 10 updates (every 5 seconds) for visibility
+                    if (updateCount % 10 == 0) {
+                        val metrics = _dashboardStats.value
+                        Log.d(TAG, "📊 Metrics update #$updateCount: entries=${metrics.entryCount}, hits=${metrics.hits}, misses=${metrics.misses}, hitRate=${metrics.hitRate}%")
+                    }
                     delay(500) // Update every 500ms
                 } catch (e: Exception) {
                     Log.w(TAG, "Error updating metrics", e)
                     delay(1000) // Wait longer on error
                 }
+            }
+            Log.i(TAG, "📊 Metrics update job stopped (total updates: $updateCount)")
+        }
+    }
+    
+    /**
+     * Ensure metrics update job is running
+     * Checks if the job is active and restarts it if needed
+     * This is thread-safe and can be called from any coroutine context
+     * 
+     * CRITICAL: This function must be called when UI resubscribes to ensure
+     * the producer job is running even if it was cancelled or failed
+     */
+    suspend fun ensureMetricsJobRunning() {
+        metricsJobMutex.withLock {
+            val job = metricsUpdateJob
+            if (job == null || !job.isActive) {
+                Log.w(TAG, "⚠️ Metrics job is not running, restarting... (wasActive=${job?.isActive}, wasNull=${job == null})")
+                startMetricsUpdateJob()
+                Log.i(TAG, "✅ Metrics job restarted successfully")
+            } else {
+                Log.d(TAG, "✅ Metrics job is already running (isActive=${job.isActive})")
             }
         }
     }
@@ -237,9 +296,10 @@ object DnsCacheManager {
     /**
      * Update metrics and emit to StateFlow
      * Calculates all statistics including memory usage, latency, and domain hit rates
+     * This function is called periodically by the metrics update job
      */
     private fun updateMetrics() {
-        val (hits, misses, total, entryCount, memoryUsageBytes) = cacheLock.read {
+        val (hits, misses, total, entryCount, memoryUsageBytes, activeEntriesList) = cacheLock.read {
             val h = cacheHits.get()
             val m = cacheMisses.get()
             val t = totalLookups.get()
@@ -247,14 +307,38 @@ object DnsCacheManager {
             val mem = cache.entries.sumOf { (hostname, entry) ->
                 entry.estimateMemoryBytes(hostname)
             }
-            return@read Quintet(h, m, t, ec, mem)
+            
+            // Create snapshot of top 100 most recently updated entries (sorted by timestamp descending)
+            // Performance constraint: Limit to 100 entries to prevent UI lag
+            val entries = cache.entries
+                .sortedByDescending { it.value.timestamp } // Most recent first
+                .take(100) // Limit to top 100
+                .map { (hostname, entry) ->
+                    val currentTime = System.currentTimeMillis() / 1000
+                    val expiryTime = entry.timestamp + entry.ttl
+                    DnsCacheEntryUiModel(
+                        domain = hostname,
+                        ips = entry.ips,
+                        expiryTime = expiryTime
+                    )
+                }
+            
+            Sextet<Long, Long, Long, Int, Long, List<DnsCacheEntryUiModel>>(h, m, t, ec, mem, entries)
         }
         
-        // Calculate hit rate
+        // Calculate hit rate using Double to avoid integer division
         val hitRate = if (total > 0) {
-            (hits * 100.0 / total).toInt()
+            ((hits.toDouble() / total) * 100).toInt()
         } else {
             0
+        }
+        
+        // Calculate average TTL
+        val ttlCount = ttlSampleCount.get()
+        val avgTtlSeconds = if (ttlCount > 0) {
+            totalTtlSeconds.get() / ttlCount
+        } else {
+            0L
         }
         
         // Calculate memory usage
@@ -309,11 +393,15 @@ object DnsCacheManager {
             avgHitLatencyMs = avgHitLatency,
             avgMissLatencyMs = avgMissLatency,
             avgDomainHitRate = avgDomainHitRate,
-            topDomains = topDomains
+            topDomains = topDomains,
+            avgTtlSeconds = avgTtlSeconds,
+            activeEntries = activeEntriesList
         )
         
-        // Emit to StateFlow
+        // Emit to StateFlow atomically
         _dashboardStats.value = metrics
+        // Log at DEBUG level for periodic visibility (called every 500ms, so verbose would be too noisy)
+        // Detailed logging is done in startMetricsUpdateJob() every 10 updates
     }
     
     /**
@@ -325,6 +413,18 @@ object DnsCacheManager {
         val third: C,
         val fourth: D,
         val fifth: E
+    )
+    
+    /**
+     * Helper data class for returning multiple values from cacheLock.read (6 values)
+     */
+    private data class Sextet<A, B, C, D, E, F>(
+        val first: A,
+        val second: B,
+        val third: C,
+        val fourth: D,
+        val fifth: E,
+        val sixth: F
     )
     
     /**
@@ -459,20 +559,29 @@ object DnsCacheManager {
     }
     
     /**
-     * Save DNS resolution to cache with optimized TTL
+     * Save DNS resolution to cache with TTL
+     * @param hostname Domain name to cache
+     * @param addresses List of resolved IP addresses
+     * @param ttl Time-To-Live in seconds (optional, uses optimized TTL if not provided)
      */
-    fun saveToCache(hostname: String, addresses: List<InetAddress>) {
+    fun saveToCache(hostname: String, addresses: List<InetAddress>, ttl: Long? = null) {
         if (!isInitialized || cacheFile == null) {
             return
         }
 
         try {
             val ips = addresses.mapNotNull { it.hostAddress }
-            val optimizedTtl = getOptimizedTtl(hostname)
+            // Use provided TTL if available, otherwise use optimized TTL
+            val finalTtl = ttl ?: getOptimizedTtl(hostname)
+            
+            // Track TTL for average calculation
+            totalTtlSeconds.addAndGet(finalTtl)
+            ttlSampleCount.incrementAndGet()
+            
             val entry = DnsCacheEntry(
                 ips = ips,
                 timestamp = System.currentTimeMillis() / 1000,
-                ttl = optimizedTtl
+                ttl = finalTtl
             )
 
             cacheLock.write {
@@ -700,6 +809,8 @@ object DnsCacheManager {
         
         avgHitLatency = 0.0
         avgMissLatency = 0.0
+        totalTtlSeconds.set(0L)
+        ttlSampleCount.set(0L)
         
         // Update metrics immediately after clear
         updateMetrics()
