@@ -1,6 +1,7 @@
 package com.hyperxray.an.feature.dashboard.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,6 +28,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import com.hyperxray.an.feature.dashboard.DnsCacheStats
 import com.hyperxray.an.feature.dashboard.formatBytes
 import com.hyperxray.an.feature.dashboard.formatNumber
@@ -33,19 +40,41 @@ import com.hyperxray.an.feature.dashboard.formatNumber
  * 
  * @param stats DNS cache statistics data
  * @param gradientColors List of colors for the gradient effect
+ * @param onClearCache Callback invoked when the clear cache button is clicked
  */
 @Composable
 fun DnsCacheCard(
     stats: DnsCacheStats,
     gradientColors: List<Color>,
+    onClearCache: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val hapticFeedback = LocalHapticFeedback.current
+    
     AnimatedStatCard(
         title = "DNS Cache",
         iconRes = null,
         gradientColors = gradientColors,
         animationDelay = 500,
         modifier = modifier,
+        headerAction = {
+            if (onClearCache != null) {
+                IconButton(
+                    onClick = {
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onClearCache()
+                    },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Clear DNS Cache",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        },
         content = {
             Column(
                 modifier = Modifier.fillMaxWidth(),

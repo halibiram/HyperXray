@@ -23,6 +23,7 @@ class ServiceIntentHandler(
         private const val TAG = "ServiceIntentHandler"
         
         // Intent action constants (from TProxyService companion object)
+        const val ACTION_CONNECT: String = "com.hyperxray.an.CONNECT"
         const val ACTION_DISCONNECT: String = "com.hyperxray.an.DISCONNECT"
         const val ACTION_RELOAD_CONFIG: String = "com.hyperxray.an.RELOAD_CONFIG"
         const val ACTION_START: String = "com.hyperxray.an.START"
@@ -46,6 +47,15 @@ class ServiceIntentHandler(
         val action = intent.action
         AiLogHelper.i(TAG, "📥 INTENT HANDLER: Received intent action: $action")
         return when (action) {
+            ACTION_CONNECT, ACTION_START -> {
+                // ACTION_CONNECT and ACTION_START are equivalent - both start the VPN service
+                if (action == ACTION_CONNECT) {
+                    AiLogHelper.i(TAG, "🔌 INTENT HANDLER: Handling ACTION_CONNECT (same as ACTION_START)")
+                } else {
+                    AiLogHelper.i(TAG, "🚀 INTENT HANDLER: Handling ACTION_START")
+                }
+                handleStart()
+            }
             ACTION_DISCONNECT -> {
                 AiLogHelper.i(TAG, "🔌 INTENT HANDLER: Handling ACTION_DISCONNECT")
                 handleDisconnect()
@@ -53,10 +63,6 @@ class ServiceIntentHandler(
             ACTION_RELOAD_CONFIG -> {
                 AiLogHelper.i(TAG, "🔄 INTENT HANDLER: Handling ACTION_RELOAD_CONFIG")
                 handleReloadConfig()
-            }
-            ACTION_START -> {
-                AiLogHelper.i(TAG, "🚀 INTENT HANDLER: Handling ACTION_START")
-                handleStart()
             }
             else -> {
                 AiLogHelper.d(TAG, "📋 INTENT HANDLER: Handling default/unknown action: $action")
@@ -122,10 +128,36 @@ class ServiceIntentHandler(
     
     /**
      * Handles ACTION_START - starts the Xray service.
+     * 
+     * CRITICAL: Ensures service is fully initialized before starting VPN session.
      */
     private fun handleStart(): Int {
         val startTime = System.currentTimeMillis()
         AiLogHelper.i(TAG, "🚀 INTENT START: Starting Xray service")
+        
+        // CRITICAL: Check if service is properly initialized
+        if (!session.isNotificationManagerInitialized()) {
+            val errorMsg = "Service not fully initialized - cannot start VPN session"
+            Log.e(TAG, errorMsg)
+            AiLogHelper.e(TAG, "❌ INTENT START: $errorMsg")
+            // Delay and retry once - service might still be initializing
+            serviceScope.launch {
+                kotlinx.coroutines.delay(1000) // Wait 1 second for initialization
+                if (session.isNotificationManagerInitialized()) {
+                    AiLogHelper.i(TAG, "🔄 INTENT START: Service now initialized, initiating VPN session...")
+                    // Retry by calling initiateVpnSession directly instead of recursive handleStart()
+                    if (!session.prefs.disableVpn) {
+                        service.initiateVpnSession()
+                    }
+                } else {
+                    val errorIntent = Intent(ACTION_ERROR)
+                    errorIntent.setPackage(service.application.packageName)
+                    errorIntent.putExtra(EXTRA_ERROR_MESSAGE, errorMsg)
+                    service.sendBroadcast(errorIntent)
+                }
+            }
+            return android.app.Service.START_STICKY
+        }
         
         session.logFileManager.clearLogsSync()
         AiLogHelper.d(TAG, "🧹 INTENT START: Logs cleared")
@@ -162,6 +194,15 @@ class ServiceIntentHandler(
             AiLogHelper.i(TAG, "✅ INTENT START: Core-only mode started successfully")
         } else {
             AiLogHelper.i(TAG, "🚀 INTENT START: Full VPN mode (disableVpn=false), initiating VPN session")
+            
+            // CRITICAL: Broadcast ACTION_START immediately so isServiceEnabled flow updates
+            // This prevents VpnConnectionUseCase from timing out while waiting for service to be enabled
+            val successIntent = Intent(ACTION_START)
+            successIntent.setPackage(service.application.packageName)
+            service.sendBroadcast(successIntent)
+            AiLogHelper.d(TAG, "📤 INTENT START: ACTION_START broadcast sent immediately for VPN mode")
+            
+            // Initiate VPN session (this will take time, but service is now "enabled")
             service.initiateVpnSession()
         }
         
@@ -183,6 +224,13 @@ class ServiceIntentHandler(
         session.notificationManager.showConnecting()
         
         session.logFileManager.clearLogsSync()
+        
+        // CRITICAL: Broadcast ACTION_START immediately so isServiceEnabled flow updates
+        val successIntent = Intent(ACTION_START)
+        successIntent.setPackage(service.application.packageName)
+        service.sendBroadcast(successIntent)
+        AiLogHelper.d(TAG, "📤 INTENT DEFAULT: ACTION_START broadcast sent immediately")
+        
         service.initiateVpnSession()
         return android.app.Service.START_STICKY
     }

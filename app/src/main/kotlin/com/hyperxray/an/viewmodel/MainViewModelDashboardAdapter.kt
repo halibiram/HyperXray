@@ -7,6 +7,7 @@ import com.hyperxray.an.feature.dashboard.DnsCacheStats as FeatureDnsCacheStats
 import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.telemetry.AggregatedTelemetry
 import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
+import com.hyperxray.an.viewmodel.MainViewUiEvent
 import android.util.Log
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -207,6 +208,20 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing DNS cache stats: ${e.message}", e)
+            }
+        }
+    }
+    
+    override fun clearDnsCache() {
+        mainViewModel.viewModelScope.launch {
+            try {
+                DnsCacheManager.clearCache()
+                // Trigger snackbar event
+                mainViewModel.emitUiEvent(MainViewUiEvent.ShowSnackbar("DNS Cache Cleared"))
+                Log.i(TAG, "✅ DNS cache cleared successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error clearing DNS cache: ${e.message}", e)
+                mainViewModel.emitUiEvent(MainViewUiEvent.ShowSnackbar("Failed to clear DNS cache"))
             }
         }
     }

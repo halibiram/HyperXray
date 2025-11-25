@@ -142,6 +142,13 @@ class MainViewModel(
 
     private val _uiEvent = Channel<MainViewUiEvent>(Channel.BUFFERED)
     val uiEvent = _uiEvent.receiveAsFlow()
+    
+    /**
+     * Emit a UI event (for use by adapters and other internal components)
+     */
+    fun emitUiEvent(event: MainViewUiEvent) {
+        _uiEvent.trySend(event)
+    }
 
     // Config files state - delegated to ConfigRepository
     val configFiles: StateFlow<List<File>> = configRepository.configFiles
@@ -221,19 +228,10 @@ class MainViewModel(
                         setServiceEnabled(true)
                         setControlMenuClickable(true)
                         
-                        // CRITICAL: Start connection process automatically when service starts
-                        // This ensures StatusCard updates properly even if connect() wasn't called manually
-                        // BUT: Only if we're not already in a failed state to prevent retry loops
-                        delay(500)
-                        val currentState = connectionState.value
-                        if (_isServiceEnabled.value && 
-                            currentState !is com.hyperxray.an.feature.dashboard.ConnectionState.Connected &&
-                            currentState !is com.hyperxray.an.feature.dashboard.ConnectionState.Failed) {
-                            Log.d(TAG, "Service started, auto-starting connection process for StatusCard update")
-                            vpnConnectionUseCase.connect()
-                        } else if (currentState is com.hyperxray.an.feature.dashboard.ConnectionState.Failed) {
-                            Log.d(TAG, "Service started but connection is in Failed state, skipping auto-connect to prevent retry loop")
-                        }
+                        // Auto-connect is disabled by default to prevent cancellation loops
+                        // User must manually trigger connect() via UI
+                        // This prevents the issue where auto-connect cancels user-initiated connections
+                        Log.d(TAG, "Service started, auto-connect is disabled. User must manually trigger connect()")
                     }
                     is ServiceEvent.Stopped -> {
                         Log.d(TAG, "Service stopped")

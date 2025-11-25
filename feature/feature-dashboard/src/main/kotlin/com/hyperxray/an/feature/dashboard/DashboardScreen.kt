@@ -1055,7 +1055,8 @@ fun DashboardScreen(
                     avgTtlSeconds = 0L,
                     activeEntries = emptyList()
                 ),
-                gradientColors = dnsCacheGradient
+                gradientColors = dnsCacheGradient,
+                onClearCache = { viewModel.clearDnsCache() }
             )
         }
     }

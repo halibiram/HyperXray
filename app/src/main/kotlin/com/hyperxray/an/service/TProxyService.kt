@@ -100,14 +100,34 @@ class TProxyService : VpnService() {
     override fun onCreate() {
         super.onCreate()
         AiLogHelper.i(TAG, "🔧 SERVICE CREATE: TProxyService onCreate() called")
-        initializeManagers()
-        setupLogHandler()
-        setupWakeLock()
-        setupNotification()
-        setupHeartbeat()
-        dependencyManager.setup(this, session)
-        initializeXrayRunner()
-        AiLogHelper.i(TAG, "✅ SERVICE CREATE: TProxyService initialization completed")
+        
+        try {
+            // CRITICAL: Initialize managers first - must complete successfully before any other setup
+            initializeManagers()
+            
+            // Verify notificationManager was initialized successfully
+            if (!session.isNotificationManagerInitialized()) {
+                val errorMsg = "CRITICAL: notificationManager not initialized after initializeManagers()"
+                Log.e(TAG, errorMsg)
+                AiLogHelper.e(TAG, "❌ SERVICE CREATE: $errorMsg")
+                throw IllegalStateException(errorMsg)
+            }
+            
+            setupLogHandler()
+            setupWakeLock()
+            setupNotification()
+            setupHeartbeat()
+            dependencyManager.setup(this, session)
+            initializeXrayRunner()
+            AiLogHelper.i(TAG, "✅ SERVICE CREATE: TProxyService initialization completed")
+        } catch (e: Exception) {
+            val errorMsg = "CRITICAL: Service initialization failed: ${e.message}"
+            Log.e(TAG, errorMsg, e)
+            AiLogHelper.e(TAG, "❌ SERVICE CREATE: $errorMsg", e)
+            // Don't allow service to start in broken state
+            stopSelf()
+            throw RuntimeException("TProxyService initialization failed", e)
+        }
     }
 
     override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
@@ -152,15 +172,45 @@ class TProxyService : VpnService() {
 
     /**
      * Initialize all managers.
+     * 
+     * CRITICAL: This method must complete successfully before any other setup methods are called.
+     * All managers are initialized synchronously and in order to prevent race conditions.
+     * 
+     * @throws IllegalStateException if any manager initialization fails
      */
     private fun initializeManagers() {
-        session.prefs = Preferences(this)
-        session.logFileManager = LogFileManager(this)
-        session.tunInterfaceManager = TunInterfaceManager(this)
-        session.notificationManager = com.hyperxray.an.service.managers.ServiceNotificationManager(this)
-        hevSocksManager = HevSocksManager(this)
-        intentHandler = ServiceIntentHandler(session, this, serviceScope)
-        xrayLogHandler = com.hyperxray.an.service.managers.XrayLogHandler(serviceScope, this)
+        try {
+            AiLogHelper.d(TAG, "🔧 INIT MANAGERS: Starting manager initialization...")
+            
+            session.prefs = Preferences(this)
+            AiLogHelper.d(TAG, "✅ INIT MANAGERS: Preferences initialized")
+            
+            session.logFileManager = LogFileManager(this)
+            AiLogHelper.d(TAG, "✅ INIT MANAGERS: LogFileManager initialized")
+            
+            session.tunInterfaceManager = TunInterfaceManager(this)
+            AiLogHelper.d(TAG, "✅ INIT MANAGERS: TunInterfaceManager initialized")
+            
+            // CRITICAL: notificationManager must be initialized before setupNotification() is called
+            session.notificationManager = com.hyperxray.an.service.managers.ServiceNotificationManager(this)
+            AiLogHelper.d(TAG, "✅ INIT MANAGERS: ServiceNotificationManager initialized")
+            
+            hevSocksManager = HevSocksManager(this)
+            AiLogHelper.d(TAG, "✅ INIT MANAGERS: HevSocksManager initialized")
+            
+            intentHandler = ServiceIntentHandler(session, this, serviceScope)
+            AiLogHelper.d(TAG, "✅ INIT MANAGERS: ServiceIntentHandler initialized")
+            
+            xrayLogHandler = com.hyperxray.an.service.managers.XrayLogHandler(serviceScope, this)
+            AiLogHelper.d(TAG, "✅ INIT MANAGERS: XrayLogHandler initialized")
+            
+            AiLogHelper.i(TAG, "✅ INIT MANAGERS: All managers initialized successfully")
+        } catch (e: Exception) {
+            val errorMsg = "Failed to initialize managers: ${e.message}"
+            Log.e(TAG, errorMsg, e)
+            AiLogHelper.e(TAG, "❌ INIT MANAGERS: $errorMsg", e)
+            throw IllegalStateException(errorMsg, e)
+        }
     }
 
     /**
@@ -325,15 +375,41 @@ class TProxyService : VpnService() {
 
     /**
      * Setup foreground notification.
+     * 
+     * CRITICAL: This method assumes notificationManager is already initialized.
+     * Defensive checks are in place to prevent UninitializedPropertyAccessException.
      */
     private fun setupNotification() {
-        val channelName = "socks5"
-        session.notificationManager.initNotificationChannel(channelName, "VPN Service")
-        session.notificationManager.createNotification(
-            channelName = channelName,
-            contentTitle = getString(R.string.app_name),
-            contentText = "VPN service is running"
-        )
+        try {
+            // Defensive check: Verify notificationManager is initialized
+            if (!session.isNotificationManagerInitialized()) {
+                val errorMsg = "CRITICAL: notificationManager not initialized before setupNotification()"
+                Log.e(TAG, errorMsg)
+                AiLogHelper.e(TAG, "❌ SETUP NOTIFICATION: $errorMsg")
+                throw IllegalStateException(errorMsg)
+            }
+            
+            val channelName = "socks5"
+            session.notificationManager.initNotificationChannel(channelName, "VPN Service")
+            session.notificationManager.createNotification(
+                channelName = channelName,
+                contentTitle = getString(R.string.app_name),
+                contentText = "VPN service is running"
+            )
+            AiLogHelper.d(TAG, "✅ SETUP NOTIFICATION: Foreground notification setup completed")
+        } catch (e: UninitializedPropertyAccessException) {
+            val errorMsg = "CRITICAL: notificationManager accessed before initialization: ${e.message}"
+            Log.e(TAG, errorMsg, e)
+            AiLogHelper.e(TAG, "❌ SETUP NOTIFICATION: $errorMsg", e)
+            // Re-throw to prevent service from starting in broken state
+            throw IllegalStateException(errorMsg, e)
+        } catch (e: Exception) {
+            val errorMsg = "Failed to setup notification: ${e.message}"
+            Log.e(TAG, errorMsg, e)
+            AiLogHelper.e(TAG, "❌ SETUP NOTIFICATION: $errorMsg", e)
+            // Re-throw to prevent service from starting without notification
+            throw IllegalStateException(errorMsg, e)
+        }
     }
 
     /**
@@ -348,6 +424,13 @@ class TProxyService : VpnService() {
                 try {
                     val interval = TProxyUtils.calculateAdaptivePollingInterval(session.coreStatsState)
                     delay(interval)
+                    
+                    // Defensive check: Verify notificationManager is initialized before use
+                    if (!session.isNotificationManagerInitialized()) {
+                        Log.w(TAG, "⚠️ Heartbeat: notificationManager not initialized, skipping notification update")
+                        delay(30000) // Wait longer before retry
+                        continue
+                    }
                     
                     val currentChannelName = if (Preferences(this@TProxyService).disableVpn) "nosocks" else "socks5"
                     session.notificationManager.createNotification(
@@ -464,6 +547,15 @@ class TProxyService : VpnService() {
         val sessionStartTime = System.currentTimeMillis()
         AiLogHelper.i(TAG, "🚀 VPN SESSION START: initiateVpnSession() called")
         
+        // CRITICAL: Check if service is properly initialized before starting
+        if (!session.isNotificationManagerInitialized()) {
+            val errorMsg = "Service not fully initialized - notificationManager not ready"
+            Log.e(TAG, errorMsg)
+            AiLogHelper.e(TAG, "❌ VPN SESSION START: $errorMsg")
+            handleStartupError(errorMsg)
+            return
+        }
+        
         if (session.isStarting) {
             Log.d(TAG, "initiateVpnSession() already in progress, ignoring duplicate call")
             AiLogHelper.w(TAG, "⚠️ VPN SESSION START: Already in progress, ignoring duplicate call")
@@ -526,10 +618,12 @@ class TProxyService : VpnService() {
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error in initiateVpnSession()", e)
-            AiLogHelper.e(TAG, "❌ VPN SESSION START ERROR: ${e.message}", e)
+            val errorMsg = "Error in initiateVpnSession(): ${e.message}"
+            Log.e(TAG, errorMsg, e)
+            AiLogHelper.e(TAG, "❌ VPN SESSION START ERROR: $errorMsg", e)
             session.isStarting = false
-            stopSelf()
+            // Don't stop service immediately - let UseCase handle retry/disconnect
+            handleStartupError(errorMsg)
         }
     }
 
@@ -548,15 +642,27 @@ class TProxyService : VpnService() {
     }
 
     /**
-     * Handle startup error by broadcasting error and stopping service.
+     * Handle startup error by broadcasting error.
+     * 
+     * CRITICAL: Do not immediately stop service - allow retry mechanism to handle it.
+     * Only stop service if it's a critical unrecoverable error.
      */
     private fun handleStartupError(errorMessage: String) {
-        Log.e(TAG, errorMessage)
+        Log.e(TAG, "Startup error: $errorMessage")
+        AiLogHelper.e(TAG, "❌ STARTUP ERROR: $errorMessage")
+        
+        // Broadcast error to notify UI/UseCase
         val errorIntent = Intent(ACTION_ERROR)
         errorIntent.setPackage(application.packageName)
         errorIntent.putExtra(EXTRA_ERROR_MESSAGE, errorMessage)
         sendBroadcast(errorIntent)
-        stopSelf()
+        
+        // Reset starting flag to allow retry
+        session.isStarting = false
+        
+        // Only stop service if it's a critical error that prevents any retry
+        // For most errors, let the UseCase handle retry/disconnect logic
+        // Don't call stopSelf() here - let the connection process handle cleanup
     }
 
     /**
@@ -832,7 +938,14 @@ class TProxyService : VpnService() {
         }
         
         try {
-            session.notificationManager.stopForeground(removeNotification = true)
+            // Defensive check: Verify notificationManager is initialized before use
+            if (session.isNotificationManagerInitialized()) {
+                session.notificationManager.stopForeground(removeNotification = true)
+            } else {
+                Log.w(TAG, "⚠️ stopService: notificationManager not initialized, skipping stopForeground")
+            }
+        } catch (e: UninitializedPropertyAccessException) {
+            Log.w(TAG, "⚠️ stopService: notificationManager accessed before initialization, skipping", e)
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping foreground service", e)
         }
@@ -863,12 +976,22 @@ class TProxyService : VpnService() {
                 val successIntent = Intent(ACTION_START)
                 successIntent.setPackage(application.packageName)
                 sendBroadcast(successIntent)
-                session.notificationManager.initNotificationChannel("socks5", "VPN Service")
-                session.notificationManager.createNotification(
-                    channelName = "socks5",
-                    contentTitle = getString(R.string.app_name),
-                    contentText = "Connected"
-                )
+                
+                // Defensive check: Verify notificationManager is initialized before use
+                if (session.isNotificationManagerInitialized()) {
+                    try {
+                        session.notificationManager.initNotificationChannel("socks5", "VPN Service")
+                        session.notificationManager.createNotification(
+                            channelName = "socks5",
+                            contentTitle = getString(R.string.app_name),
+                            contentText = "Connected"
+                        )
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error updating notification in onStartComplete: ${e.message}", e)
+                    }
+                } else {
+                    Log.w(TAG, "⚠️ startNativeTProxy: notificationManager not initialized, skipping notification update")
+                }
             },
             notificationManager = session.notificationManager
         )

@@ -147,6 +147,28 @@ class ServiceSessionState {
     // Performance tracking
     var lastPerformanceNotificationTime: Long = 0L
     var lastLatency: Double? = null
+    
+    /**
+     * Safely check if notificationManager is initialized.
+     * Attempts to access the property and catches UninitializedPropertyAccessException
+     * if the lateinit property has not been initialized.
+     * 
+     * @return true if notificationManager is initialized, false otherwise
+     */
+    fun isNotificationManagerInitialized(): Boolean {
+        return try {
+            // Access the property - this will throw UninitializedPropertyAccessException
+            // if the lateinit property has not been initialized
+            // If we reach here, the property is initialized
+            notificationManager
+            true
+        } catch (e: kotlin.UninitializedPropertyAccessException) {
+            false
+        } catch (e: Exception) {
+            // Any other exception means we can't determine, assume not initialized for safety
+            false
+        }
+    }
 }
 
 

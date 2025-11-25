@@ -57,6 +57,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import com.hyperxray.an.feature.dashboard.ConnectionState
 import com.hyperxray.an.feature.dashboard.ConnectionStage
 import com.hyperxray.an.feature.dashboard.DisconnectionStage
@@ -90,6 +92,8 @@ fun ConnectionStatusCard(
     downlinkThroughput: Double = 0.0,
     modifier: Modifier = Modifier
 ) {
+    val hapticFeedback = LocalHapticFeedback.current
+    
     // Determine connection state properties - simple calculations, no unnecessary optimization
     val isConnected = connectionState is ConnectionState.Connected
     val isConnecting = connectionState is ConnectionState.Connecting
@@ -448,7 +452,10 @@ fun ConnectionStatusCard(
                 
                 // Toggle Button with enhanced styling
                 Button(
-                    onClick = onToggleConnection,
+                    onClick = {
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onToggleConnection()
+                    },
                     enabled = isClickable && !isConnecting && !isDisconnecting && 
                               !(isFailed && (connectionState as? ConnectionState.Failed)?.retryCountdownSeconds != null && 
                                 (connectionState as? ConnectionState.Failed)?.retryCountdownSeconds!! > 0),

@@ -48,6 +48,7 @@ import kotlinx.coroutines.delay
  * @param gradientColors List of colors for the gradient effect
  * @param content The composable content to display inside the card
  * @param animationDelay Delay in milliseconds before animation starts (for staggered effect)
+ * @param headerAction Optional composable action to display in the header (e.g., clear button)
  */
 @Composable
 fun AnimatedStatCard(
@@ -56,7 +57,8 @@ fun AnimatedStatCard(
     gradientColors: List<Color>,
     content: @Composable () -> Unit,
     modifier: Modifier = Modifier,
-    animationDelay: Long = 0
+    animationDelay: Long = 0,
+    headerAction: (@Composable () -> Unit)? = null
 ) {
     // Use key to prevent re-animation on recomposition
     val animationKey = remember(title, iconRes) { "${title}_${iconRes}" }
@@ -159,6 +161,8 @@ fun AnimatedStatCard(
                             color = Color.White // High contrast on obsidian
                         )
                     }
+                    // Header action (e.g., clear cache button)
+                    headerAction?.invoke()
                 }
                 Spacer(modifier = Modifier.height(20.dp))
                 content()

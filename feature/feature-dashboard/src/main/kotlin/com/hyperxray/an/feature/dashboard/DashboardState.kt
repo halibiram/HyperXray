@@ -96,5 +96,6 @@ interface DashboardViewModel {
     fun updateCoreStats()
     fun updateTelemetryStats()
     fun updateDnsCacheStats()
+    fun clearDnsCache()
 }
 

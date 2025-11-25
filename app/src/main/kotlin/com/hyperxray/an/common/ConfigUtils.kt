@@ -86,7 +86,6 @@ object ConfigUtils {
         jsonObject.put("policy", policyObject)
 
         // Enable debug logging for detailed troubleshooting
-        // We need to see all logs to properly diagnose UDP closed pipe issues
         val logObject = jsonObject.optJSONObject("log") ?: JSONObject()
         logObject.put("logLevel", "debug")
         jsonObject.put("log", logObject)
@@ -111,6 +110,11 @@ object ConfigUtils {
         // Apply bypass domain/IP routing rules
         applyBypassRoutingRules(prefs, jsonObject)
 
+        // CRITICAL: Convert tproxy inbounds to socks protocol
+        // tproxy requires IP_TRANSPARENT socket capability which is not available in standard Android VPN mode
+        // This causes immediate connection termination and process crashes
+        convertTproxyToSocks(jsonObject)
+
         // Ensure all outbounds have tags for stats collection
         ensureOutboundTags(jsonObject)
         
@@ -118,9 +122,14 @@ object ConfigUtils {
         // This ensures Xray can receive both TCP and UDP packets from the TUN interface
         ensureUdpSupportInDokodemoInbounds(jsonObject)
         
-        // CRITICAL: Configure UDP timeout settings to prevent closed pipe errors
+        // CRITICAL: Configure UDP timeout settings
         // This ensures UDP connections stay alive longer and are closed gracefully
         configureUdpTimeoutSettings(jsonObject)
+        
+        // CRITICAL: Remove IP_TRANSPARENT sockopt from all outbounds
+        // IP_TRANSPARENT socket option is not available in Android VPN mode
+        // This causes "operation not permitted" errors for UDP connections
+        removeIpTransparentSockopt(jsonObject)
         
         // NOTE: Port 53 routing rule removal disabled - causes startup issues
         // removePort53DnsRoutingRule(jsonObject)
@@ -398,7 +407,7 @@ object ConfigUtils {
         val connectionLimits = JSONObject()
         connectionLimits.put("connIdle", prefs.connIdleTimeout)
         connectionLimits.put("handshake", prefs.handshakeTimeout)
-        // Set to 0 for unlimited connections to prevent broken pipe errors
+        // Set to 0 for unlimited connections
         connectionLimits.put("uplinkOnly", 0)  // Unlimited
         connectionLimits.put("downlinkOnly", 0)  // Unlimited
         level0.put("connection", connectionLimits)
@@ -407,7 +416,7 @@ object ConfigUtils {
         val bufferLimits = JSONObject()
         bufferLimits.put("handshake", prefs.handshakeTimeout)
         bufferLimits.put("connIdle", prefs.connIdleTimeout)
-        // Set to 0 for unlimited buffer to prevent broken pipe errors
+        // Set to 0 for unlimited buffer
         bufferLimits.put("uplinkOnly", 0)  // Unlimited
         bufferLimits.put("downlinkOnly", 0)  // Unlimited
         // Buffer strategy: maximum throughput
@@ -742,7 +751,7 @@ object ConfigUtils {
         // Maximize connection limits
         connectionLimits.put("connIdle", prefs.extremeConnIdleTimeout)
         connectionLimits.put("handshake", prefs.extremeHandshakeTimeout)
-        // Set to 0 for unlimited - prevents connection drops and broken pipe
+        // Set to 0 for unlimited - prevents connection drops
         connectionLimits.put("uplinkOnly", 0)  // Unlimited
         connectionLimits.put("downlinkOnly", 0)  // Unlimited
 
@@ -1109,7 +1118,7 @@ object ConfigUtils {
                 put("settings", settings)
                 
                 // CRITICAL: Add allocator configuration to prevent UDP connection closure
-                // This helps prevent "closed pipe" errors by keeping UDP connections alive longer
+                // This helps keep UDP connections alive longer
                 val allocatorObject = JSONObject().apply {
                     put("strategy", "always")
                     put("concurrency", 3)
@@ -1240,12 +1249,12 @@ object ConfigUtils {
     }
 
     /**
-     * Configures UDP timeout settings to prevent closed pipe errors.
+     * Configures UDP timeout settings.
      * 
-     * UDP closed pipe errors occur when:
+     * UDP errors occur when:
      * 1. UDP connections are closed while packets are still being processed
      * 2. UDP timeout is too short, causing premature connection closure
-     * 3. UDP dispatcher tries to write to a closed pipe
+     * 3. UDP dispatcher tries to write to a closed connection
      * 
      * This function:
      * - Increases UDP connection idle timeout to prevent premature closure
@@ -1254,7 +1263,7 @@ object ConfigUtils {
      */
     @Throws(JSONException::class)
     private fun configureUdpTimeoutSettings(jsonObject: JSONObject) {
-        Log.d(TAG, "Configuring UDP timeout settings to prevent closed pipe errors")
+        Log.d(TAG, "Configuring UDP timeout settings")
         
         // Get or create policy object
         var policyObject = jsonObject.optJSONObject("policy")
@@ -1283,10 +1292,9 @@ object ConfigUtils {
         
         // CRITICAL: Increase connIdle timeout for UDP connections
         // Default is 300 seconds (5 minutes), but UDP connections need MUCH longer timeout
-        // to prevent closed pipe errors during packet processing
+        // to prevent errors during packet processing
         // Set to 1800 seconds (30 minutes) to allow UDP sessions to stay alive much longer
-        // This prevents premature closure of UDP dispatcher connections which causes
-        // "failed to write/handle UDP input > io: read/write on closed pipe" errors
+        // This prevents premature closure of UDP dispatcher connections
         // OPTIMIZATION: Increased to 3600 seconds (60 minutes) to further reduce race conditions
         // with Xray's hardcoded 1-minute inactivity timer
         val currentConnIdle = connectionSettings.optInt("connIdle", 300)
@@ -1364,6 +1372,94 @@ object ConfigUtils {
     }
     
     /**
+     * Removes IP_TRANSPARENT sockopt from all outbounds to prevent UDP connection errors.
+     * 
+     * IP_TRANSPARENT socket option is not available in Android VPN mode (non-root).
+     * When Xray-core tries to apply this option to UDP connections, it causes:
+     * - "operation not permitted" errors
+     * - UDP connection failures
+     * - "failed to apply socket options to incoming connection" errors
+     * 
+     * This function:
+     * - Scans all outbounds for streamSettings.sockopt configurations
+     * - Removes IP_TRANSPARENT related settings (tproxy, mark, etc.)
+     * - Prevents UDP connection errors in Android VPN mode
+     */
+    @Throws(JSONException::class)
+    private fun removeIpTransparentSockopt(jsonObject: JSONObject) {
+        Log.d(TAG, "Removing IP_TRANSPARENT sockopt from outbounds to prevent UDP errors")
+        
+        val outboundArray = jsonObject.optJSONArray("outbounds") ?: jsonObject.optJSONArray("outbound")
+        if (outboundArray == null) {
+            Log.d(TAG, "No outbounds found, skipping IP_TRANSPARENT sockopt removal")
+            return
+        }
+        
+        var removedCount = 0
+        for (i in 0 until outboundArray.length()) {
+            val outbound = outboundArray.getJSONObject(i)
+            val streamSettings = outbound.optJSONObject("streamSettings")
+            
+            if (streamSettings != null) {
+                val sockopt = streamSettings.optJSONObject("sockopt")
+                if (sockopt != null) {
+                    var modified = false
+                    
+                    // Remove tproxy setting (requires IP_TRANSPARENT)
+                    if (sockopt.has("tproxy")) {
+                        val tproxyValue = sockopt.optString("tproxy", "")
+                        Log.w(TAG, "⚠️ Removing tproxy sockopt (tproxy=$tproxyValue) from outbound[$i] - requires IP_TRANSPARENT")
+                        sockopt.remove("tproxy")
+                        modified = true
+                    }
+                    
+                    // Remove mark setting (can cause issues in VPN mode)
+                    if (sockopt.has("mark")) {
+                        val markValue = sockopt.optInt("mark", 0)
+                        Log.w(TAG, "⚠️ Removing mark sockopt (mark=$markValue) from outbound[$i] - may cause issues in VPN mode")
+                        sockopt.remove("mark")
+                        modified = true
+                    }
+                    
+                    // If sockopt is now empty or only has safe settings, remove it entirely
+                    if (modified && sockopt.length() == 0) {
+                        streamSettings.remove("sockopt")
+                        Log.d(TAG, "  ✅ Removed empty sockopt object from outbound[$i]")
+                        removedCount++
+                    } else if (modified) {
+                        streamSettings.put("sockopt", sockopt)
+                        Log.d(TAG, "  ✅ Updated sockopt in outbound[$i]")
+                        removedCount++
+                    }
+                    
+                    // If streamSettings is now empty, remove it entirely
+                    if (streamSettings.length() == 0) {
+                        outbound.remove("streamSettings")
+                        Log.d(TAG, "  ✅ Removed empty streamSettings from outbound[$i]")
+                    } else {
+                        outbound.put("streamSettings", streamSettings)
+                    }
+                }
+            }
+        }
+        
+        // Update the outbounds array
+        if (jsonObject.has("outbounds")) {
+            jsonObject.put("outbounds", outboundArray)
+        } else {
+            jsonObject.put("outbound", outboundArray)
+        }
+        
+        if (removedCount > 0) {
+            Log.w(TAG, "🚨 CRITICAL: Removed IP_TRANSPARENT sockopt from $removedCount outbound(s)")
+            Log.w(TAG, "  - IP_TRANSPARENT is not available in Android VPN mode")
+            Log.w(TAG, "  - This prevents 'operation not permitted' errors for UDP connections")
+        } else {
+            Log.d(TAG, "No IP_TRANSPARENT sockopt found in outbounds, no removal needed")
+        }
+    }
+    
+    /**
      * CRITICAL: Remove port 53 routing rule that redirects DNS queries to dns-out outbound.
      * This rule prevents Xray-core from using SystemDnsCacheServer (localhost:5353).
      * We need Xray-core to use its DNS resolver (which uses SystemDnsCacheServer) instead of routing to dns-out.
@@ -1425,7 +1521,100 @@ object ConfigUtils {
      * Xray stats format: outbound>>>[tag]>>>traffic>>>uplink/downlink
      * Without tags, stats cannot be collected properly.
      */
+    /**
+     * Converts tproxy protocol inbounds to socks protocol.
+     * 
+     * CRITICAL: tproxy (Transparent Proxy) requires IP_TRANSPARENT socket capability
+     * which is not available in standard Android VPN mode (non-root). This causes:
+     * - Immediate connection termination
+     * - "operation not permitted" errors during socket binding
+     * - Process crashes and service failures
+     * 
+     * SOCKS protocol is universally supported by Android's VpnService local interface
+     * and provides equivalent functionality without requiring privileged socket operations.
+     * 
+     * This function:
+     * 1. Detects inbounds using "tproxy" protocol
+     * 2. Converts protocol to "socks"
+     * 3. Configures SOCKS settings (udp: true, auth: noauth)
+     * 4. Preserves existing port and listen IP bindings
+     */
     @Throws(JSONException::class)
+    private fun convertTproxyToSocks(jsonObject: JSONObject) {
+        var inboundArray = jsonObject.optJSONArray("inbounds") ?: jsonObject.optJSONArray("inbound")
+        
+        if (inboundArray == null) {
+            Log.d(TAG, "No inbounds array found, skipping tproxy conversion")
+            return
+        }
+
+        var convertedCount = 0
+        for (i in 0 until inboundArray.length()) {
+            val inbound = inboundArray.getJSONObject(i)
+            val protocol = inbound.optString("protocol", "").lowercase()
+            
+            // Only process tproxy inbounds
+            if (protocol != "tproxy") {
+                continue
+            }
+            
+            convertedCount++
+            val originalPort = inbound.optInt("port", 10808)
+            val originalListen = inbound.optString("listen", "127.0.0.1")
+            val originalTag = inbound.optString("tag", "")
+            
+            Log.w(TAG, "⚠️ BLOCKER FIX: Converting tproxy inbound #$convertedCount to socks protocol")
+            Log.w(TAG, "  - Reason: tproxy requires IP_TRANSPARENT capability (not available in Android VPN mode)")
+            Log.w(TAG, "  - Original: port=$originalPort, listen=$originalListen, tag=$originalTag")
+            
+            // Change protocol from tproxy to socks
+            inbound.put("protocol", "socks")
+            Log.d(TAG, "  ✅ Changed protocol: tproxy → socks")
+            
+            // Get or create settings object
+            var settings = inbound.optJSONObject("settings")
+            if (settings == null) {
+                settings = JSONObject()
+                inbound.put("settings", settings)
+            }
+            
+            // Configure SOCKS settings for full traffic proxying
+            // udp: true - Enable UDP support for SOCKS5
+            // auth: noauth - No authentication required (standard for local interface)
+            settings.put("udp", true)
+            settings.put("auth", "noauth")
+            Log.d(TAG, "  ✅ Configured SOCKS settings: udp=true, auth=noauth")
+            
+            // Preserve existing port and listen IP (critical requirement)
+            if (originalPort > 0) {
+                inbound.put("port", originalPort)
+            }
+            if (originalListen.isNotEmpty()) {
+                inbound.put("listen", originalListen)
+            }
+            if (originalTag.isNotEmpty() && !inbound.has("tag")) {
+                inbound.put("tag", originalTag)
+            }
+            
+            Log.i(TAG, "  ✅ Conversion completed: tproxy → socks (port=$originalPort, listen=$originalListen)")
+        }
+        
+        // Update the inbounds array
+        if (jsonObject.has("inbounds")) {
+            jsonObject.put("inbounds", inboundArray)
+        } else {
+            jsonObject.put("inbound", inboundArray)
+        }
+        
+        if (convertedCount > 0) {
+            Log.w(TAG, "🚨 CRITICAL: Converted $convertedCount tproxy inbound(s) to socks protocol")
+            Log.w(TAG, "  - This prevents 'operation not permitted' errors and process crashes")
+            Log.w(TAG, "  - SOCKS protocol is fully compatible with Android VPN mode")
+        } else {
+            Log.d(TAG, "No tproxy inbounds found, no conversion needed")
+        }
+    }
+
     private fun ensureOutboundTags(jsonObject: JSONObject) {
         val outboundArray = jsonObject.optJSONArray("outbounds") ?: jsonObject.optJSONArray("outbound")
         if (outboundArray == null) {
