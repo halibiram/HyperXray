@@ -71,3 +71,17 @@ fun formatHandshakeTime(ms: Double): String {
     return "%.2f ms".format(ms)
 }
 
+/**
+ * Formats latency in milliseconds with appropriate precision.
+ * Shows 3 decimal places for sub-millisecond values (< 1ms) for accuracy,
+ * and 2 decimal places for larger values.
+ */
+fun formatLatency(ms: Double): String {
+    return when {
+        ms <= 0.0 || ms.isNaN() -> "N/A"
+        ms < 1.0 -> "%.3f ms".format(ms) // Sub-millisecond precision for very fast operations
+        ms < 10.0 -> "%.2f ms".format(ms) // 2 decimal places for small values
+        else -> "%.1f ms".format(ms) // 1 decimal place for larger values
+    }
+}
+

@@ -60,6 +60,10 @@ fun AggregatedTelemetry.toFeatureState(): FeatureAggregatedTelemetry {
  * Maps all fields from the comprehensive DnsCacheMetrics to FeatureDnsCacheStats
  */
 private fun com.hyperxray.an.core.network.dns.DnsCacheManager.DnsCacheMetrics.toFeatureState(): FeatureDnsCacheStats {
+    // DEBUG: Log latency values to verify they are being passed correctly
+    if (avgHitLatencyMs > 0.0 || avgMissLatencyMs > 0.0) {
+        Log.d(TAG, "📊 toFeatureState: avgHitLatencyMs=${avgHitLatencyMs}, avgMissLatencyMs=${avgMissLatencyMs}")
+    }
     return FeatureDnsCacheStats(
         entryCount = entryCount,
         memoryUsageMB = (memoryUsageBytes / (1024 * 1024)).toLong(), // Convert bytes to MB

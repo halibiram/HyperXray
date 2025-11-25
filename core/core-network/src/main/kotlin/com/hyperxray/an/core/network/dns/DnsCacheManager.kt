@@ -42,6 +42,9 @@ private const val PREFS_KEY_MISSES = "dns_cache_misses"
 private const val PREFS_KEY_TOTAL_LOOKUPS = "dns_cache_total_lookups"
 private const val PREFS_KEY_AVG_HIT_LATENCY = "dns_cache_avg_hit_latency"
 private const val PREFS_KEY_AVG_MISS_LATENCY = "dns_cache_avg_miss_latency"
+// Use String storage for latency to preserve precision (Float has only ~7 decimal digits)
+private const val PREFS_KEY_AVG_HIT_LATENCY_STR = "dns_cache_avg_hit_latency_str"
+private const val PREFS_KEY_AVG_MISS_LATENCY_STR = "dns_cache_avg_miss_latency_str"
 
 // Popular domains that rarely change - use longer TTL
 private val popularDomains = setOf(
@@ -458,6 +461,12 @@ object DnsCacheManager {
                 putLong(PREFS_KEY_HITS, hits)
                 putLong(PREFS_KEY_MISSES, misses)
                 putLong(PREFS_KEY_TOTAL_LOOKUPS, total)
+                // CRITICAL FIX: Use String storage for latency to preserve precision
+                // Float has only ~7 decimal digits, which causes precision loss for sub-millisecond values
+                // Store as String with full Double precision
+                putString(PREFS_KEY_AVG_HIT_LATENCY_STR, avgHitLatency.toString())
+                putString(PREFS_KEY_AVG_MISS_LATENCY_STR, avgMissLatency.toString())
+                // Keep Float for backward compatibility (but prefer String)
                 putFloat(PREFS_KEY_AVG_HIT_LATENCY, avgHitLatency.toFloat())
                 putFloat(PREFS_KEY_AVG_MISS_LATENCY, avgMissLatency.toFloat())
                 apply() // Use apply() for async write (non-blocking)
@@ -485,8 +494,23 @@ object DnsCacheManager {
                 val savedHits = prefs.getLong(PREFS_KEY_HITS, 0L)
                 val savedMisses = prefs.getLong(PREFS_KEY_MISSES, 0L)
                 val savedTotal = prefs.getLong(PREFS_KEY_TOTAL_LOOKUPS, 0L)
-                val savedAvgHitLatency = prefs.getFloat(PREFS_KEY_AVG_HIT_LATENCY, 0f).toDouble()
-                val savedAvgMissLatency = prefs.getFloat(PREFS_KEY_AVG_MISS_LATENCY, 0f).toDouble()
+                
+                // CRITICAL FIX: Read latency from String storage first (preserves precision)
+                // Fallback to Float if String not available (backward compatibility)
+                val savedAvgHitLatencyStr = prefs.getString(PREFS_KEY_AVG_HIT_LATENCY_STR, null)
+                val savedAvgMissLatencyStr = prefs.getString(PREFS_KEY_AVG_MISS_LATENCY_STR, null)
+                
+                val savedAvgHitLatency = if (savedAvgHitLatencyStr != null) {
+                    savedAvgHitLatencyStr.toDoubleOrNull() ?: prefs.getFloat(PREFS_KEY_AVG_HIT_LATENCY, 0f).toDouble()
+                } else {
+                    prefs.getFloat(PREFS_KEY_AVG_HIT_LATENCY, 0f).toDouble()
+                }
+                
+                val savedAvgMissLatency = if (savedAvgMissLatencyStr != null) {
+                    savedAvgMissLatencyStr.toDoubleOrNull() ?: prefs.getFloat(PREFS_KEY_AVG_MISS_LATENCY, 0f).toDouble()
+                } else {
+                    prefs.getFloat(PREFS_KEY_AVG_MISS_LATENCY, 0f).toDouble()
+                }
                 
                 // Only sync if we have saved stats (main process has written them)
                 // and local counters are zero or less (UI process hasn't done any DNS queries)
@@ -494,14 +518,21 @@ object DnsCacheManager {
                 val localMisses = cacheMisses.get()
                 val localTotal = totalLookups.get()
                 
+                // CRITICAL FIX: Always sync latency values if they exist in SharedPreferences
+                // Latency values should always be synced regardless of counter values
+                // This ensures UI process shows correct latency even if it hasn't done any DNS queries
+                if (savedAvgHitLatency > 0.0 || savedAvgMissLatency > 0.0) {
+                    avgHitLatency = savedAvgHitLatency
+                    avgMissLatency = savedAvgMissLatency
+                    Log.d(TAG, "📊 Synced latency from SharedPreferences: avgHitLatency=${String.format("%.3f", savedAvgHitLatency)}ms, avgMissLatency=${String.format("%.3f", savedAvgMissLatency)}ms")
+                }
+                
                 // If main process has stats and local process has no stats, sync from main process
                 if (savedTotal > 0 && (localTotal == 0L || savedTotal > localTotal)) {
                     // Update atomic counters (for UI process to show correct stats from main process)
                     cacheHits.set(savedHits)
                     cacheMisses.set(savedMisses)
                     totalLookups.set(savedTotal)
-                    avgHitLatency = savedAvgHitLatency
-                    avgMissLatency = savedAvgMissLatency
                 }
             }
         } catch (e: Exception) {
@@ -621,24 +652,34 @@ object DnsCacheManager {
                     if (addresses.isNotEmpty()) {
                         val latencyMs = (System.nanoTime() - startTime) / 1_000_000.0
                         recordHitLatency(latencyMs)
-                        Log.i(TAG, "✅ DNS cache HIT: $hostname -> ${entry.ips} (age: ${(System.currentTimeMillis() / 1000 - entry.timestamp)}s, latency: ${latencyMs}ms)")
+                        val ageSeconds = (System.currentTimeMillis() / 1000 - entry.timestamp)
+                        val ttlRemaining = entry.ttl - ageSeconds
+                        Log.i(TAG, "✅ DNS cache HIT: $hostname -> ${entry.ips} (age: ${ageSeconds}s, TTL remaining: ${ttlRemaining}s, latency: ${String.format("%.3f", latencyMs)}ms, avgHitLatency: ${String.format("%.3f", avgHitLatency)}ms)")
                         return@read addresses
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Error converting cached IPs to InetAddress", e)
                 }
             } else if (entry != null && entry.isExpired()) {
-                // Remove expired entry
+                // Remove expired entry and track latency
+                val latencyMs = (System.nanoTime() - startTime) / 1_000_000.0
+                val ageSeconds = (System.currentTimeMillis() / 1000 - entry.timestamp)
                 cacheLock.write {
                     cache.remove(hostname.lowercase())
                 }
+                cacheMisses.incrementAndGet()
+                recordDomainAccess(hostname, isHit = false)
+                recordMissLatency(latencyMs)
+                Log.i(TAG, "⚠️ DNS cache EXPIRED: $hostname (age: ${ageSeconds}s, TTL: ${entry.ttl}s, latency: ${String.format("%.3f", latencyMs)}ms, avgMissLatency: ${String.format("%.3f", avgMissLatency)}ms)")
+                return@read null
             }
             
-            // Cache miss
+            // Cache miss (entry not found)
             cacheMisses.incrementAndGet()
             recordDomainAccess(hostname, isHit = false)
             val latencyMs = (System.nanoTime() - startTime) / 1_000_000.0
             recordMissLatency(latencyMs)
+            Log.i(TAG, "⚠️ DNS cache MISS: $hostname (latency: ${String.format("%.3f", latencyMs)}ms, avgMissLatency: ${String.format("%.3f", avgMissLatency)}ms)")
             null
         }
     }

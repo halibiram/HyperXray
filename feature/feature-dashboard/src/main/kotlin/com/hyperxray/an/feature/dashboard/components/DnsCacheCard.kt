@@ -33,6 +33,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import com.hyperxray.an.feature.dashboard.DnsCacheStats
 import com.hyperxray.an.feature.dashboard.formatBytes
 import com.hyperxray.an.feature.dashboard.formatNumber
+import com.hyperxray.an.feature.dashboard.formatLatency
 
 /**
  * DNS Cache statistics card component.
@@ -194,8 +195,12 @@ fun DnsCacheCard(
                             )
                             Text(
                                 text = if (stats.avgHitLatencyMs > 0.0 && !stats.avgHitLatencyMs.isNaN()) {
-                                    "${String.format("%.1f", stats.avgHitLatencyMs)}ms avg"
+                                    // DEBUG: Log the actual value being formatted
+                                    val formatted = formatLatency(stats.avgHitLatencyMs)
+                                    android.util.Log.d("DnsCacheCard", "📊 avgHitLatencyMs=${stats.avgHitLatencyMs}, formatted=$formatted")
+                                    "$formatted avg"
                                 } else {
+                                    android.util.Log.d("DnsCacheCard", "⚠️ avgHitLatencyMs is invalid: ${stats.avgHitLatencyMs}")
                                     "N/A"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
@@ -236,8 +241,12 @@ fun DnsCacheCard(
                             )
                             Text(
                                 text = if (stats.avgMissLatencyMs > 0.0 && !stats.avgMissLatencyMs.isNaN()) {
-                                    "${String.format("%.1f", stats.avgMissLatencyMs)}ms avg"
+                                    // DEBUG: Log the actual value being formatted
+                                    val formatted = formatLatency(stats.avgMissLatencyMs)
+                                    android.util.Log.d("DnsCacheCard", "📊 avgMissLatencyMs=${stats.avgMissLatencyMs}, formatted=$formatted")
+                                    "$formatted avg"
                                 } else {
+                                    android.util.Log.d("DnsCacheCard", "⚠️ avgMissLatencyMs is invalid: ${stats.avgMissLatencyMs}")
                                     "N/A"
                                 },
                                 style = MaterialTheme.typography.bodySmall,

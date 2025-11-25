@@ -36,8 +36,21 @@ class GetDnsCacheStatsUseCase(
                 appendLine("<b>💾 Memory Usage:</b> ${metrics.memoryUsageBytes / (1024 * 1024)} MB / ${metrics.memoryLimitBytes / (1024 * 1024)} MB")
                 appendLine("<b>📉 Memory Usage:</b> ${metrics.memoryUsagePercent}%")
                 appendLine("")
-                appendLine("<b>⚡ Avg Hit Latency:</b> ${String.format("%.2f", metrics.avgHitLatencyMs)} ms")
-                appendLine("<b>🐌 Avg Miss Latency:</b> ${String.format("%.2f", metrics.avgMissLatencyMs)} ms")
+                // Format latency with appropriate precision (same as Dashboard)
+                val hitLatencyFormatted = when {
+                    metrics.avgHitLatencyMs <= 0.0 || metrics.avgHitLatencyMs.isNaN() -> "N/A"
+                    metrics.avgHitLatencyMs < 1.0 -> String.format("%.3f", metrics.avgHitLatencyMs) // Sub-millisecond precision
+                    metrics.avgHitLatencyMs < 10.0 -> String.format("%.2f", metrics.avgHitLatencyMs) // 2 decimal places
+                    else -> String.format("%.1f", metrics.avgHitLatencyMs) // 1 decimal place
+                }
+                val missLatencyFormatted = when {
+                    metrics.avgMissLatencyMs <= 0.0 || metrics.avgMissLatencyMs.isNaN() -> "N/A"
+                    metrics.avgMissLatencyMs < 1.0 -> String.format("%.3f", metrics.avgMissLatencyMs) // Sub-millisecond precision
+                    metrics.avgMissLatencyMs < 10.0 -> String.format("%.2f", metrics.avgMissLatencyMs) // 2 decimal places
+                    else -> String.format("%.1f", metrics.avgMissLatencyMs) // 1 decimal place
+                }
+                appendLine("<b>⚡ Avg Hit Latency:</b> $hitLatencyFormatted ms")
+                appendLine("<b>🐌 Avg Miss Latency:</b> $missLatencyFormatted ms")
                 
                 // Show top domains if available
                 if (metrics.topDomains.isNotEmpty()) {
