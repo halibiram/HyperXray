@@ -78,6 +78,19 @@ object AiLogHelper {
     fun i(tag: String, message: String) = log(tag, "INFO", message)
     fun w(tag: String, message: String) = log(tag, "WARN", message)
     fun e(tag: String, message: String) = log(tag, "ERROR", message)
+    
+    // Overloads with exception support
+    fun e(tag: String, message: String, throwable: Throwable) {
+        val messageWithException = "$message\nException: ${throwable.javaClass.simpleName}: ${throwable.message}\n${throwable.stackTraceToString()}"
+        log(tag, "ERROR", messageWithException)
+        Log.e(tag, message, throwable)
+    }
+    
+    fun w(tag: String, message: String, throwable: Throwable) {
+        val messageWithException = "$message\nException: ${throwable.javaClass.simpleName}: ${throwable.message}"
+        log(tag, "WARN", messageWithException)
+        Log.w(tag, message, throwable)
+    }
 }
 
 

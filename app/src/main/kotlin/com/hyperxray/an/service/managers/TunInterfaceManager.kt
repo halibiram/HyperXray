@@ -10,6 +10,7 @@ import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.hyperxray.an.BuildConfig
+import com.hyperxray.an.common.AiLogHelper
 import com.hyperxray.an.common.Socks5ReadinessChecker
 import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.core.network.dns.SystemDnsCacheServer
@@ -55,9 +56,13 @@ class TunInterfaceManager(private val vpnService: VpnService) {
         serviceScope: CoroutineScope,
         onError: ((String) -> Unit)? = null
     ): ParcelFileDescriptor? {
+        val establishStartTime = System.currentTimeMillis()
+        AiLogHelper.i(TAG, "🔧 TUN ESTABLISH START: Beginning VPN interface establishment")
+        
         synchronized(tunFdLock) {
             if (tunFdRef.get() != null) {
                 Log.d(TAG, "VPN interface already established, skipping establish()")
+                AiLogHelper.d(TAG, "✅ TUN ESTABLISH: VPN interface already established, reusing existing")
                 val existingFd = tunFdRef.get()
                 // Update session state for backward compatibility
                 synchronized(sessionState.tunFdLock) {
@@ -68,44 +73,77 @@ class TunInterfaceManager(private val vpnService: VpnService) {
         }
         
         // Initialize DnsCacheManager first (before starting DNS cache server)
+        val dnsInitStartTime = System.currentTimeMillis()
         if (!sessionState.dnsCacheInitialized) {
             try {
+                AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Initializing DnsCacheManager...")
                 DnsCacheManager.initialize(context)
                 sessionState.dnsCacheInitialized = true
+                val dnsInitDuration = System.currentTimeMillis() - dnsInitStartTime
                 Log.d(TAG, "DnsCacheManager initialized")
+                AiLogHelper.i(TAG, "✅ TUN ESTABLISH: DnsCacheManager initialized (duration: ${dnsInitDuration}ms)")
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to initialize DnsCacheManager: ${e.message}", e)
+                AiLogHelper.w(TAG, "⚠️ TUN ESTABLISH: Failed to initialize DnsCacheManager: ${e.message}")
             }
+        } else {
+            AiLogHelper.d(TAG, "✅ TUN ESTABLISH: DnsCacheManager already initialized")
         }
         
         // Start system DNS cache server before building VPN (needed for DNS configuration)
+        val dnsServerStartTime = System.currentTimeMillis()
         try {
             if (sessionState.systemDnsCacheServer == null) {
+                AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Creating SystemDnsCacheServer instance...")
                 sessionState.systemDnsCacheServer = SystemDnsCacheServer.getInstance(context)
             }
+            AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Starting DNS cache server...")
             sessionState.systemDnsCacheServer?.start()
+            val dnsServerDuration = System.currentTimeMillis() - dnsServerStartTime
+            val listeningPort = sessionState.systemDnsCacheServer?.getListeningPort()
             Log.d(TAG, "DNS cache server started successfully")
+            AiLogHelper.i(TAG, "✅ TUN ESTABLISH: DNS cache server started on port $listeningPort (duration: ${dnsServerDuration}ms)")
         } catch (e: Exception) {
             Log.w(TAG, "Error starting DNS cache server: ${e.message}", e)
+            AiLogHelper.w(TAG, "⚠️ TUN ESTABLISH: Error starting DNS cache server: ${e.message}")
         }
         
         // Check VPN permission before attempting to establish VPN interface
+        val permissionCheckStartTime = System.currentTimeMillis()
+        AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Checking VPN permission...")
         val vpnPrepareIntent = VpnService.prepare(vpnService)
         if (vpnPrepareIntent != null) {
-            Log.e(TAG, "VPN permission not granted. VpnService.prepare() returned non-null intent.")
+            val errorMsg = "VPN permission not granted. VpnService.prepare() returned non-null intent."
+            Log.e(TAG, errorMsg)
+            AiLogHelper.e(TAG, "❌ TUN ESTABLISH FAILED: $errorMsg")
             onError?.invoke("VPN permission not granted. Please grant VPN permission.")
             return null
         }
-        
+        val permissionCheckDuration = System.currentTimeMillis() - permissionCheckStartTime
         Log.d(TAG, "VPN permission check passed. Proceeding to establish VPN interface...")
+        AiLogHelper.i(TAG, "✅ TUN ESTABLISH: VPN permission check passed (duration: ${permissionCheckDuration}ms)")
         
+        // Build VPN interface configuration
+        val buildStartTime = System.currentTimeMillis()
         Log.d(TAG, "Building VPN interface configuration...")
+        AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Building VPN interface configuration (MTU=${prefs.tunnelMtu}, IPv4=${prefs.ipv4}, IPv6=${prefs.ipv6})...")
         val builder = buildVpnInterface(prefs, sessionState.systemDnsCacheServer)
+        val buildDuration = System.currentTimeMillis() - buildStartTime
+        AiLogHelper.d(TAG, "✅ TUN ESTABLISH: VPN interface configuration built (duration: ${buildDuration}ms)")
         
+        // Establish VPN interface
+        val establishFdStartTime = System.currentTimeMillis()
         Log.d(TAG, "Attempting to establish VPN interface (TUN)...")
+        AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Calling builder.establish()...")
         val newTunFd = builder.establish()
+        val establishFdDuration = System.currentTimeMillis() - establishFdStartTime
         
         Log.d(TAG, "VPN interface establish() result: ${if (newTunFd != null) "SUCCESS" else "FAILED (null)"}")
+        if (newTunFd != null) {
+            AiLogHelper.i(TAG, "✅ TUN ESTABLISH: VPN interface established successfully (fd=${newTunFd.fd}, duration: ${establishFdDuration}ms)")
+        } else {
+            AiLogHelper.e(TAG, "❌ TUN ESTABLISH FAILED: builder.establish() returned null (duration: ${establishFdDuration}ms)")
+        }
         
         synchronized(tunFdLock) {
             tunFdRef.set(newTunFd)
@@ -119,6 +157,8 @@ class TunInterfaceManager(private val vpnService: VpnService) {
         if (newTunFd == null) {
             Log.e(TAG, "Failed to establish VPN interface (TUN). builder.establish() returned null.")
             Log.e(TAG, "Possible causes: VPN permission not granted, another VPN is active, or system-level TUN creation error.")
+            AiLogHelper.e(TAG, "❌ TUN ESTABLISH FAILED: builder.establish() returned null")
+            AiLogHelper.e(TAG, "🔍 TUN ESTABLISH: Possible causes: VPN permission not granted, another VPN is active, or system-level TUN creation error")
             
             // Check if another VPN is active
             try {
@@ -129,9 +169,13 @@ class TunInterfaceManager(private val vpnService: VpnService) {
                 
                 if (hasVpn) {
                     Log.e(TAG, "Another VPN is currently active. Cannot establish new VPN interface.")
+                    AiLogHelper.e(TAG, "❌ TUN ESTABLISH: Another VPN is currently active. Cannot establish new VPN interface.")
+                } else {
+                    AiLogHelper.d(TAG, "✅ TUN ESTABLISH: No other VPN detected")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Could not check for active VPN: ${e.message}", e)
+                AiLogHelper.w(TAG, "⚠️ TUN ESTABLISH: Could not check for active VPN: ${e.message}")
             }
             
             val errorMessage = "Failed to establish VPN interface (TUN). Please check VPN permissions or disable other VPN services."
@@ -143,12 +187,15 @@ class TunInterfaceManager(private val vpnService: VpnService) {
         if (newTunFd != null && prefs.ipv4) {
             sessionState.systemDnsCacheServer?.setVpnInterfaceIp(prefs.tunnelIpv4Address)
             Log.i(TAG, "✅ VPN interface IP set for DNS: ${prefs.tunnelIpv4Address} (direct UDP DNS queries will be routed through VPN)")
+            AiLogHelper.i(TAG, "✅ TUN ESTABLISH: VPN interface IP set for DNS: ${prefs.tunnelIpv4Address}")
         } else {
             if (newTunFd == null) {
                 Log.w(TAG, "⚠️ VPN interface not established, DNS queries may not route through VPN")
+                AiLogHelper.w(TAG, "⚠️ TUN ESTABLISH: VPN interface not established, DNS queries may not route through VPN")
             }
             if (!prefs.ipv4) {
                 Log.w(TAG, "⚠️ IPv4 disabled, VPN interface IP not set for DNS")
+                AiLogHelper.w(TAG, "⚠️ TUN ESTABLISH: IPv4 disabled, VPN interface IP not set for DNS")
             }
         }
         
@@ -158,29 +205,38 @@ class TunInterfaceManager(private val vpnService: VpnService) {
         val socksPort = prefs.socksPort
         serviceScope.launch {
             try {
+                AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Checking SOCKS5 readiness (early check): $socksAddress:$socksPort")
                 // Quick check if SOCKS5 is already ready
                 if (Socks5ReadinessChecker.isSocks5Ready(context, socksAddress, socksPort)) {
                     sessionState.systemDnsCacheServer?.setSocks5Proxy(socksAddress, socksPort)
                     Log.d(TAG, "✅ SOCKS5 UDP proxy set for DNS (early check): $socksAddress:$socksPort")
+                    AiLogHelper.i(TAG, "✅ TUN ESTABLISH: SOCKS5 UDP proxy set for DNS (early check): $socksAddress:$socksPort")
                 } else {
                     Log.d(TAG, "⏳ SOCKS5 not ready yet, will be set after readiness check")
+                    AiLogHelper.d(TAG, "⏳ TUN ESTABLISH: SOCKS5 not ready yet, will be set after readiness check")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Error in early SOCKS5 proxy check: ${e.message}")
+                AiLogHelper.w(TAG, "⚠️ TUN ESTABLISH: Error in early SOCKS5 proxy check: ${e.message}")
             }
         }
         
         // Generate and write TProxy config file
+        val tproxyFileStartTime = System.currentTimeMillis()
         val tproxyFile = File(context.cacheDir, "tproxy.conf")
         try {
+            AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Creating TProxy config file...")
             tproxyFile.createNewFile()
             FileOutputStream(tproxyFile, false).use { fos ->
                 val tproxyConf = TProxyUtils.getTproxyConf(prefs)
                 fos.write(tproxyConf.toByteArray())
             }
+            val tproxyFileDuration = System.currentTimeMillis() - tproxyFileStartTime
             Log.d(TAG, "TProxy config file created successfully")
+            AiLogHelper.i(TAG, "✅ TUN ESTABLISH: TProxy config file created successfully (${tproxyFile.length()} bytes, duration: ${tproxyFileDuration}ms)")
         } catch (e: IOException) {
             Log.e(TAG, "Failed to write TProxy config file: ${e.message}", e)
+            AiLogHelper.e(TAG, "❌ TUN ESTABLISH: Failed to write TProxy config file: ${e.message}")
             
             val errorMessage = "Failed to write TProxy config file: ${e.message}"
             onError?.invoke(errorMessage)
@@ -188,7 +244,9 @@ class TunInterfaceManager(private val vpnService: VpnService) {
             // but we should still notify about it
         }
         
+        val totalDuration = System.currentTimeMillis() - establishStartTime
         Log.d(TAG, "VPN interface established successfully. Waiting for Xray to start and SOCKS5 to become ready...")
+        AiLogHelper.i(TAG, "✅ TUN ESTABLISH SUCCESS: VPN interface established successfully (total duration: ${totalDuration}ms)")
         return newTunFd
     }
     

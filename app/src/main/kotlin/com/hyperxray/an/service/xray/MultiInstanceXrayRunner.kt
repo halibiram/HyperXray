@@ -2,6 +2,7 @@ package com.hyperxray.an.service.xray
 
 import android.content.Intent
 import android.util.Log
+import com.hyperxray.an.common.AiLogHelper
 import com.hyperxray.an.common.ConfigUtils.extractPortsFromJson
 import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.core.network.dns.SystemDnsCacheServer
@@ -37,18 +38,25 @@ class MultiInstanceXrayRunner(
     private var isRunning = false
     
     override suspend fun start(config: XrayConfig) {
+        val startTime = System.currentTimeMillis()
+        AiLogHelper.i(TAG, "🚀 XRAY START: Beginning Xray process start")
+        
         // Prevent duplicate calls
         if (runnerContext.isStopping()) {
             Log.w(TAG, "start() called while stopping, aborting.")
+            AiLogHelper.w(TAG, "⚠️ XRAY START: Called while stopping, aborting")
             return
         }
         
         try {
             Log.d(TAG, "Attempting to start xray process(es).")
+            AiLogHelper.d(TAG, "🔧 XRAY START: Attempting to start xray process(es)")
+            
             // CRITICAL: Read instanceCount directly from Preferences to ensure latest value
             // This ensures settings changes are respected even if config was created with old value
             val instanceCount = runnerContext.prefs.xrayCoreInstanceCount
             Log.i(TAG, "📊 Xray Core Instance Count: $instanceCount (from Preferences, will start ${if (instanceCount == 1) "1 instance" else "$instanceCount instances"})")
+            AiLogHelper.i(TAG, "📊 XRAY START: Instance count: $instanceCount (from Preferences, will start ${if (instanceCount == 1) "1 instance" else "$instanceCount instances"})")
             
             // Validate instanceCount matches config (log warning if mismatch, but use Preferences value)
             if (config.instanceCount != instanceCount) {
@@ -60,6 +68,7 @@ class MultiInstanceXrayRunner(
             if (selectedConfigPath == null) {
                 val errorMessage = "No configuration file selected."
                 Log.e(TAG, errorMessage)
+                AiLogHelper.e(TAG, "❌ XRAY START FAILED: $errorMessage")
                 val errorIntent = Intent(runnerContext.getActionError())
                 errorIntent.setPackage(runnerContext.getApplicationPackageName())
                 errorIntent.putExtra(runnerContext.getExtraErrorMessage(), errorMessage)
@@ -73,11 +82,13 @@ class MultiInstanceXrayRunner(
                 }
                 return
             }
+            AiLogHelper.d(TAG, "✅ XRAY START: Config path found: $selectedConfigPath")
             
             val configFile = TProxyUtils.validateConfigPath(runnerContext.context, selectedConfigPath)
             if (configFile == null) {
                 val errorMessage = "Invalid configuration file: path validation failed or file not accessible."
                 Log.e(TAG, errorMessage)
+                AiLogHelper.e(TAG, "❌ XRAY START FAILED: $errorMessage")
                 val errorIntent = Intent(runnerContext.getActionError())
                 errorIntent.setPackage(runnerContext.getApplicationPackageName())
                 errorIntent.putExtra(runnerContext.getExtraErrorMessage(), errorMessage)
@@ -91,12 +102,17 @@ class MultiInstanceXrayRunner(
                 }
                 return
             }
+            AiLogHelper.d(TAG, "✅ XRAY START: Config file validated: ${configFile.name} (${configFile.length()} bytes)")
             
             // Read config content securely (after validation)
+            val configReadStartTime = System.currentTimeMillis()
+            AiLogHelper.d(TAG, "🔧 XRAY START: Reading config content...")
             val configContent = TProxyUtils.readConfigContentSecurely(configFile)
+            val configReadDuration = System.currentTimeMillis() - configReadStartTime
             if (configContent == null) {
                 val errorMessage = "Failed to read configuration file."
                 Log.e(TAG, errorMessage)
+                AiLogHelper.e(TAG, "❌ XRAY START FAILED: $errorMessage")
                 val errorIntent = Intent(runnerContext.getActionError())
                 errorIntent.setPackage(runnerContext.getApplicationPackageName())
                 errorIntent.putExtra(runnerContext.getExtraErrorMessage(), errorMessage)
@@ -110,6 +126,7 @@ class MultiInstanceXrayRunner(
                 }
                 return
             }
+            AiLogHelper.i(TAG, "✅ XRAY START: Config content read successfully (${configContent.length} bytes, duration: ${configReadDuration}ms)")
             
             // Pre-resolve server address BEFORE starting Xray (using system DNS, not VPN DNS)
             // This ensures server IP is available even if only YouTube package exists
@@ -153,12 +170,17 @@ class MultiInstanceXrayRunner(
             
             // Use MultiXrayCoreManager for 1 or more instances (uniform handling)
             if (instanceCount >= 1) {
+                val managerStartTime = System.currentTimeMillis()
                 Log.i(TAG, "🚀 Starting $instanceCount xray-core instance(s) using MultiXrayCoreManager")
+                AiLogHelper.i(TAG, "🚀 XRAY START: Starting $instanceCount xray-core instance(s) using MultiXrayCoreManager")
                 Log.d(TAG, "Instance count details: requested=$instanceCount, will start ${if (instanceCount == 1) "1 instance" else "$instanceCount instances"} for ${if (instanceCount == 1) "single instance mode" else "load balancing"}")
+                AiLogHelper.d(TAG, "📊 XRAY START: Instance details - requested=$instanceCount, mode=${if (instanceCount == 1) "single instance" else "load balancing"}")
                 
                 // Initialize MultiXrayCoreManager if not already initialized
                 if (runnerContext.multiXrayCoreManager == null) {
+                    AiLogHelper.d(TAG, "🔧 XRAY START: Initializing MultiXrayCoreManager...")
                     runnerContext.multiXrayCoreManager = MultiXrayCoreManager.getInstance(runnerContext.context)
+                    AiLogHelper.i(TAG, "✅ XRAY START: MultiXrayCoreManager initialized")
                     
                     // Set log callback to forward logs to logFileManager and broadcast
                     // Also intercept DNS queries and cache them (no root required)
@@ -514,16 +536,24 @@ class MultiInstanceXrayRunner(
     }
     
     override suspend fun stop() {
+        val stopTime = System.currentTimeMillis()
+        AiLogHelper.i(TAG, "🛑 XRAY STOP: Stopping Xray instances")
         isRunning = false
         val manager = runnerContext.multiXrayCoreManager
         if (manager != null) {
             try {
                 Log.d(TAG, "Stopping MultiXrayCoreManager instances...")
+                AiLogHelper.d(TAG, "🔧 XRAY STOP: Stopping MultiXrayCoreManager instances...")
                 manager.stopAllInstances()
+                val stopDuration = System.currentTimeMillis() - stopTime
                 Log.d(TAG, "MultiXrayCoreManager instances stopped.")
+                AiLogHelper.i(TAG, "✅ XRAY STOP SUCCESS: MultiXrayCoreManager instances stopped (duration: ${stopDuration}ms)")
             } catch (e: Exception) {
                 Log.e(TAG, "Error stopping MultiXrayCoreManager instances", e)
+                AiLogHelper.e(TAG, "❌ XRAY STOP ERROR: Error stopping MultiXrayCoreManager instances: ${e.message}", e)
             }
+        } else {
+            AiLogHelper.w(TAG, "⚠️ XRAY STOP: MultiXrayCoreManager is null, nothing to stop")
         }
     }
     

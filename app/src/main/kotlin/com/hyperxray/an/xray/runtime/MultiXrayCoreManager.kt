@@ -2,6 +2,7 @@ package com.hyperxray.an.xray.runtime
 
 import android.content.Context
 import android.util.Log
+import com.hyperxray.an.common.AiLogHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -118,21 +119,28 @@ class MultiXrayCoreManager(private val context: Context) {
         configContent: String?,
         excludedPorts: Set<Int> = emptySet()
     ): Map<Int, Int> {
+        val startTime = System.currentTimeMillis()
+        AiLogHelper.i(TAG, "🚀 XRAY MANAGER START: startInstances() called with count=$count, configPath=$configPath")
+        
         // Step 1: Acquire lock -> Check state -> Release lock
         val shouldProceed = mutex.withLock {
             // Prevent concurrent start calls
             if (isStarting) {
                 val stackTrace = Exception("Duplicate startInstances call")
                 Log.w(TAG, "Start already in progress, ignoring duplicate call", stackTrace)
+                AiLogHelper.w(TAG, "⚠️ XRAY MANAGER START: Already in progress, ignoring duplicate call")
                 return@withLock false
             }
             
             if (count < 1 || count > 4) {
-                Log.e(TAG, "❌ Invalid instance count: $count (must be 1-4)")
+                val errorMsg = "Invalid instance count: $count (must be 1-4)"
+                Log.e(TAG, "❌ $errorMsg")
+                AiLogHelper.e(TAG, "❌ XRAY MANAGER START FAILED: $errorMsg")
                 return@withLock false
             }
             
             Log.i(TAG, "🚀 MultiXrayCoreManager.startInstances() called with count=$count")
+            AiLogHelper.i(TAG, "🚀 XRAY MANAGER START: Starting $count instance(s)")
             isStarting = true
             true
         }
@@ -152,20 +160,27 @@ class MultiXrayCoreManager(private val context: Context) {
             
             if (previousCount > 0) {
                 Log.i(TAG, "🔄 Reconfiguring instances from $previousCount to $count (previous ports: $previousPorts)")
+                AiLogHelper.i(TAG, "🔄 XRAY MANAGER START: Reconfiguring instances from $previousCount to $count (previous ports: $previousPorts)")
             }
             
             // Step 3: Stop existing instances first
             // Acquire mutex only for the stop operation, then release before starting new instances
             if (previousCount > 0) {
                 Log.i(TAG, "🛑 Stopping $previousCount existing instances before starting new ones...")
+                AiLogHelper.i(TAG, "🛑 XRAY MANAGER START: Stopping $previousCount existing instances before starting new ones...")
+                val stopStartTime = System.currentTimeMillis()
                 mutex.withLock {
                     stopAllInstancesInternal()
                 }
+                val stopDuration = System.currentTimeMillis() - stopStartTime
                 Log.i(TAG, "✅ Existing instances stopped, proceeding with new instance startup")
+                AiLogHelper.i(TAG, "✅ XRAY MANAGER START: Existing instances stopped (duration: ${stopDuration}ms), proceeding with new instance startup")
             }
             
             Log.i(TAG, "▶️ Starting $count Xray-core instances sequentially")
             Log.d(TAG, "Instance startup configuration: count=$count, configPath=$configPath, excludedPortsCount=${excludedPorts.size}")
+            AiLogHelper.i(TAG, "▶️ XRAY MANAGER START: Starting $count Xray-core instances sequentially")
+            AiLogHelper.d(TAG, "📋 XRAY MANAGER START: Configuration - count=$count, configPath=$configPath, excludedPorts=${excludedPorts.size}")
         
             // OPTIMIZATION: Inject common config once (without API port)
             // Then each instance only needs lightweight port injection
@@ -186,8 +201,10 @@ class MultiXrayCoreManager(private val context: Context) {
             // Step 4: Start each instance sequentially (SYNC MODE)
             // CRITICAL: Mutex is NOT held during service.start() or waiting for Running state
             for (i in 0 until count) {
+                val instanceStartTime = System.currentTimeMillis()
                 try {
                     Log.i(TAG, "📋 Starting instance $i (${i + 1}/$count) sequentially...")
+                    AiLogHelper.i(TAG, "📋 XRAY MANAGER START: Starting instance $i (${i + 1}/$count) sequentially...")
                     
                     // Check cancellation
                     coroutineContext.ensureActive()
@@ -195,22 +212,27 @@ class MultiXrayCoreManager(private val context: Context) {
                     // Check isStarting flag (no mutex needed for read)
                     if (!isStarting) {
                         Log.w(TAG, "⚠️ Instance $i: Startup cancelled - isStarting flag is false")
+                        AiLogHelper.w(TAG, "⚠️ XRAY MANAGER START: Instance $i startup cancelled - isStarting flag is false")
                         break
                     }
                     
                     // Allocate port (no mutex needed)
                     Log.d(TAG, "Instance $i: Allocating port...")
+                    AiLogHelper.d(TAG, "🔧 XRAY MANAGER START: Instance $i - Allocating port...")
                     val apiPort: Int? = this@MultiXrayCoreManager.findAvailablePort(allExcludedPorts)
                     
                     if (apiPort == null) {
                         Log.e(TAG, "❌ Instance $i: Failed to find available port")
+                        AiLogHelper.e(TAG, "❌ XRAY MANAGER START: Instance $i - Failed to find available port")
                         break
                     }
                     Log.d(TAG, "Instance $i: Port allocated: $apiPort")
+                    AiLogHelper.i(TAG, "✅ XRAY MANAGER START: Instance $i - Port allocated: $apiPort")
                     allExcludedPorts.add(apiPort)
                     
                     // Inject API port into config (no mutex needed)
                     Log.d(TAG, "Instance $i: Injecting API port $apiPort into config...")
+                    AiLogHelper.d(TAG, "🔧 XRAY MANAGER START: Instance $i - Injecting API port $apiPort into config...")
                     val injectedConfigContent = try {
                         ConfigUtils.injectApiPort(commonConfigContent, apiPort)
                             .also { Log.d(TAG, "Instance $i: Config injection completed (config size: ${it.length} bytes)") }
@@ -451,9 +473,13 @@ class MultiXrayCoreManager(private val context: Context) {
      * Use stopAllInstancesInternal() when already holding the mutex.
      */
     suspend fun stopAllInstances() {
+        val stopTime = System.currentTimeMillis()
+        AiLogHelper.i(TAG, "🛑 XRAY MANAGER STOP: stopAllInstances() called")
         mutex.withLock {
             stopAllInstancesInternal()
         }
+        val stopDuration = System.currentTimeMillis() - stopTime
+        AiLogHelper.i(TAG, "✅ XRAY MANAGER STOP SUCCESS: All instances stopped (duration: ${stopDuration}ms)")
     }
     
     /**
@@ -682,31 +708,43 @@ class MultiXrayCoreManager(private val context: Context) {
         val instanceCount = instances.size
         if (instanceCount == 0) {
             Log.d(TAG, "No instances to stop")
+            AiLogHelper.d(TAG, "✅ XRAY MANAGER STOP: No instances to stop")
             return
         }
         
         Log.i(TAG, "Stopping all $instanceCount instances (internal, mutex-free)")
+        AiLogHelper.i(TAG, "🛑 XRAY MANAGER STOP: Stopping all $instanceCount instances")
         
         // Get snapshot of services to stop (no mutex needed - we're already synchronized or called from safe context)
         val servicesToStop = instances.values.toList()
         val portsToStop = instancePorts.values.toList()
+        AiLogHelper.d(TAG, "📋 XRAY MANAGER STOP: Instances to stop - ports: $portsToStop")
         
         // Stop services (NO MUTEX HERE - these are IO operations)
         servicesToStop.forEachIndexed { index, service ->
+            val instanceStopTime = System.currentTimeMillis()
             try {
-                Log.d(TAG, "Stopping instance $index (port: ${portsToStop.getOrNull(index)})")
+                val port = portsToStop.getOrNull(index)
+                Log.d(TAG, "Stopping instance $index (port: $port)")
+                AiLogHelper.d(TAG, "🔧 XRAY MANAGER STOP: Stopping instance $index (port: $port)...")
                 service.stop()
+                val instanceStopDuration = System.currentTimeMillis() - instanceStopTime
+                AiLogHelper.i(TAG, "✅ XRAY MANAGER STOP: Instance $index stopped (port: $port, duration: ${instanceStopDuration}ms)")
             } catch (e: Exception) {
                 Log.e(TAG, "Error stopping instance $index", e)
+                AiLogHelper.e(TAG, "❌ XRAY MANAGER STOP: Error stopping instance $index: ${e.message}", e)
             }
         }
         
         // Cleanup services (NO MUTEX HERE - these are cleanup operations)
         servicesToStop.forEachIndexed { index, service ->
             try {
+                AiLogHelper.d(TAG, "🧹 XRAY MANAGER STOP: Cleaning up instance $index...")
                 service.cleanup()
+                AiLogHelper.d(TAG, "✅ XRAY MANAGER STOP: Instance $index cleaned up")
             } catch (e: Exception) {
                 Log.e(TAG, "Error cleaning up instance $index", e)
+                AiLogHelper.e(TAG, "❌ XRAY MANAGER STOP: Error cleaning up instance $index: ${e.message}", e)
             }
         }
         
@@ -720,8 +758,10 @@ class MultiXrayCoreManager(private val context: Context) {
         
         // Clear routing cache when all instances stop
         routingCache.clear()
+        AiLogHelper.d(TAG, "🧹 XRAY MANAGER STOP: Routing cache cleared")
         
         Log.i(TAG, "All $instanceCount instances stopped (internal)")
+        AiLogHelper.i(TAG, "✅ XRAY MANAGER STOP: All $instanceCount instances stopped (internal)")
     }
     
     /**

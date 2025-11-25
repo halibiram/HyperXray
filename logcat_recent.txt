@@ -1,5 +1,0 @@
-adb server version (41) doesn't match this client (39); killing...
-could not read ok from ADB Server
-* failed to start daemon
-- waiting for device -
-error: protocol fault (couldn't read status): Connection reset by peer

@@ -27,6 +27,7 @@ DEVICE_LOG_PATHS = {
     "learner_log": f"/data/data/{PACKAGE_NAME}/files/learner_log.jsonl",
     "runtime_log": f"/data/data/{PACKAGE_NAME}/files/logs/tls_v5_runtime_log.jsonl",
     "dns_cache": f"/data/data/{PACKAGE_NAME}/cache/dns_cache.json",
+    "stat_file": f"/data/data/{PACKAGE_NAME}/files/stat.txt",
     "logcat": None,  # Will be collected separately
 }
 
@@ -81,21 +82,24 @@ def check_adb_connection() -> bool:
     return False
 
 
-def pull_log_file(device_path: str, local_name: str) -> Optional[Path]:
+def pull_log_file(device_path: str, local_name: str, check_exists: bool = True) -> Optional[Path]:
     """Cihazdan log dosyasını çek."""
     local_path = OUTPUT_DIR / local_name
 
-    # Önce dosyanın var olup olmadığını kontrol et
-    result = run_adb_command(
-        ["shell", "run-as", PACKAGE_NAME, "test", "-f", device_path])
-    if result is None:
-        print(f"⚠️  Log dosyası bulunamadı: {device_path}")
-        return None
+    # Önce dosyanın var olup olmadığını kontrol et (opsiyonel)
+    if check_exists:
+        result = run_adb_command(
+            ["shell", "run-as", PACKAGE_NAME, "test", "-f", device_path])
+        if result is None:
+            print(f"⚠️  Log dosyası bulunamadı: {device_path}")
+            return None
 
-    # Dosyayı çek
+    # Dosyayı çek (relative path kullan)
+    # device_path'ten sadece dosya adını al
+    relative_path = device_path.replace(f"/data/data/{PACKAGE_NAME}/", "")
     result = run_adb_command(
-        ["shell", "run-as", PACKAGE_NAME, "cat", device_path])
-    if result:
+        ["shell", "run-as", PACKAGE_NAME, "cat", relative_path])
+    if result is not None:
         local_path.write_text(result, encoding="utf-8", errors="ignore")
         size = local_path.stat().st_size
         print(f"✅ {local_name} çekildi ({size:,} bytes)")
@@ -105,25 +109,27 @@ def pull_log_file(device_path: str, local_name: str) -> Optional[Path]:
         return None
 
 
-def collect_logcat(tag_filters: List[str] = None, lines: int = 10000) -> Optional[Path]:
-    """Logcat'ten logları topla."""
+def collect_logcat(tag_filters: List[str] = None, lines: int = 100000) -> Optional[Path]:
+    """Logcat'ten logları detaylı topla (artırılmış satır limiti)."""
     local_path = OUTPUT_DIR / "logcat.txt"
 
     # Önce tüm logları çek (filtreleme sonra yapılabilir)
     # -d: dump and exit, -v time: timestamp ekle
     command = ["logcat", "-d", "-v", "time"]
 
-    # Son N satırı al
+    # Son N satırı al (artırıldı: 100000)
     command.extend(["-t", str(lines)])
 
     result = run_adb_command(command)
     if result:
         # Package ile ilgili logları filtrele (DNS cache loglarını da dahil et)
         filtered_lines = []
-        dns_tags = ["SystemDnsCacheServer", "DnsCacheManager", "DNS", "dns"]
+        dns_tags = ["SystemDnsCacheServer", "DnsCacheManager", "DNS", "dns", "DnsUpstreamClient", "DnsSocketPool"]
+        relevant_tags = [PACKAGE_NAME, "HyperXray", "TProxyService", "XrayRuntime", "TProxy", "Xray"]
+        
         for line in result.split("\n"):
-            if (PACKAGE_NAME in line or "HyperXray" in line or "TProxyService" in line or
-                    "XrayRuntime" in line or any(tag in line for tag in dns_tags)):
+            if (any(tag in line for tag in relevant_tags) or 
+                any(tag in line for tag in dns_tags)):
                 filtered_lines.append(line)
 
         if filtered_lines:
@@ -276,7 +282,7 @@ def analyze_jsonl_log(log_file: Path) -> Dict[str, Any]:
 
 
 def analyze_dns_cache(cache_file: Path) -> Dict[str, Any]:
-    """DNS cache dosyasını analiz et."""
+    """DNS cache dosyasını detaylı analiz et."""
     if not cache_file or not cache_file.exists():
         return {"status": "not_found"}
 
@@ -287,37 +293,101 @@ def analyze_dns_cache(cache_file: Path) -> Dict[str, Any]:
         # Cache istatistikleri
         entries = cache_data.get("entries", {})
         total_entries = len(entries)
+        current_time = int(datetime.now().timestamp())
 
         # TTL analizi
         ttls = []
-        for entry_data in entries.values():
+        expired_entries = 0
+        valid_entries = 0
+        entry_ages = []
+        ip_counts = []
+        domain_categories = {
+            "popular": 0,
+            "cdn": 0,
+            "api": 0,
+            "other": 0
+        }
+
+        for domain, entry_data in entries.items():
             if isinstance(entry_data, dict):
                 ttl = entry_data.get("ttl", 0)
+                timestamp = entry_data.get("timestamp", 0)
+                ips = entry_data.get("ips", [])
+                
                 if ttl > 0:
                     ttls.append(ttl)
+                
+                # Check if expired
+                age = current_time - timestamp
+                entry_ages.append(age)
+                if age > ttl:
+                    expired_entries += 1
+                else:
+                    valid_entries += 1
+                
+                # IP count
+                if isinstance(ips, list):
+                    ip_counts.append(len(ips))
+                
+                # Domain categorization
+                domain_lower = domain.lower()
+                if any(p in domain_lower for p in ["google", "facebook", "youtube", "twitter", "instagram", "amazon", "microsoft", "apple"]):
+                    domain_categories["popular"] += 1
+                elif any(cdn in domain_lower for cdn in [".cdn.", ".edge.", "cloudfront", "akamaiedge", "fastly"]):
+                    domain_categories["cdn"] += 1
+                elif any(api in domain_lower for api in ["api.", ".api", "api-"]):
+                    domain_categories["api"] += 1
+                else:
+                    domain_categories["other"] += 1
 
         avg_ttl = sum(ttls) / len(ttls) if ttls else 0
+        avg_age = sum(entry_ages) / len(entry_ages) if entry_ages else 0
+        avg_ips = sum(ip_counts) / len(ip_counts) if ip_counts else 0
+        min_ttl = min(ttls) if ttls else 0
+        max_ttl = max(ttls) if ttls else 0
 
         # Domain analizi
         domains = list(entries.keys())
         popular_domains = [d for d in domains if any(
-            p in d for p in ["google", "facebook", "youtube", "twitter", "instagram"])]
+            p in d.lower() for p in ["google", "facebook", "youtube", "twitter", "instagram"])]
+
+        # TTL distribution
+        ttl_distribution = Counter()
+        for ttl in ttls:
+            if ttl < 3600:  # < 1 hour
+                ttl_distribution["<1h"] += 1
+            elif ttl < 86400:  # < 24 hours
+                ttl_distribution["1h-24h"] += 1
+            elif ttl < 172800:  # < 48 hours
+                ttl_distribution["24h-48h"] += 1
+            else:
+                ttl_distribution[">48h"] += 1
 
         return {
             "status": "analyzed",
             "total_entries": total_entries,
+            "valid_entries": valid_entries,
+            "expired_entries": expired_entries,
+            "expiry_rate": round((expired_entries / total_entries * 100) if total_entries > 0 else 0, 2),
             "avg_ttl_seconds": round(avg_ttl, 2),
+            "min_ttl_seconds": min_ttl,
+            "max_ttl_seconds": max_ttl,
+            "avg_age_seconds": round(avg_age, 2),
+            "avg_ips_per_entry": round(avg_ips, 2),
+            "ttl_distribution": dict(ttl_distribution),
+            "domain_categories": domain_categories,
             "popular_domains_count": len(popular_domains),
-            "sample_domains": domains[:20]
+            "sample_domains": domains[:30],
+            "cache_size_bytes": len(content.encode('utf-8'))
         }
-    except json.JSONDecodeError:
-        return {"status": "invalid_json"}
+    except json.JSONDecodeError as e:
+        return {"status": "invalid_json", "error": str(e)}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
 
 def analyze_dns_logs(app_log_file: Path, logcat_file: Path) -> Dict[str, Any]:
-    """DNS loglarını analiz et (app_log ve logcat'ten filtrele)."""
+    """DNS loglarını detaylı analiz et (app_log ve logcat'ten filtrele)."""
     dns_logs = []
     dns_cache_hits = 0
     dns_cache_misses = 0
@@ -326,9 +396,16 @@ def analyze_dns_logs(app_log_file: Path, logcat_file: Path) -> Dict[str, Any]:
     dns_unhealthy_servers = 0
     dns_invalid_data = 0
     domains_queried = Counter()
+    latency_times = []
+    ttl_values = []
+    dns_operations = Counter()  # initialize, save, get, cleanup, etc.
+    dns_metrics_updates = 0
+    dns_server_starts = 0
+    dns_server_stops = 0
 
-    # DNS ile ilgili tag'ler
-    dns_tags = ["SystemDnsCacheServer", "DnsCacheManager", "DNS", "dns"]
+    # DNS ile ilgili tag'ler (genişletilmiş)
+    dns_tags = ["SystemDnsCacheServer", "DnsCacheManager", "DnsUpstreamClient", 
+                "DnsSocketPool", "DNS", "dns", "DnsCache"]
 
     # App log'dan DNS loglarını filtrele
     if app_log_file and app_log_file.exists():
@@ -353,8 +430,40 @@ def analyze_dns_logs(app_log_file: Path, logcat_file: Path) -> Dict[str, Any]:
                     domain = domain_match.group(0)
                     domains_queried[domain] += 1
 
+                # Latency extraction
+                latency_match = re.search(r'latency[:\s]+([\d.]+)\s*ms', line, re.IGNORECASE)
+                if latency_match:
+                    try:
+                        latency_times.append(float(latency_match.group(1)))
+                    except ValueError:
+                        pass
+                
+                # TTL extraction
+                ttl_match = re.search(r'TTL[:\s]+(\d+)', line, re.IGNORECASE)
+                if ttl_match:
+                    try:
+                        ttl_values.append(int(ttl_match.group(1)))
+                    except ValueError:
+                        pass
+                
+                # DNS operations tracking
+                if "initialized" in line.lower() or "initialize" in line.lower():
+                    dns_operations["initialize"] += 1
+                elif "save" in line.lower() and "cache" in line.lower():
+                    dns_operations["save"] += 1
+                elif "get" in line.lower() and "cache" in line.lower():
+                    dns_operations["get"] += 1
+                elif "cleanup" in line.lower() or "cleaned up" in line.lower():
+                    dns_operations["cleanup"] += 1
+                elif "metrics" in line.lower() and "update" in line.lower():
+                    dns_metrics_updates += 1
+                elif "started" in line.lower() and "server" in line.lower():
+                    dns_server_starts += 1
+                elif "stopped" in line.lower() and "server" in line.lower():
+                    dns_server_stops += 1
+                
                 # Hata kontrolü
-                if "ERROR" in line_upper or "FAILED" in line_upper() or "EXCEPTION" in line_upper:
+                if "ERROR" in line_upper or "FAILED" in line_upper or "EXCEPTION" in line_upper:
                     dns_errors += 1
                 elif "unhealthy" in line.lower():
                     dns_unhealthy_servers += 1
@@ -382,6 +491,38 @@ def analyze_dns_logs(app_log_file: Path, logcat_file: Path) -> Dict[str, Any]:
                     domain = domain_match.group(0)
                     domains_queried[domain] += 1
 
+                # Latency extraction (logcat)
+                latency_match = re.search(r'latency[:\s]+([\d.]+)\s*ms', line, re.IGNORECASE)
+                if latency_match:
+                    try:
+                        latency_times.append(float(latency_match.group(1)))
+                    except ValueError:
+                        pass
+                
+                # TTL extraction (logcat)
+                ttl_match = re.search(r'TTL[:\s]+(\d+)', line, re.IGNORECASE)
+                if ttl_match:
+                    try:
+                        ttl_values.append(int(ttl_match.group(1)))
+                    except ValueError:
+                        pass
+                
+                # DNS operations tracking (logcat)
+                if "initialized" in line.lower() or "initialize" in line.lower():
+                    dns_operations["initialize"] += 1
+                elif "save" in line.lower() and "cache" in line.lower():
+                    dns_operations["save"] += 1
+                elif "get" in line.lower() and "cache" in line.lower():
+                    dns_operations["get"] += 1
+                elif "cleanup" in line.lower() or "cleaned up" in line.lower():
+                    dns_operations["cleanup"] += 1
+                elif "metrics" in line.lower() and "update" in line.lower():
+                    dns_metrics_updates += 1
+                elif "started" in line.lower() and "server" in line.lower():
+                    dns_server_starts += 1
+                elif "stopped" in line.lower() and "server" in line.lower():
+                    dns_server_stops += 1
+                
                 if "ERROR" in line_upper or "FATAL" in line_upper:
                     dns_errors += 1
                 elif "unhealthy" in line.lower():
@@ -395,6 +536,16 @@ def analyze_dns_logs(app_log_file: Path, logcat_file: Path) -> Dict[str, Any]:
     total_queries = dns_cache_hits + dns_cache_misses + dns_resolved
     cache_hit_rate = (dns_cache_hits / total_queries *
                       100) if total_queries > 0 else 0
+    
+    # Calculate latency statistics
+    avg_latency = sum(latency_times) / len(latency_times) if latency_times else 0
+    min_latency = min(latency_times) if latency_times else 0
+    max_latency = max(latency_times) if latency_times else 0
+    
+    # Calculate TTL statistics
+    avg_ttl = sum(ttl_values) / len(ttl_values) if ttl_values else 0
+    min_ttl = min(ttl_values) if ttl_values else 0
+    max_ttl = max(ttl_values) if ttl_values else 0
 
     return {
         "status": "analyzed",
@@ -407,8 +558,24 @@ def analyze_dns_logs(app_log_file: Path, logcat_file: Path) -> Dict[str, Any]:
         "unhealthy_servers": dns_unhealthy_servers,
         "invalid_data_errors": dns_invalid_data,
         "unique_domains": len(domains_queried),
-        "top_domains": dict(domains_queried.most_common(20)),
-        "sample_logs": dns_logs[:15]
+        "top_domains": dict(domains_queried.most_common(30)),
+        "latency_stats": {
+            "avg_ms": round(avg_latency, 2),
+            "min_ms": round(min_latency, 2),
+            "max_ms": round(max_latency, 2),
+            "samples": len(latency_times)
+        },
+        "ttl_stats": {
+            "avg_seconds": round(avg_ttl, 2),
+            "min_seconds": min_ttl,
+            "max_seconds": max_ttl,
+            "samples": len(ttl_values)
+        },
+        "operations": dict(dns_operations),
+        "metrics_updates": dns_metrics_updates,
+        "server_starts": dns_server_starts,
+        "server_stops": dns_server_stops,
+        "sample_logs": dns_logs[:20]
     }
 
 
@@ -605,6 +772,14 @@ def generate_report(analyses: Dict[str, Any]) -> str:
                 report.append(
                     f"| Telegram Logları | {status_emoji} {status} | - |\n")
 
+        elif log_type == "stat_file":
+            if status == "analyzed":
+                total = analysis.get("total_lines", 0)
+                report.append(
+                    f"| Stat Dosyası | {status_emoji} {status} | {total} satır |\n")
+            else:
+                report.append(f"| Stat Dosyası | {status_emoji} {status} | - |\n")
+
         elif log_type == "logcat":
             if status == "analyzed":
                 lines = analysis.get("total_lines", 0)
@@ -681,15 +856,46 @@ def generate_report(analyses: Dict[str, Any]) -> str:
             report.append(
                 f"- **Toplam Kayıt:** {analysis.get('total_entries', 0):,}\n")
             report.append(
-                f"- **Ortalama TTL:** {analysis.get('avg_ttl_seconds', 0):.2f} saniye\n")
+                f"- **Geçerli Kayıt:** {analysis.get('valid_entries', 0):,}\n")
+            report.append(
+                f"- **Süresi Dolmuş Kayıt:** {analysis.get('expired_entries', 0):,}\n")
+            report.append(
+                f"- **Süresi Dolma Oranı:** %{analysis.get('expiry_rate', 0):.2f}\n")
+            report.append(
+                f"- **Ortalama TTL:** {analysis.get('avg_ttl_seconds', 0):.2f} saniye ({analysis.get('avg_ttl_seconds', 0) / 3600:.2f} saat)\n")
+            report.append(
+                f"- **Min TTL:** {analysis.get('min_ttl_seconds', 0):,} saniye\n")
+            report.append(
+                f"- **Max TTL:** {analysis.get('max_ttl_seconds', 0):,} saniye\n")
+            report.append(
+                f"- **Ortalama Yaş:** {analysis.get('avg_age_seconds', 0):.2f} saniye ({analysis.get('avg_age_seconds', 0) / 3600:.2f} saat)\n")
+            report.append(
+                f"- **Entry Başına Ortalama IP:** {analysis.get('avg_ips_per_entry', 0):.2f}\n")
+            report.append(
+                f"- **Cache Boyutu:** {analysis.get('cache_size_bytes', 0):,} bytes ({analysis.get('cache_size_bytes', 0) / 1024:.2f} KB)\n")
+            
+            if analysis.get("ttl_distribution"):
+                report.append("\n### TTL Dağılımı\n")
+                report.append("| Aralık | Kayıt Sayısı |\n")
+                report.append("|--------|--------------|\n")
+                for range_name, count in analysis.get("ttl_distribution", {}).items():
+                    report.append(f"| {range_name} | {count:,} |\n")
+            
+            if analysis.get("domain_categories"):
+                report.append("\n### Domain Kategorileri\n")
+                report.append("| Kategori | Sayı |\n")
+                report.append("|----------|------|\n")
+                for category, count in analysis.get("domain_categories", {}).items():
+                    report.append(f"| {category} | {count:,} |\n")
+            
             report.append(
                 f"- **Popüler Domain Sayısı:** {analysis.get('popular_domains_count', 0)}\n")
 
             if analysis.get("sample_domains"):
-                report.append("\n### Örnek Domainler\n")
+                report.append("\n### Örnek Domainler (İlk 30)\n")
                 report.append("| Domain |\n")
                 report.append("|--------|\n")
-                for domain in analysis.get("sample_domains", [])[:20]:
+                for domain in analysis.get("sample_domains", [])[:30]:
                     report.append(f"| {domain} |\n")
 
         elif log_type == "dns_logs":
@@ -712,12 +918,42 @@ def generate_report(analyses: Dict[str, Any]) -> str:
                     f"- **⚠️ Invalid Data Errors:** {analysis.get('invalid_data_errors', 0):,}\n")
             report.append(
                 f"- **Benzersiz Domain:** {analysis.get('unique_domains', 0):,}\n")
+            
+            if analysis.get("latency_stats"):
+                lat_stats = analysis["latency_stats"]
+                report.append("\n### Latency İstatistikleri\n")
+                report.append(f"- **Ortalama Latency:** {lat_stats.get('avg_ms', 0):.2f} ms\n")
+                report.append(f"- **Min Latency:** {lat_stats.get('min_ms', 0):.2f} ms\n")
+                report.append(f"- **Max Latency:** {lat_stats.get('max_ms', 0):.2f} ms\n")
+                report.append(f"- **Örnek Sayısı:** {lat_stats.get('samples', 0):,}\n")
+            
+            if analysis.get("ttl_stats"):
+                ttl_stats = analysis["ttl_stats"]
+                report.append("\n### TTL İstatistikleri (Loglardan)\n")
+                report.append(f"- **Ortalama TTL:** {ttl_stats.get('avg_seconds', 0):.2f} saniye ({ttl_stats.get('avg_seconds', 0) / 3600:.2f} saat)\n")
+                report.append(f"- **Min TTL:** {ttl_stats.get('min_seconds', 0):,} saniye\n")
+                report.append(f"- **Max TTL:** {ttl_stats.get('max_seconds', 0):,} saniye\n")
+                report.append(f"- **Örnek Sayısı:** {ttl_stats.get('samples', 0):,}\n")
+            
+            if analysis.get("operations"):
+                report.append("\n### DNS İşlemleri\n")
+                report.append("| İşlem | Sayı |\n")
+                report.append("|-------|------|\n")
+                for op, count in analysis.get("operations", {}).items():
+                    report.append(f"| {op} | {count:,} |\n")
+            
+            if analysis.get("metrics_updates", 0) > 0:
+                report.append(f"- **Metrics Güncellemeleri:** {analysis.get('metrics_updates', 0):,}\n")
+            if analysis.get("server_starts", 0) > 0:
+                report.append(f"- **DNS Server Başlatmaları:** {analysis.get('server_starts', 0):,}\n")
+            if analysis.get("server_stops", 0) > 0:
+                report.append(f"- **DNS Server Durdurmaları:** {analysis.get('server_stops', 0):,}\n")
 
             if analysis.get("top_domains"):
-                report.append("\n### En Çok Sorgulanan Domainler\n")
+                report.append("\n### En Çok Sorgulanan Domainler (İlk 30)\n")
                 report.append("| Domain | Sorgu Sayısı |\n")
                 report.append("|--------|--------------|\n")
-                for domain, count in list(analysis.get("top_domains", {}).items())[:20]:
+                for domain, count in list(analysis.get("top_domains", {}).items())[:30]:
                     report.append(f"| {domain} | {count:,} |\n")
 
             if analysis.get("sample_logs"):
@@ -819,15 +1055,18 @@ def main():
     log_files = {}
     log_files["app_log"] = pull_log_file(
         DEVICE_LOG_PATHS["app_log"],
-        "app_log.txt"
+        "app_log.txt",
+        check_exists=False  # Boş olsa bile çek
     )
     log_files["learner_log"] = pull_log_file(
         DEVICE_LOG_PATHS["learner_log"],
-        "learner_log.jsonl"
+        "learner_log.jsonl",
+        check_exists=False
     )
     log_files["runtime_log"] = pull_log_file(
         DEVICE_LOG_PATHS["runtime_log"],
-        "tls_v5_runtime_log.jsonl"
+        "tls_v5_runtime_log.jsonl",
+        check_exists=False
     )
     # DNS cache dosyasını çek (cache dizini için özel işlem)
     dns_cache_result = run_adb_command(
@@ -843,6 +1082,67 @@ def main():
         print(f"⚠️  DNS cache dosyası bulunamadı: cache/dns_cache.json")
         log_files["dns_cache"] = None
 
+    # Stat dosyasını çek
+    log_files["stat_file"] = pull_log_file(
+        DEVICE_LOG_PATHS["stat_file"],
+        "stat.txt",
+        check_exists=False
+    )
+
+    # Crash dosyalarını çek
+    print("\n📂 Crash dosyaları kontrol ediliyor...")
+    crashes_list = run_adb_command(
+        ["shell", "run-as", PACKAGE_NAME, "ls", "files/crashes/"])
+    if crashes_list:
+        crash_files = [f.strip() for f in crashes_list.split("\n") if f.strip()]
+        if crash_files:
+            print(f"  {len(crash_files)} crash dosyası bulundu")
+            for crash_file in crash_files[:5]:  # İlk 5 crash dosyasını çek
+                crash_result = run_adb_command(
+                    ["shell", "run-as", PACKAGE_NAME, "cat", f"files/crashes/{crash_file}"])
+                if crash_result:
+                    crash_local = OUTPUT_DIR / f"crash_{crash_file}"
+                    crash_local.write_text(crash_result, encoding="utf-8", errors="ignore")
+                    size = crash_local.stat().st_size
+                    print(f"  ✅ crash_{crash_file} çekildi ({size:,} bytes)")
+
+    # Tüm dosyaları listele (debug için)
+    print("\n📂 Uygulama dosyaları listeleniyor...")
+    files_list = run_adb_command(
+        ["shell", "run-as", PACKAGE_NAME, "ls", "-la", "files/"])
+    if files_list:
+        print("Files dizini içeriği:")
+        for line in files_list.split("\n")[:20]:  # İlk 20 satır
+            if line.strip():
+                print(f"  {line}")
+    
+    # Logs dizinini kontrol et ve tüm dosyaları çek
+    print("\n📂 Logs dizini kontrol ediliyor...")
+    logs_list = run_adb_command(
+        ["shell", "run-as", PACKAGE_NAME, "ls", "-la", "files/logs/"])
+    if logs_list:
+        print("Logs dizini içeriği:")
+        log_files_in_logs = []
+        for line in logs_list.split("\n"):
+            if line.strip() and not line.startswith("total") and not line.startswith("d"):
+                # Dosya adını çıkar
+                parts = line.split()
+                if len(parts) >= 9:
+                    filename = parts[-1]
+                    if filename and filename != "." and filename != "..":
+                        log_files_in_logs.append(filename)
+                        print(f"  {line}")
+        
+        # Logs dizinindeki tüm dosyaları çek
+        for log_file_name in log_files_in_logs:
+            log_result = run_adb_command(
+                ["shell", "run-as", PACKAGE_NAME, "cat", f"files/logs/{log_file_name}"])
+            if log_result:
+                log_local = OUTPUT_DIR / f"logs_{log_file_name}"
+                log_local.write_text(log_result, encoding="utf-8", errors="ignore")
+                size = log_local.stat().st_size
+                print(f"  ✅ logs_{log_file_name} çekildi ({size:,} bytes)")
+
     log_files["logcat"] = collect_logcat()
 
     print("\n📊 Loglar analiz ediliyor...\n")
@@ -853,6 +1153,7 @@ def main():
     analyses["learner_log"] = analyze_jsonl_log(log_files.get("learner_log"))
     analyses["runtime_log"] = analyze_jsonl_log(log_files.get("runtime_log"))
     analyses["dns_cache"] = analyze_dns_cache(log_files.get("dns_cache"))
+    analyses["stat_file"] = analyze_app_log(log_files.get("stat_file"))  # Stat dosyasını da analiz et
     analyses["dns_logs"] = analyze_dns_logs(
         log_files.get("app_log"), log_files.get("logcat"))
     analyses["telegram_logs"] = analyze_telegram_logs(

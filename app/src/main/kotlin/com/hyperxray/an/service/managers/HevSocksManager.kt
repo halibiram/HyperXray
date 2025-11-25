@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import com.hyperxray.an.common.AiLogHelper
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.service.TProxyService
 import com.hyperxray.an.service.utils.TProxyUtils
@@ -187,19 +188,26 @@ class HevSocksManager(private val context: Context) {
         onStartComplete: (() -> Unit)? = null,
         notificationManager: Any? = null
     ): Boolean {
+        val startTime = System.currentTimeMillis()
         Log.d(TAG, "Starting native TProxy service...")
+        AiLogHelper.i(TAG, "🚀 TPROXY START: Starting native TProxy service...")
         
         val tproxyFile = File(context.cacheDir, "tproxy.conf")
         if (!tproxyFile.exists()) {
-            Log.e(TAG, "TProxy config file not found in startNativeTProxy")
+            val errorMsg = "TProxy config file not found in startNativeTProxy"
+            Log.e(TAG, errorMsg)
+            AiLogHelper.e(TAG, "❌ TPROXY START FAILED: $errorMsg")
             stopXrayCallback("TProxy config file not found")
             return false
         }
+        AiLogHelper.d(TAG, "✅ TPROXY START: Config file found: ${tproxyFile.absolutePath} (${tproxyFile.length()} bytes)")
 
         // Safely get fd using TunInterfaceManager with thread safety
         // Check if we're stopping (defensive check)
         if (isStoppingCallback()) {
-            Log.w(TAG, "Service is stopping, cannot start TProxy")
+            val errorMsg = "Service is stopping, cannot start TProxy"
+            Log.w(TAG, errorMsg)
+            AiLogHelper.w(TAG, "⚠️ TPROXY START: $errorMsg")
             stopXrayCallback("Service is stopping")
             return false
         }
@@ -209,17 +217,25 @@ class HevSocksManager(private val context: Context) {
         }
         
         if (fd == null) {
-            Log.e(TAG, "TUN file descriptor is null or invalid in startNativeTProxy")
+            val errorMsg = "TUN file descriptor is null or invalid in startNativeTProxy"
+            Log.e(TAG, errorMsg)
+            AiLogHelper.e(TAG, "❌ TPROXY START FAILED: $errorMsg")
             stopXrayCallback("TUN file descriptor is null or invalid in startNativeTProxy")
             return false
         }
+        AiLogHelper.d(TAG, "✅ TPROXY START: TUN file descriptor obtained: fd=$fd")
 
         // Use fd immediately after extraction (minimize race window)
+        val nativeStartTime = System.currentTimeMillis()
+        AiLogHelper.d(TAG, "🔧 TPROXY START: Calling native TProxyStartService...")
         synchronized(tunFdLock) {
             com.hyperxray.an.service.TProxyService.TProxyStartService(tproxyFile.absolutePath, fd)
         }
+        val nativeStartDuration = System.currentTimeMillis() - nativeStartTime
         isRunningRef.set(true)
+        val totalDuration = System.currentTimeMillis() - startTime
         Log.d(TAG, "Native TProxy service started.")
+        AiLogHelper.i(TAG, "✅ TPROXY START SUCCESS: Native TProxy service started (native call: ${nativeStartDuration}ms, total: ${totalDuration}ms)")
 
         // Start AI-powered TProxy optimization
         val optimizer = tproxyAiOptimizer
@@ -342,26 +358,39 @@ class HevSocksManager(private val context: Context) {
         waitForUdpCleanup: Boolean = true,
         udpCleanupDelayMs: Long = 1000L
     ) {
+        val stopTime = System.currentTimeMillis()
+        AiLogHelper.i(TAG, "🛑 TPROXY STOP: Stopping native TProxy service (waitForUdpCleanup=$waitForUdpCleanup, delay=${udpCleanupDelayMs}ms)")
+        
         try {
+            val nativeStopTime = System.currentTimeMillis()
+            AiLogHelper.d(TAG, "🔧 TPROXY STOP: Calling native TProxyStopService...")
             synchronized(tunFdLock) {
                 com.hyperxray.an.service.TProxyService.TProxyStopService()
             }
+            val nativeStopDuration = System.currentTimeMillis() - nativeStopTime
+            AiLogHelper.d(TAG, "✅ TPROXY STOP: Native TProxyStopService completed (duration: ${nativeStopDuration}ms)")
             
             if (waitForUdpCleanup) {
                 // Give native tunnel time to clean up UDP sessions and close sockets gracefully
                 // This prevents race conditions where UDP packets are written to closed pipes
                 // UDP cleanup can take time, especially with active connections
+                AiLogHelper.d(TAG, "⏳ TPROXY STOP: Waiting for UDP cleanup (${udpCleanupDelayMs}ms)...")
                 try {
                     Thread.sleep(udpCleanupDelayMs)
+                    AiLogHelper.d(TAG, "✅ TPROXY STOP: UDP cleanup wait completed")
                 } catch (e: InterruptedException) {
                     Thread.currentThread().interrupt()
+                    AiLogHelper.w(TAG, "⚠️ TPROXY STOP: UDP cleanup wait interrupted")
                 }
             }
             
             isRunningRef.set(false)
+            val totalDuration = System.currentTimeMillis() - stopTime
             Log.d(TAG, "Native TProxy service stopped.")
+            AiLogHelper.i(TAG, "✅ TPROXY STOP SUCCESS: Native TProxy service stopped (total duration: ${totalDuration}ms)")
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping native TProxy service", e)
+            AiLogHelper.e(TAG, "❌ TPROXY STOP ERROR: Error stopping native TProxy service: ${e.message}", e)
             isRunningRef.set(false)
         }
     }

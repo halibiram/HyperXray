@@ -1,0 +1,48 @@
+HyperXray Crash Report
+Timestamp: 2025-11-24_11-25-42
+PID: 27865
+Package: com.hyperxray.an
+
+Exception:
+java.lang.RuntimeException: Unable to create service com.hyperxray.an.service.TProxyService: java.lang.NullPointerException: Attempt to invoke virtual method 'android.content.Context android.content.Context.getApplicationContext()' on a null object reference
+	at android.app.ActivityThread.handleCreateService(ActivityThread.java:5773)
+	at android.app.ActivityThread.-$$Nest$mhandleCreateService(Unknown Source:0)
+	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:2859)
+	at android.os.Handler.dispatchMessage(Handler.java:110)
+	at android.os.Looper.loopOnce(Looper.java:267)
+	at android.os.Looper.loop(Looper.java:360)
+	at android.app.ActivityThread.main(ActivityThread.java:10088)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:616)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:1113)
+Caused by: java.lang.NullPointerException: Attempt to invoke virtual method 'android.content.Context android.content.Context.getApplicationContext()' on a null object reference
+	at android.content.ContextWrapper.getApplicationContext(ContextWrapper.java:163)
+	at com.hyperxray.an.prefs.Preferences.<init>(Preferences.kt:14)
+	at com.hyperxray.an.service.TProxyService.<init>(TProxyService.kt:173)
+	at java.lang.Class.newInstance(Native Method)
+	at android.app.AppComponentFactory.instantiateService(AppComponentFactory.java:129)
+	at androidx.core.app.CoreComponentFactory.instantiateService(CoreComponentFactory.java:73)
+	at android.app.ActivityThread.handleCreateService(ActivityThread.java:5732)
+	... 9 more
+
+Stack trace:
+java.lang.RuntimeException: Unable to create service com.hyperxray.an.service.TProxyService: java.lang.NullPointerException: Attempt to invoke virtual method 'android.content.Context android.content.Context.getApplicationContext()' on a null object reference
+	at android.app.ActivityThread.handleCreateService(ActivityThread.java:5773)
+	at android.app.ActivityThread.-$$Nest$mhandleCreateService(Unknown Source:0)
+	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:2859)
+	at android.os.Handler.dispatchMessage(Handler.java:110)
+	at android.os.Looper.loopOnce(Looper.java:267)
+	at android.os.Looper.loop(Looper.java:360)
+	at android.app.ActivityThread.main(ActivityThread.java:10088)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:616)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:1113)
+Caused by: java.lang.NullPointerException: Attempt to invoke virtual method 'android.content.Context android.content.Context.getApplicationContext()' on a null object reference
+	at android.content.ContextWrapper.getApplicationContext(ContextWrapper.java:163)
+	at com.hyperxray.an.prefs.Preferences.<init>(Preferences.kt:14)
+	at com.hyperxray.an.service.TProxyService.<init>(TProxyService.kt:173)
+	at java.lang.Class.newInstance(Native Method)
+	at android.app.AppComponentFactory.instantiateService(AppComponentFactory.java:129)
+	at androidx.core.app.CoreComponentFactory.instantiateService(CoreComponentFactory.java:73)
+	at android.app.ActivityThread.handleCreateService(ActivityThread.java:5732)
+	... 9 more

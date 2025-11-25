@@ -61,3 +61,4 @@ logs/
 hyperxray_*.log
 vpn_error_logs.txt
 convert_log.py
+**/dns_cache.json

@@ -3,6 +3,8 @@ package com.hyperxray.an.core.network.dns
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+// Note: AiLogHelper is in app module, so we use Log here for core module
+// App module components should use AiLogHelper for detailed logging
 import org.json.JSONObject
 import org.json.JSONArray
 import java.io.File

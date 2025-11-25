@@ -3,6 +3,7 @@ package com.hyperxray.an.service.handlers
 import android.content.Intent
 import android.util.Log
 import com.hyperxray.an.R
+import com.hyperxray.an.common.AiLogHelper
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.service.TProxyService
 import com.hyperxray.an.service.state.ServiceSessionState
@@ -43,11 +44,24 @@ class ServiceIntentHandler(
      */
     fun handleIntent(intent: Intent): Int {
         val action = intent.action
+        AiLogHelper.i(TAG, "📥 INTENT HANDLER: Received intent action: $action")
         return when (action) {
-            ACTION_DISCONNECT -> handleDisconnect()
-            ACTION_RELOAD_CONFIG -> handleReloadConfig()
-            ACTION_START -> handleStart()
-            else -> handleDefault()
+            ACTION_DISCONNECT -> {
+                AiLogHelper.i(TAG, "🔌 INTENT HANDLER: Handling ACTION_DISCONNECT")
+                handleDisconnect()
+            }
+            ACTION_RELOAD_CONFIG -> {
+                AiLogHelper.i(TAG, "🔄 INTENT HANDLER: Handling ACTION_RELOAD_CONFIG")
+                handleReloadConfig()
+            }
+            ACTION_START -> {
+                AiLogHelper.i(TAG, "🚀 INTENT HANDLER: Handling ACTION_START")
+                handleStart()
+            }
+            else -> {
+                AiLogHelper.d(TAG, "📋 INTENT HANDLER: Handling default/unknown action: $action")
+                handleDefault()
+            }
         }
     }
     
@@ -55,6 +69,7 @@ class ServiceIntentHandler(
      * Handles ACTION_DISCONNECT - stops the Xray service.
      */
     private fun handleDisconnect(): Int {
+        AiLogHelper.i(TAG, "🛑 INTENT DISCONNECT: User requested disconnect")
         service.stopVpn("User requested disconnect (ACTION_DISCONNECT)")
         return android.app.Service.START_NOT_STICKY
     }
@@ -63,6 +78,8 @@ class ServiceIntentHandler(
      * Handles ACTION_RELOAD_CONFIG - reloads Xray configuration.
      */
     private fun handleReloadConfig(): Int {
+        AiLogHelper.i(TAG, "🔄 INTENT RELOAD: Reloading Xray configuration")
+        
         // Ensure notification is shown
         val channelName = if (session.prefs.disableVpn) "nosocks" else "socks5"
         session.notificationManager.initNotificationChannel(
@@ -78,6 +95,7 @@ class ServiceIntentHandler(
         val prefs = session.prefs
         if (prefs.disableVpn) {
             Log.d(TAG, "Received RELOAD_CONFIG action (core-only mode)")
+            AiLogHelper.d(TAG, "🔄 INTENT RELOAD: Core-only mode, reloading Xray process")
             session.reloadingRequested = true
             session.xrayProcess?.destroy()
             serviceScope.launch {
@@ -88,15 +106,17 @@ class ServiceIntentHandler(
         
         if (session.tunInterfaceManager.getTunFd() == null) {
             Log.w(TAG, "Cannot reload config, VPN service is not running.")
+            AiLogHelper.w(TAG, "⚠️ INTENT RELOAD: Cannot reload config, VPN service is not running")
             return android.app.Service.START_STICKY
         }
         
         Log.d(TAG, "Received RELOAD_CONFIG action.")
-            session.reloadingRequested = true
-            session.xrayProcess?.destroy()
-            serviceScope.launch {
-                service.runXrayProcess()
-            }
+        AiLogHelper.i(TAG, "🔄 INTENT RELOAD: Reloading Xray process (VPN mode)")
+        session.reloadingRequested = true
+        session.xrayProcess?.destroy()
+        serviceScope.launch {
+            service.runXrayProcess()
+        }
         return android.app.Service.START_STICKY
     }
     
@@ -104,10 +124,16 @@ class ServiceIntentHandler(
      * Handles ACTION_START - starts the Xray service.
      */
     private fun handleStart(): Int {
+        val startTime = System.currentTimeMillis()
+        AiLogHelper.i(TAG, "🚀 INTENT START: Starting Xray service")
+        
         session.logFileManager.clearLogsSync()
+        AiLogHelper.d(TAG, "🧹 INTENT START: Logs cleared")
+        
         val prefs = session.prefs
         
         if (prefs.disableVpn) {
+            AiLogHelper.i(TAG, "🚀 INTENT START: Core-only mode (disableVpn=true)")
             serviceScope.launch {
                 service.runXrayProcess()
             }
@@ -133,10 +159,14 @@ class ServiceIntentHandler(
                 "VPN service is running",
                 channelName
             )
+            AiLogHelper.i(TAG, "✅ INTENT START: Core-only mode started successfully")
         } else {
+            AiLogHelper.i(TAG, "🚀 INTENT START: Full VPN mode (disableVpn=false), initiating VPN session")
             service.initiateVpnSession()
         }
         
+        val duration = System.currentTimeMillis() - startTime
+        AiLogHelper.i(TAG, "✅ INTENT START: Action handled (duration: ${duration}ms)")
         return android.app.Service.START_STICKY
     }
     

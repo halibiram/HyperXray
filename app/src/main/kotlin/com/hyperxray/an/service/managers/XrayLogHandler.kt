@@ -3,6 +3,7 @@ package com.hyperxray.an.service.managers
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.hyperxray.an.common.AiLogHelper
 import com.hyperxray.an.data.source.LogFileManager
 import com.hyperxray.an.service.TProxyService
 import com.hyperxray.an.service.utils.TProxyUtils
@@ -203,6 +204,7 @@ class XrayLogHandler(
         if (line.contains("started", ignoreCase = true) &&
             line.contains("Xray", ignoreCase = true)) {
             Log.d(TAG, "Detected Xray startup in logs")
+            AiLogHelper.i(TAG, "✅ XRAY LOG: Detected Xray startup in logs")
             listener?.onXrayStarted()
         }
 
@@ -272,12 +274,14 @@ class XrayLogHandler(
      */
     fun stopObserving() {
         Log.d(TAG, "Stopping log observation")
+        AiLogHelper.i(TAG, "🛑 XRAY LOG HANDLER: Stopping log observation")
         readJob?.cancel()
         stderrJob?.cancel()
         healthCheckJob?.cancel()
         readJob = null
         stderrJob = null
         healthCheckJob = null
+        AiLogHelper.i(TAG, "✅ XRAY LOG HANDLER: Log observation stopped")
     }
 
     /**
@@ -287,8 +291,22 @@ class XrayLogHandler(
      * Also reads stderr stream in parallel to capture error messages.
      */
     private suspend fun readProcessStreamWithTimeout(process: Process, logFileManager: LogFileManager) {
+        val readStartTime = System.currentTimeMillis()
+        val processId = try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                val pidMethod = process.javaClass.getMethod("pid")
+                pidMethod.invoke(process) as? Long ?: 0L
+            } else {
+                0L
+            }
+        } catch (e: Exception) {
+            0L
+        }
+        AiLogHelper.i(TAG, "📖 XRAY LOG HANDLER: Starting process stream reading (PID: $processId)")
+        
         try {
             // Start reading stderr in parallel to capture error messages immediately
+            AiLogHelper.d(TAG, "🔧 XRAY LOG HANDLER: Starting stderr reader...")
             stderrJob = serviceScope.launch(Dispatchers.IO) {
                 try {
                     BufferedReader(InputStreamReader(process.errorStream)).use { errorReader ->
@@ -327,6 +345,7 @@ class XrayLogHandler(
             }
 
             // Health check coroutine monitors process and cancels read job if needed
+            AiLogHelper.d(TAG, "🔧 XRAY LOG HANDLER: Starting health check coroutine...")
             healthCheckJob = serviceScope.launch(Dispatchers.IO) {
                 try {
                     delay(HEALTH_CHECK_INITIAL_DELAY_MS)
@@ -337,6 +356,7 @@ class XrayLogHandler(
                         // Check if we're stopping
                         if (isStopping()) {
                             Log.d(TAG, "Health check detected stop request, cancelling read job.")
+                            AiLogHelper.i(TAG, "🛑 XRAY LOG HANDLER: Health check detected stop request, cancelling read job")
                             readJob?.cancel()
                             stderrJob?.cancel()
                             break
@@ -350,6 +370,7 @@ class XrayLogHandler(
                                 -1
                             }
                             Log.d(TAG, "Health check detected process death (exit code: $exitValue), cancelling read job.")
+                            AiLogHelper.w(TAG, "⚠️ XRAY LOG HANDLER: Health check detected process death (exit code: $exitValue), cancelling read job")
                             readJob?.cancel()
                             stderrJob?.cancel()
 
@@ -379,10 +400,12 @@ class XrayLogHandler(
             }
 
             // Stream reading coroutine - can be cancelled by health check
+            AiLogHelper.d(TAG, "🔧 XRAY LOG HANDLER: Starting stdout reader coroutine...")
             readJob = serviceScope.launch(Dispatchers.IO) {
                 try {
                     BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
                         var lastReadTime = System.currentTimeMillis()
+                        var lineCount = 0L
 
                         while (isActive && !isStopping()) {
                             try {
@@ -399,9 +422,11 @@ class XrayLogHandler(
                                             -1
                                         }
                                         Log.d(TAG, "Read timeout detected, process is dead (exit code: $exitValue)")
+                                        AiLogHelper.w(TAG, "⚠️ XRAY LOG HANDLER: Read timeout detected, process is dead (exit code: $exitValue, lines read: $lineCount)")
                                         break
                                     }
                                     Log.w(TAG, "Read timeout: no data for ${READ_TIMEOUT_MS}ms, but process is alive. Continuing...")
+                                    AiLogHelper.w(TAG, "⚠️ XRAY LOG HANDLER: Read timeout: no data for ${READ_TIMEOUT_MS}ms, but process is alive. Continuing... (lines read: $lineCount)")
                                     lastReadTime = currentTime
                                 }
 
@@ -440,6 +465,7 @@ class XrayLogHandler(
 
                             } catch (e: InterruptedIOException) {
                                 Log.d(TAG, "Stream read interrupted: ${e.message}")
+                                AiLogHelper.d(TAG, "📖 XRAY LOG HANDLER: Stream read interrupted: ${e.message} (lines read: $lineCount)")
                                 break
                             } catch (e: IOException) {
                                 // Check if process is still alive
@@ -450,16 +476,20 @@ class XrayLogHandler(
                                         -1
                                     }
                                     Log.d(TAG, "IOException during read, process is dead (exit code: $exitValue): ${e.message}")
+                                    AiLogHelper.w(TAG, "⚠️ XRAY LOG HANDLER: IOException during read, process is dead (exit code: $exitValue, lines read: $lineCount): ${e.message}")
                                 } else {
                                     Log.e(TAG, "IOException during stream read (process alive): ${e.message}", e)
+                                    AiLogHelper.e(TAG, "❌ XRAY LOG HANDLER: IOException during stream read (process alive, lines read: $lineCount): ${e.message}", e)
                                 }
                                 break
                             } catch (e: kotlinx.coroutines.CancellationException) {
                                 Log.d(TAG, "Read coroutine cancelled")
+                                AiLogHelper.d(TAG, "📖 XRAY LOG HANDLER: Read coroutine cancelled (lines read: $lineCount)")
                                 throw e
                             } catch (e: Exception) {
                                 if (isActive) {
                                     Log.e(TAG, "Unexpected error during stream read: ${e.message}", e)
+                                    AiLogHelper.e(TAG, "❌ XRAY LOG HANDLER: Unexpected error during stream read (lines read: $lineCount): ${e.message}", e)
                                 }
                                 break
                             }
@@ -467,28 +497,36 @@ class XrayLogHandler(
                     }
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     Log.d(TAG, "Read coroutine cancelled during stream reading")
+                    AiLogHelper.d(TAG, "📖 XRAY LOG HANDLER: Read coroutine cancelled during stream reading")
                     throw e
                 } catch (e: Exception) {
                     if (isActive) {
                         Log.e(TAG, "Error in read coroutine: ${e.message}", e)
+                        AiLogHelper.e(TAG, "❌ XRAY LOG HANDLER: Error in read coroutine: ${e.message}", e)
                     }
                 } finally {
                     // Cleanup: close streams
+                    AiLogHelper.d(TAG, "🧹 XRAY LOG HANDLER: Cleaning up streams...")
                     try {
                         process.inputStream?.close()
                     } catch (e: Exception) {
                         Log.w(TAG, "Error closing process input stream", e)
+                        AiLogHelper.w(TAG, "⚠️ XRAY LOG HANDLER: Error closing process input stream: ${e.message}")
                     }
                     try {
                         process.errorStream?.close()
                     } catch (e: Exception) {
                         Log.w(TAG, "Error closing process error stream", e)
+                        AiLogHelper.w(TAG, "⚠️ XRAY LOG HANDLER: Error closing process error stream: ${e.message}")
                     }
                     try {
                         process.outputStream?.close()
                     } catch (e: Exception) {
                         Log.w(TAG, "Error closing process output stream", e)
+                        AiLogHelper.w(TAG, "⚠️ XRAY LOG HANDLER: Error closing process output stream: ${e.message}")
                     }
+                    val readDuration = System.currentTimeMillis() - readStartTime
+                    AiLogHelper.i(TAG, "✅ XRAY LOG HANDLER: Stream reading completed (duration: ${readDuration}ms)")
                 }
             }
 
@@ -501,9 +539,11 @@ class XrayLogHandler(
 
         } catch (e: Exception) {
             Log.e(TAG, "Error starting log observation: ${e.message}", e)
+            AiLogHelper.e(TAG, "❌ XRAY LOG HANDLER: Error starting log observation: ${e.message}", e)
         } finally {
             // Cancel all jobs and wait for them to finish
             try {
+                AiLogHelper.d(TAG, "🧹 XRAY LOG HANDLER: Cancelling all jobs...")
                 healthCheckJob?.cancel()
                 readJob?.cancel()
                 stderrJob?.cancel()
@@ -513,8 +553,10 @@ class XrayLogHandler(
                     readJob?.join()
                     stderrJob?.join()
                 }
+                AiLogHelper.d(TAG, "✅ XRAY LOG HANDLER: All jobs cancelled")
             } catch (e: Exception) {
                 Log.w(TAG, "Error cancelling stream reading coroutines: ${e.message}", e)
+                AiLogHelper.w(TAG, "⚠️ XRAY LOG HANDLER: Error cancelling stream reading coroutines: ${e.message}")
             }
 
             // Wait before closing streams to allow process to finish writing

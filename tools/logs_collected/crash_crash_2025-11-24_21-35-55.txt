@@ -1,0 +1,42 @@
+HyperXray Crash Report
+Timestamp: 2025-11-24_21-35-55
+PID: 22064
+Package: com.hyperxray.an
+
+Exception:
+java.lang.RuntimeException: Unable to create service com.hyperxray.an.service.TProxyService: kotlin.UninitializedPropertyAccessException: lateinit property notificationManager has not been initialized
+	at android.app.ActivityThread.handleCreateService(ActivityThread.java:5773)
+	at android.app.ActivityThread.-$$Nest$mhandleCreateService(Unknown Source:0)
+	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:2859)
+	at android.os.Handler.dispatchMessage(Handler.java:110)
+	at android.os.Looper.loopOnce(Looper.java:267)
+	at android.os.Looper.loop(Looper.java:360)
+	at android.app.ActivityThread.main(ActivityThread.java:10088)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:616)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:1113)
+Caused by: kotlin.UninitializedPropertyAccessException: lateinit property notificationManager has not been initialized
+	at com.hyperxray.an.service.state.ServiceSessionState.getNotificationManager(ServiceSessionState.kt:38)
+	at com.hyperxray.an.service.TProxyService.setupNotification(TProxyService.kt:306)
+	at com.hyperxray.an.service.TProxyService.onCreate(TProxyService.kt:103)
+	at android.app.ActivityThread.handleCreateService(ActivityThread.java:5760)
+	... 9 more
+
+Stack trace:
+java.lang.RuntimeException: Unable to create service com.hyperxray.an.service.TProxyService: kotlin.UninitializedPropertyAccessException: lateinit property notificationManager has not been initialized
+	at android.app.ActivityThread.handleCreateService(ActivityThread.java:5773)
+	at android.app.ActivityThread.-$$Nest$mhandleCreateService(Unknown Source:0)
+	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:2859)
+	at android.os.Handler.dispatchMessage(Handler.java:110)
+	at android.os.Looper.loopOnce(Looper.java:267)
+	at android.os.Looper.loop(Looper.java:360)
+	at android.app.ActivityThread.main(ActivityThread.java:10088)
+	at java.lang.reflect.Method.invoke(Native Method)
+	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:616)
+	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:1113)
+Caused by: kotlin.UninitializedPropertyAccessException: lateinit property notificationManager has not been initialized
+	at com.hyperxray.an.service.state.ServiceSessionState.getNotificationManager(ServiceSessionState.kt:38)
+	at com.hyperxray.an.service.TProxyService.setupNotification(TProxyService.kt:306)
+	at com.hyperxray.an.service.TProxyService.onCreate(TProxyService.kt:103)
+	at android.app.ActivityThread.handleCreateService(ActivityThread.java:5760)
+	... 9 more

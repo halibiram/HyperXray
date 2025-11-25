@@ -9,6 +9,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
 import com.hyperxray.an.R
+import com.hyperxray.an.common.AiLogHelper
 import com.hyperxray.an.data.source.LogFileManager
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.viewmodel.CoreStatsState
@@ -98,6 +99,7 @@ class TProxyService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        AiLogHelper.i(TAG, "🔧 SERVICE CREATE: TProxyService onCreate() called")
         initializeManagers()
         setupLogHandler()
         setupWakeLock()
@@ -105,6 +107,7 @@ class TProxyService : VpnService() {
         setupHeartbeat()
         dependencyManager.setup(this, session)
         initializeXrayRunner()
+        AiLogHelper.i(TAG, "✅ SERVICE CREATE: TProxyService initialization completed")
     }
 
     override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
@@ -118,6 +121,7 @@ class TProxyService : VpnService() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "onDestroy called, cleaning up resources.")
+        AiLogHelper.i(TAG, "🛑 SERVICE DESTROY: TProxyService onDestroy() called, cleaning up resources")
         
         cleanupResources()
         
@@ -135,6 +139,7 @@ class TProxyService : VpnService() {
         cleanupSessionState()
         
         Log.d(TAG, "TProxyService destroyed.")
+        AiLogHelper.i(TAG, "✅ SERVICE DESTROY: TProxyService destroyed successfully")
     }
 
     override fun onRevoke() {
@@ -456,13 +461,18 @@ class TProxyService : VpnService() {
      * If any step fails, the service is immediately stopped to prevent zombie state.
      */
     fun initiateVpnSession() {
+        val sessionStartTime = System.currentTimeMillis()
+        AiLogHelper.i(TAG, "🚀 VPN SESSION START: initiateVpnSession() called")
+        
         if (session.isStarting) {
             Log.d(TAG, "initiateVpnSession() already in progress, ignoring duplicate call")
+            AiLogHelper.w(TAG, "⚠️ VPN SESSION START: Already in progress, ignoring duplicate call")
             return
         }
         
         if (session.isStopping) {
             Log.w(TAG, "initiateVpnSession() called while stopping, ignoring")
+            AiLogHelper.w(TAG, "⚠️ VPN SESSION START: Called while stopping, ignoring")
             return
         }
         
@@ -471,26 +481,45 @@ class TProxyService : VpnService() {
         try {
             resetSessionState()
             TProxyUtils.ensureXrayDirectories(this)
+            AiLogHelper.d(TAG, "🔧 VPN SESSION START: Session state reset, Xray directories ensured")
             
             serviceScope.launch {
                 try {
                     // Step 1: Establish VPN interface
+                    val step1StartTime = System.currentTimeMillis()
+                    AiLogHelper.i(TAG, "🔧 VPN SESSION STEP 1: Establishing VPN interface...")
                     if (!establishVpnInterface()) {
-                        handleStartupError("VPN interface establishment failed. Cannot proceed with Xray process.")
+                        val errorMsg = "VPN interface establishment failed. Cannot proceed with Xray process."
+                        AiLogHelper.e(TAG, "❌ VPN SESSION STEP 1 FAILED: $errorMsg")
+                        handleStartupError(errorMsg)
                         return@launch
                     }
+                    val step1Duration = System.currentTimeMillis() - step1StartTime
+                    AiLogHelper.i(TAG, "✅ VPN SESSION STEP 1 COMPLETED: VPN interface established (duration: ${step1Duration}ms)")
                     
                     // Step 2: Start Xray-core process
+                    val step2StartTime = System.currentTimeMillis()
+                    AiLogHelper.i(TAG, "🔧 VPN SESSION STEP 2: Starting Xray-core process...")
                     if (!startXrayProcess()) {
-                        handleStartupError("Failed to start Xray process.")
+                        val errorMsg = "Failed to start Xray process."
+                        AiLogHelper.e(TAG, "❌ VPN SESSION STEP 2 FAILED: $errorMsg")
+                        handleStartupError(errorMsg)
                         return@launch
                     }
+                    val step2Duration = System.currentTimeMillis() - step2StartTime
+                    AiLogHelper.i(TAG, "✅ VPN SESSION STEP 2 COMPLETED: Xray-core process started (duration: ${step2Duration}ms)")
                     
                     // Step 3: Native TProxy will start automatically when SOCKS5 becomes ready
                     // (triggered via checkSocks5Readiness callback -> startNativeTProxy)
+                    AiLogHelper.i(TAG, "⏳ VPN SESSION STEP 3: Waiting for SOCKS5 readiness (Native TProxy will start automatically)")
+                    
+                    val totalDuration = System.currentTimeMillis() - sessionStartTime
+                    AiLogHelper.i(TAG, "✅ VPN SESSION START SUCCESS: All steps completed (total duration: ${totalDuration}ms)")
                     
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error in VPN/Xray startup sequence: ${e.message}", e)
+                    val errorMsg = "Error in VPN/Xray startup sequence: ${e.message}"
+                    Log.e(TAG, errorMsg, e)
+                    AiLogHelper.e(TAG, "❌ VPN SESSION START FAILED: $errorMsg", e)
                     handleStartupError("Error starting VPN/Xray: ${e.message}")
                 } finally {
                     session.isStarting = false
@@ -498,6 +527,7 @@ class TProxyService : VpnService() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in initiateVpnSession()", e)
+            AiLogHelper.e(TAG, "❌ VPN SESSION START ERROR: ${e.message}", e)
             session.isStarting = false
             stopSelf()
         }
@@ -533,12 +563,15 @@ class TProxyService : VpnService() {
      * Establish VPN interface using TunInterfaceManager.
      */
     private suspend fun establishVpnInterface(): Boolean {
+        val establishStartTime = System.currentTimeMillis()
         if (session.tunInterfaceManager.isEstablished()) {
             Log.d(TAG, "VPN interface already established")
+            AiLogHelper.d(TAG, "✅ VPN INTERFACE: Already established")
             return true
         }
 
         Log.d(TAG, "Establishing VPN interface via TunInterfaceManager...")
+        AiLogHelper.i(TAG, "🔧 VPN INTERFACE: Establishing VPN interface via TunInterfaceManager...")
         val newTunFd = session.tunInterfaceManager.establish(
             prefs = session.prefs,
             sessionState = session,
@@ -563,10 +596,13 @@ class TProxyService : VpnService() {
 
         if (newTunFd == null) {
             Log.e(TAG, "Failed to establish VPN interface")
+            AiLogHelper.e(TAG, "❌ VPN INTERFACE: Failed to establish VPN interface")
             return false
         }
 
+        val establishDuration = System.currentTimeMillis() - establishStartTime
         Log.d(TAG, "VPN interface established successfully")
+        AiLogHelper.i(TAG, "✅ VPN INTERFACE: VPN interface established successfully (duration: ${establishDuration}ms, fd: ${newTunFd.fd})")
         return true
     }
 
@@ -581,16 +617,29 @@ class TProxyService : VpnService() {
     }
     
     private suspend fun startXrayProcess(): Boolean {
+        val startTime = System.currentTimeMillis()
+        AiLogHelper.i(TAG, "🚀 XRAY PROCESS START: Starting Xray process")
+        
         val selectedConfigPath = session.prefs.selectedConfigPath
-            ?: return handleConfigError("No configuration file selected.")
+            ?: return handleConfigError("No configuration file selected.").also {
+                AiLogHelper.e(TAG, "❌ XRAY PROCESS START: No configuration file selected")
+            }
+        AiLogHelper.d(TAG, "✅ XRAY PROCESS START: Config path found: $selectedConfigPath")
         
         val configFile = TProxyUtils.validateConfigPath(this, selectedConfigPath)
-            ?: return handleConfigError("Invalid configuration file: path validation failed or file not accessible.")
+            ?: return handleConfigError("Invalid configuration file: path validation failed or file not accessible.").also {
+                AiLogHelper.e(TAG, "❌ XRAY PROCESS START: Invalid configuration file: path validation failed")
+            }
+        AiLogHelper.d(TAG, "✅ XRAY PROCESS START: Config file validated: ${configFile.name} (${configFile.length()} bytes)")
         
         val configContent = TProxyUtils.readConfigContentSecurely(configFile)
-            ?: return handleConfigError("Failed to read configuration file.")
+            ?: return handleConfigError("Failed to read configuration file.").also {
+                AiLogHelper.e(TAG, "❌ XRAY PROCESS START: Failed to read configuration file")
+            }
+        AiLogHelper.d(TAG, "✅ XRAY PROCESS START: Config content read: ${configContent.length} bytes")
         
         val instanceCount = session.prefs.xrayCoreInstanceCount
+        AiLogHelper.i(TAG, "📊 XRAY PROCESS START: Instance count: $instanceCount")
         
         // Check if current xrayRunner is compatible with instance count
         // If not, recreate it with the correct type
@@ -641,7 +690,10 @@ class TProxyService : VpnService() {
         )
         
         session.currentConfig = config
+        AiLogHelper.d(TAG, "🔧 XRAY PROCESS START: Starting XrayRunner with config...")
         session.xrayRunner?.start(config)
+        val duration = System.currentTimeMillis() - startTime
+        AiLogHelper.i(TAG, "✅ XRAY PROCESS START: XrayRunner started successfully (duration: ${duration}ms)")
         return true
     }
 
@@ -666,51 +718,78 @@ class TProxyService : VpnService() {
      * 3. Close VPN interface (TunInterfaceManager)
      */
     fun stopVpn(reason: String? = null) {
+        val stopStartTime = System.currentTimeMillis()
+        val reasonMsg = reason ?: "No reason provided"
+        AiLogHelper.i(TAG, "🛑 VPN STOP: stopVpn() called. Reason: $reasonMsg")
+        
         if (session.isStopping) {
             Log.d(TAG, "stopVpn already in progress, ignoring duplicate call. Reason: $reason")
+            AiLogHelper.w(TAG, "⚠️ VPN STOP: Already in progress, ignoring duplicate call. Reason: $reason")
             return
         }
         session.isStopping = true
-        
-        Log.i(TAG, "stopVpn() called. Reason: ${reason ?: "No reason provided"}")
+
+        Log.i(TAG, "stopVpn() called. Reason: $reasonMsg")
 
         session.socks5ReadinessJob?.cancel()
         session.socks5ReadinessJob = null
         Socks5ReadinessChecker.setSocks5Ready(false)
         session.socks5ReadinessChecked = false
+        AiLogHelper.d(TAG, "🔧 VPN STOP: SOCKS5 readiness job cancelled, readiness flags reset")
 
         try {
             // Step 1: Stop native TProxy service first
+            val step1StartTime = System.currentTimeMillis()
+            AiLogHelper.i(TAG, "🔧 VPN STOP STEP 1: Stopping native TProxy service...")
             try {
                 Thread.sleep(500) // Allow in-flight UDP packets to finish
                 hevSocksManager.stopNativeTProxy(waitForUdpCleanup = true, udpCleanupDelayMs = 1000L)
+                val step1Duration = System.currentTimeMillis() - step1StartTime
+                AiLogHelper.i(TAG, "✅ VPN STOP STEP 1 COMPLETED: Native TProxy service stopped (duration: ${step1Duration}ms)")
             } catch (e: Exception) {
                 Log.e(TAG, "Error stopping native TProxy service", e)
+                AiLogHelper.e(TAG, "❌ VPN STOP STEP 1 ERROR: Error stopping native TProxy service: ${e.message}", e)
             }
 
             // Step 2: Stop XrayRunner
+            val step2StartTime = System.currentTimeMillis()
+            AiLogHelper.i(TAG, "🔧 VPN STOP STEP 2: Stopping XrayRunner...")
             if (session.xrayRunner != null) {
                 try {
                     runBlocking {
                         session.xrayRunner?.stop()
                     }
+                    val step2Duration = System.currentTimeMillis() - step2StartTime
+                    AiLogHelper.i(TAG, "✅ VPN STOP STEP 2 COMPLETED: XrayRunner stopped (duration: ${step2Duration}ms)")
                 } catch (e: Exception) {
                     Log.e(TAG, "Error stopping XrayRunner", e)
+                    AiLogHelper.e(TAG, "❌ VPN STOP STEP 2 ERROR: Error stopping XrayRunner: ${e.message}", e)
                 }
+            } else {
+                AiLogHelper.w(TAG, "⚠️ VPN STOP STEP 2: XrayRunner is null, skipping")
             }
 
             // Step 3: Cancel coroutine scope
+            AiLogHelper.d(TAG, "🔧 VPN STOP STEP 3: Cancelling coroutine scope...")
             serviceScope.cancel()
+            AiLogHelper.i(TAG, "✅ VPN STOP STEP 3 COMPLETED: Coroutine scope cancelled")
 
             // Step 4: Clear references
+            AiLogHelper.d(TAG, "🔧 VPN STOP STEP 4: Clearing references...")
             session.xrayProcess = null
             session.currentConfig = null
+            AiLogHelper.i(TAG, "✅ VPN STOP STEP 4 COMPLETED: References cleared")
 
             // Step 5: Close VPN interface
+            val step5StartTime = System.currentTimeMillis()
+            AiLogHelper.i(TAG, "🔧 VPN STOP STEP 5: Closing VPN interface...")
             stopService()
+            val step5Duration = System.currentTimeMillis() - step5StartTime
+            AiLogHelper.i(TAG, "✅ VPN STOP STEP 5 COMPLETED: VPN interface closed (duration: ${step5Duration}ms)")
 
         } catch (e: Exception) {
             Log.e(TAG, "Error during stopVpn cleanup", e)
+            AiLogHelper.e(TAG, "❌ VPN STOP ERROR: Error during cleanup: ${e.message}", e)
         } finally {
             session.isStopping = false
             
@@ -718,7 +797,9 @@ class TProxyService : VpnService() {
             stopIntent.setPackage(application.packageName)
             sendBroadcast(stopIntent)
             
+            val totalDuration = System.currentTimeMillis() - stopStartTime
             Log.d(TAG, "stopVpn cleanup completed.")
+            AiLogHelper.i(TAG, "✅ VPN STOP SUCCESS: Cleanup completed (total duration: ${totalDuration}ms)")
         }
     }
 
