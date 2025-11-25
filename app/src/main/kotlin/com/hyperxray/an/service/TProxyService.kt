@@ -17,7 +17,7 @@ import com.hyperxray.an.xray.runtime.MultiXrayCoreManager
 import com.hyperxray.an.notification.TelegramNotificationManager
 import com.hyperxray.an.service.utils.TProxyUtils
 import com.hyperxray.an.service.managers.TunInterfaceManager
-import com.hyperxray.an.service.managers.HevSocksManager
+import com.hyperxray.an.service.managers.Tun2SockManager
 import com.hyperxray.an.service.managers.ServiceDependencyManager
 import com.hyperxray.an.service.xray.XrayRunner
 import com.hyperxray.an.service.xray.XrayRunnerContext
@@ -86,7 +86,7 @@ class TProxyService : VpnService() {
     
     // Managers
     private lateinit var xrayLogHandler: com.hyperxray.an.service.managers.XrayLogHandler
-    private lateinit var hevSocksManager: HevSocksManager
+    private lateinit var tun2sockManager: Tun2SockManager
     private lateinit var intentHandler: ServiceIntentHandler
     private val dependencyManager = ServiceDependencyManager()
 
@@ -153,7 +153,7 @@ class TProxyService : VpnService() {
         session.logFileManager = LogFileManager(this)
         session.tunInterfaceManager = TunInterfaceManager(this)
         session.notificationManager = com.hyperxray.an.service.managers.ServiceNotificationManager(this)
-        hevSocksManager = HevSocksManager(this)
+        tun2sockManager = Tun2SockManager(this)
         intentHandler = ServiceIntentHandler(session, this, serviceScope)
         xrayLogHandler = com.hyperxray.an.service.managers.XrayLogHandler(serviceScope, this)
     }
@@ -623,7 +623,7 @@ class TProxyService : VpnService() {
             // Step 1: Stop native TProxy service first
             try {
                 Thread.sleep(500) // Allow in-flight UDP packets to finish
-                hevSocksManager.stopNativeTProxy(waitForUdpCleanup = true, udpCleanupDelayMs = 1000L)
+                tun2sockManager.stopNativeTProxy(waitForUdpCleanup = true, udpCleanupDelayMs = 1000L)
             } catch (e: Exception) {
                 Log.e(TAG, "Error stopping native TProxy service", e)
             }
@@ -677,7 +677,7 @@ class TProxyService : VpnService() {
 
         if (session.tunInterfaceManager.isEstablished()) {
             try {
-                hevSocksManager.stopNativeTProxy(waitForUdpCleanup = true, udpCleanupDelayMs = 200L)
+                tun2sockManager.stopNativeTProxy(waitForUdpCleanup = true, udpCleanupDelayMs = 200L)
             } catch (e: Exception) {
                 Log.e(TAG, "Error stopping native TProxy service", e)
             }
@@ -709,8 +709,9 @@ class TProxyService : VpnService() {
      * Called when SOCKS5 becomes ready.
      */
     private suspend fun startNativeTProxy() {
-        val success = hevSocksManager.startNativeTProxy(
+        val success = tun2sockManager.startNativeTProxy(
             tunInterfaceManager = session.tunInterfaceManager,
+            prefs = session.prefs,
             isStoppingCallback = { session.isStopping },
             stopXrayCallback = { reason -> stopVpn(reason) },
             serviceScope = serviceScope,
@@ -748,7 +749,7 @@ class TProxyService : VpnService() {
         
         Log.i(TAG, "checkSocks5Readiness called for ${prefs.socksAddress}:${prefs.socksPort}")
         try {
-            hevSocksManager.checkSocks5Readiness(
+            tun2sockManager.checkSocks5Readiness(
                 prefs = prefs,
                 serviceScope = serviceScope,
                 socks5ReadinessChecked = session.socks5ReadinessChecked,
@@ -944,87 +945,62 @@ class TProxyService : VpnService() {
         const val BROADCAST_BUFFER_SIZE_THRESHOLD: Int = 100
 
         init {
-            // Load native library to ensure JNI methods are available
-            // The library is also loaded in HevSocksManager, but we need it here
-            // for TProxyService native method registration
-            try {
-                System.loadLibrary("hev-socks5-tunnel")
-            } catch (e: UnsatisfiedLinkError) {
-                Log.w(TAG, "Failed to load hev-socks5-tunnel library: ${e.message}")
-            }
+            // Tun2SockManager manages its own native libraries.
         }
 
         /**
-         * JNI native method for native code compatibility.
-         * Native code (hev-socks5-tunnel.so) expects this method in TProxyService class.
-         * This method delegates to HevSocksManager.TProxyStartService implementation.
-         * 
-         * Note: The actual native implementation is in HevSocksManager, but native code
-         * tries to register this method in TProxyService class via JNI RegisterNatives.
+         * Stubbed method for backward compatibility with TProxyUtils.
          */
         @JvmStatic
         @Suppress("FunctionName")
-        external fun TProxyStartService(configPath: String, fd: Int)
+        fun TProxyStartService(configPath: String, fd: Int) {
+            // Stub
+        }
 
         /**
-         * JNI native method for native code compatibility.
-         * Native code (hev-socks5-tunnel.so) expects this method in TProxyService class.
-         * This method delegates to HevSocksManager.TProxyStopService implementation.
-         * 
-         * Note: The actual native implementation is in HevSocksManager, but native code
-         * tries to register this method in TProxyService class via JNI RegisterNatives.
+         * Stubbed method for backward compatibility with TProxyUtils.
          */
         @JvmStatic
         @Suppress("FunctionName")
-        external fun TProxyStopService()
+        fun TProxyStopService() {
+            // Stub
+        }
 
         /**
-         * JNI native method for native code compatibility.
-         * Native code (hev-socks5-tunnel.so) expects this method in TProxyService class.
-         * This method delegates to HevSocksManager.TProxyGetStats implementation.
-         * 
-         * Note: The actual native implementation is in HevSocksManager, but native code
-         * tries to register this method in TProxyService class via JNI RegisterNatives.
+         * Stubbed method for backward compatibility with TProxyUtils.
          */
         @JvmStatic
         @Suppress("FunctionName")
-        external fun TProxyGetStats(): LongArray?
+        fun TProxyGetStats(): LongArray? {
+            return null
+        }
 
         /**
-         * JNI native method for native code compatibility.
-         * Native code (hev-socks5-tunnel.so) expects this method in TProxyService class.
-         * This method delegates to HevSocksManager.TProxyNotifyUdpError implementation.
-         * 
-         * Note: The actual native implementation is in HevSocksManager, but native code
-         * tries to register this method in TProxyService class via JNI RegisterNatives.
+         * Stubbed method for backward compatibility with TProxyUtils.
          */
         @JvmStatic
         @Suppress("FunctionName")
-        external fun TProxyNotifyUdpError(errorType: Int): Boolean
+        fun TProxyNotifyUdpError(errorType: Int): Boolean {
+            return false
+        }
 
         /**
-         * JNI native method for native code compatibility.
-         * Native code (hev-socks5-tunnel.so) expects this method in TProxyService class.
-         * This method delegates to HevSocksManager.TProxyNotifyUdpRecoveryComplete implementation.
-         * 
-         * Note: The actual native implementation is in HevSocksManager, but native code
-         * tries to register this method in TProxyService class via JNI RegisterNatives.
+         * Stubbed method for backward compatibility with TProxyUtils.
          */
         @JvmStatic
         @Suppress("FunctionName")
-        external fun TProxyNotifyUdpRecoveryComplete(): Boolean
+        fun TProxyNotifyUdpRecoveryComplete(): Boolean {
+            return false
+        }
 
         /**
-         * JNI native method for native code compatibility.
-         * Native code (hev-socks5-tunnel.so) expects this method in TProxyService class.
-         * This method delegates to HevSocksManager.TProxyNotifyImminentUdpCleanup implementation.
-         * 
-         * Note: The actual native implementation is in HevSocksManager, but native code
-         * tries to register this method in TProxyService class via JNI RegisterNatives.
+         * Stubbed method for backward compatibility with TProxyUtils.
          */
         @JvmStatic
         @Suppress("FunctionName")
-        external fun TProxyNotifyImminentUdpCleanup(): Boolean
+        fun TProxyNotifyImminentUdpCleanup(): Boolean {
+            return false
+        }
 
         fun getNativeLibraryDir(context: Context?): String? {
             if (context == null) {
