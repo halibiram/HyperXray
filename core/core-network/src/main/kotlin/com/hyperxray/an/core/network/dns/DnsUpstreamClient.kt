@@ -49,6 +49,84 @@ data class DnsServerStats(
 }
 
 /**
+ * Singleton DoH client provider to avoid creating multiple thread pools
+ * This optimizes memory usage by reusing a single OkHttpClient instance
+ */
+object DoHClientProvider {
+    @Volatile
+    private var dohClient: OkHttpClient? = null
+    
+    @Volatile
+    private var dohProviders: List<DnsOverHttps>? = null
+    
+    /**
+     * Get or create DoH providers (singleton pattern)
+     */
+    fun getDoHProviders(): List<DnsOverHttps> {
+        if (dohProviders != null) {
+            return dohProviders!!
+        }
+        
+        synchronized(this) {
+            if (dohProviders != null) {
+                return dohProviders!!
+            }
+            
+            // Create shared OkHttpClient with connection pooling
+            val dnsClient = OkHttpClient.Builder()
+                .connectTimeout(5, TimeUnit.SECONDS)
+                .readTimeout(5, TimeUnit.SECONDS)
+                .connectionPool(
+                    okhttp3.ConnectionPool(
+                        maxIdleConnections = 10,
+                        keepAliveDuration = 5,
+                        timeUnit = TimeUnit.MINUTES
+                    )
+                )
+                .build()
+            
+            dohClient = dnsClient
+            
+            dohProviders = listOf(
+                DnsOverHttps.Builder()
+                    .client(dnsClient)
+                    .url("https://cloudflare-dns.com/dns-query".toHttpUrl())
+                    .includeIPv6(true)
+                    .build(),
+                DnsOverHttps.Builder()
+                    .client(dnsClient)
+                    .url("https://dns.google/dns-query".toHttpUrl())
+                    .includeIPv6(true)
+                    .build(),
+                DnsOverHttps.Builder()
+                    .client(dnsClient)
+                    .url("https://dns.quad9.net/dns-query".toHttpUrl())
+                    .includeIPv6(true)
+                    .build(),
+                DnsOverHttps.Builder()
+                    .client(dnsClient)
+                    .url("https://doh.opendns.com/dns-query".toHttpUrl())
+                    .includeIPv6(true)
+                    .build()
+            )
+            
+            return dohProviders!!
+        }
+    }
+    
+    /**
+     * Close DoH client resources (call when app is shutting down)
+     */
+    fun close() {
+        synchronized(this) {
+            dohClient?.dispatcher?.executorService?.shutdown()
+            dohClient = null
+            dohProviders = null
+        }
+    }
+}
+
+/**
  * DNS Upstream Client
  * Handles all upstream logic (UDP, DoH, DoT, Fallbacks) and "Happy Eyeballs" algorithm
  */
@@ -64,6 +142,7 @@ class DnsUpstreamClient(
     fun setSocks5Client(client: Socks5UdpClient?) {
         socks5Client = client
     }
+    
     private val dnsServerStats = ConcurrentHashMap<String, DnsServerStats>()
     private val adaptiveTimeouts = ConcurrentHashMap<String, Long>()
     private val HEALTH_CHECK_INTERVAL_MS = 60000L // 60 seconds
@@ -77,44 +156,6 @@ class DnsUpstreamClient(
     )
     private val pendingQueries = ConcurrentHashMap<String, PendingQuery>()
     private val QUERY_DEDUP_TIMEOUT_MS = 5000L // 5 seconds max wait for duplicate queries
-    
-    // DoH (DNS over HTTPS) providers for fallback when UDP DNS fails
-    private val dohProviders: List<DnsOverHttps> by lazy {
-        val dnsClient = OkHttpClient.Builder()
-            .connectTimeout(5, TimeUnit.SECONDS)
-            .readTimeout(5, TimeUnit.SECONDS)
-            .connectionPool(
-                okhttp3.ConnectionPool(
-                    maxIdleConnections = 10,
-                    keepAliveDuration = 5,
-                    timeUnit = TimeUnit.MINUTES
-                )
-            )
-            .build()
-
-        listOf(
-            DnsOverHttps.Builder()
-                .client(dnsClient)
-                .url("https://cloudflare-dns.com/dns-query".toHttpUrl())
-                .includeIPv6(true)
-                .build(),
-            DnsOverHttps.Builder()
-                .client(dnsClient)
-                .url("https://dns.google/dns-query".toHttpUrl())
-                .includeIPv6(true)
-                .build(),
-            DnsOverHttps.Builder()
-                .client(dnsClient)
-                .url("https://dns.quad9.net/dns-query".toHttpUrl())
-                .includeIPv6(true)
-                .build(),
-            DnsOverHttps.Builder()
-                .client(dnsClient)
-                .url("https://doh.opendns.com/dns-query".toHttpUrl())
-                .includeIPv6(true)
-                .build()
-        )
-    }
     
     /**
      * Initialize DNS servers with default list
@@ -537,6 +578,9 @@ class DnsUpstreamClient(
     
     /**
      * Try SOCKS5 fallback when direct UDP fails
+     * 
+     * CRITICAL: Uses new sendUdpAndReceive() method which handles Transaction ID matching
+     * The Transaction ID from the original query is preserved in the response
      */
     private suspend fun trySocks5Fallback(
         queryData: ByteArray,
@@ -551,18 +595,26 @@ class DnsUpstreamClient(
             val sendStart = System.currentTimeMillis()
             Log.d(TAG, "🔌 [SOCKS5] Fallback: Using SOCKS5 proxy for DNS query: $hostname → ${dnsServer.hostAddress}:$DNS_PORT")
             
-            val sendSuccess = proxy.sendUdp(compressedQuery, dnsServer, DNS_PORT)
-            if (!sendSuccess) {
-                Log.w(TAG, "❌ [SOCKS5] Failed to send DNS query via SOCKS5 proxy")
-                return null
-            }
-            
-            val responseBuffer = ByteArray(BUFFER_SIZE)
-            val response = proxy.receiveUdp(responseBuffer, timeoutMs.toInt())
+            // Use new sendUdpAndReceive() method with Transaction ID matching
+            // This ensures the response matches the query's Transaction ID
+            val response = proxy.sendUdpAndReceive(
+                compressedQuery,
+                dnsServer,
+                DNS_PORT,
+                timeoutMs.toInt().coerceAtMost(5000) // Cap at 5 seconds
+            )
             
             if (response != null) {
                 val elapsed = System.currentTimeMillis() - sendStart
                 Log.d(TAG, "📥 [SOCKS5] DNS response received via SOCKS5: ${response.size} bytes (${elapsed}ms)")
+                
+                // Verify Transaction ID matches (sanity check)
+                val queryTxId = extractTransactionId(queryData)
+                val responseTxId = extractTransactionId(response)
+                if (queryTxId != null && responseTxId != null && queryTxId != responseTxId) {
+                    Log.w(TAG, "⚠️ [SOCKS5] Transaction ID mismatch: query=0x%04x, response=0x%04x".format(queryTxId, responseTxId))
+                    // Still return response - dispatcher should have matched correctly
+                }
                 
                 // Update adaptive timeout and stats
                 val currentTimeout = adaptiveTimeouts[dnsServer.hostAddress] ?: DEFAULT_TIMEOUT_MS
@@ -584,6 +636,16 @@ class DnsUpstreamClient(
             Log.w(TAG, "❌ [SOCKS5] SOCKS5 UDP proxy fallback failed for ${dnsServer.hostAddress}: ${e.message}")
             null
         }
+    }
+    
+    /**
+     * Extract Transaction ID from DNS packet (first 2 bytes, big-endian)
+     */
+    private fun extractTransactionId(dnsPacket: ByteArray): Int? {
+        if (dnsPacket.size < 2) return null
+        return ByteBuffer.wrap(dnsPacket, 0, 2)
+            .order(ByteOrder.BIG_ENDIAN)
+            .short.toInt() and 0xFFFF
     }
     
     /**
@@ -699,6 +761,9 @@ class DnsUpstreamClient(
             Log.d(TAG, "🔄 Trying DoH fallback for $hostname (real DNS over HTTPS)...")
             
             try {
+                // Get DoH providers from singleton
+                val dohProviders = DoHClientProvider.getDoHProviders()
+                
                 // Parallel DoH queries - try all providers simultaneously
                 val deferredResults = dohProviders.mapIndexed { index, dohProvider ->
                     async(Dispatchers.IO) {
@@ -937,4 +1002,3 @@ class DnsUpstreamClient(
         Log.i(TAG, "✅ Upstream DNS servers updated: ${servers.map { it.hostAddress }}")
     }
 }
-

@@ -417,7 +417,10 @@ object TProxyUtils {
                 }
             }
             
-            val maxWaitTimeMs = 2000L
+            // Increased timeout to 5000ms to accommodate Happy Eyeballs algorithm
+            // which may need to try multiple DNS servers with wave delays (400ms)
+            // and adaptive timeouts (max 3000ms per server)
+            val maxWaitTimeMs = 5000L
             val startTime = System.currentTimeMillis()
             
             val result = withTimeoutOrNull(maxWaitTimeMs) {

@@ -1,39 +1,107 @@
 package com.hyperxray.an.core.network.dns
 
 import android.util.Log
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketException
 import java.net.SocketTimeoutException
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 private const val TAG = "Socks5UdpClient"
+private const val RESPONSE_TIMEOUT_MS = 10000L // 10 seconds timeout for responses
+private const val KEEP_ALIVE_CHECK_INTERVAL_MS = 30000L // Check connection health every 30s
+private const val MAX_RETRIES = 1 // Maximum retry attempts on send failure
 
 /**
- * SOCKS5 UDP proxy wrapper for DNS queries
- * Implements SOCKS5 UDP ASSOCIATE protocol
+ * SOCKS5 UDP proxy wrapper for DNS queries with Transaction ID-based response dispatching
+ * 
+ * CRITICAL ARCHITECTURE:
+ * - Background response listener loop continuously reads from UDP socket
+ * - Transaction ID matching routes responses to correct waiting coroutines
+ * - Mutex ensures only one thread writes to UDP socket at a time
+ * - Auto-reconnect and keep-alive maintain connection health
+ * - Supports 50+ concurrent DNS queries without mixing responses
  */
 class Socks5UdpClient(
     private val proxyAddress: String,
     private val proxyPort: Int
 ) {
+    // TCP socket for SOCKS5 handshake and UDP ASSOCIATE
     private var tcpSocket: Socket? = null
+    
+    // UDP relay endpoint from SOCKS5 server
     @Volatile
     private var udpRelayAddress: InetAddress? = null
+    
     @Volatile
     private var udpRelayPort: Int = 0
-    // Reusable UDP socket for sending and receiving (SOCKS5 requires same socket)
+    
+    // Single UDP socket for all SOCKS5 UDP traffic (SOCKS5 requirement)
     @Volatile
     private var udpSocket: DatagramSocket? = null
     
+    // Response dispatcher: Transaction ID -> CompletableDeferred<ByteArray>
+    // CRITICAL: This maps DNS Transaction IDs to waiting coroutines
+    private val pendingResponses = ConcurrentHashMap<Int, CompletableDeferred<ByteArray>>()
+    
+    // Mutex for serializing UDP socket writes (prevents buffer corruption)
+    private val writeMutex = Mutex()
+    
+    // Background response listener job
+    private var responseListenerJob: Job? = null
+    
+    // Coroutine scope for background operations
+    private val clientScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    
+    // Connection state tracking
+    private val isEstablished = AtomicBoolean(false)
+    private val isShuttingDown = AtomicBoolean(false)
+    
+    // Transaction ID generator (simple counter, wraps at 65535)
+    private val transactionIdCounter = AtomicInteger((System.currentTimeMillis() % 65536).toInt())
+    
+    /**
+     * Generate unique Transaction ID for DNS query
+     * DNS Transaction ID is 16-bit (0-65535)
+     */
+    private fun generateTransactionId(): Int {
+        return transactionIdCounter.incrementAndGet() and 0xFFFF
+    }
+    
+    /**
+     * Extract Transaction ID from DNS packet (first 2 bytes, big-endian)
+     */
+    private fun extractTransactionId(dnsPacket: ByteArray): Int? {
+        if (dnsPacket.size < 2) return null
+        return ByteBuffer.wrap(dnsPacket, 0, 2)
+            .order(ByteOrder.BIG_ENDIAN)
+            .short.toInt() and 0xFFFF
+    }
+    
     /**
      * Establish SOCKS5 connection and get UDP relay endpoint
+     * Also starts background response listener
      */
     suspend fun establish(): Boolean = withContext(Dispatchers.IO) {
+        if (isShuttingDown.get()) {
+            Log.w(TAG, "Cannot establish: client is shutting down")
+            return@withContext false
+        }
+        
         try {
+            // Close existing connection if any
+            closeInternal()
+            
             // Connect to SOCKS5 proxy via TCP
             tcpSocket = Socket().apply {
                 soTimeout = 10000 // 10 seconds
@@ -85,16 +153,154 @@ class Socks5UdpClient(
             udpRelayAddress = InetAddress.getByAddress(addrBytes)
             udpRelayPort = ((udpAssociateResponse[8].toInt() and 0xFF) shl 8) or (udpAssociateResponse[9].toInt() and 0xFF)
             
+            // Create UDP socket for SOCKS5 relay
+            udpSocket = DatagramSocket().apply {
+                soTimeout = 5000 // Default timeout for receive operations
+            }
+            
+            // Start background response listener
+            startResponseListener()
+            
+            // Start keep-alive monitor
+            startKeepAliveMonitor()
+            
+            isEstablished.set(true)
             Log.i(TAG, "✅ SOCKS5 UDP ASSOCIATE established: ${udpRelayAddress?.hostAddress}:$udpRelayPort")
             return@withContext true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to establish SOCKS5 UDP proxy: ${e.message}", e)
-            tcpSocket?.close()
-            tcpSocket = null
-            udpRelayAddress = null
-            udpRelayPort = 0
+            closeInternal()
             return@withContext false
         }
+    }
+    
+    /**
+     * Start background response listener loop
+     * Continuously reads from UDP socket and dispatches responses by Transaction ID
+     */
+    private fun startResponseListener() {
+        // Cancel existing listener if any
+        responseListenerJob?.cancel()
+        
+        responseListenerJob = clientScope.launch {
+            val socket = udpSocket ?: return@launch
+            val buffer = ByteArray(65535) // Maximum UDP packet size
+            
+            Log.d(TAG, "🔄 Starting background response listener")
+            
+            while (isActive && !isShuttingDown.get() && !socket.isClosed) {
+                try {
+                    val packet = DatagramPacket(buffer, buffer.size)
+                    socket.receive(packet)
+                    
+                    // Unwrap SOCKS5 header
+                    val wrapped = ByteArray(packet.length)
+                    System.arraycopy(packet.data, 0, wrapped, 0, packet.length)
+                    val unwrapped = unwrapUdpPacket(wrapped)
+                    
+                    if (unwrapped == null) {
+                        Log.w(TAG, "⚠️ Failed to unwrap SOCKS5 UDP packet (${wrapped.size} bytes)")
+                        continue
+                    }
+                    
+                    // Extract Transaction ID from DNS packet
+                    val transactionId = extractTransactionId(unwrapped)
+                    if (transactionId == null) {
+                        Log.w(TAG, "⚠️ Failed to extract Transaction ID from DNS response (${unwrapped.size} bytes)")
+                        continue
+                    }
+                    
+                    // Route response to waiting coroutine
+                    val deferred = pendingResponses.remove(transactionId)
+                    if (deferred != null) {
+                        if (deferred.isActive) {
+                            deferred.complete(unwrapped)
+                            Log.d(TAG, "✅ Dispatched response for TXID=0x%04x (${unwrapped.size} bytes)".format(transactionId))
+                        } else {
+                            Log.d(TAG, "⚠️ Deferred for TXID=0x%04x is no longer active, dropping response".format(transactionId))
+                        }
+                    } else {
+                        Log.w(TAG, "⚠️ No pending request found for TXID=0x%04x, dropping response".format(transactionId))
+                    }
+                } catch (e: SocketTimeoutException) {
+                    // Expected timeout, continue listening
+                    continue
+                } catch (e: SocketException) {
+                    if (!isShuttingDown.get() && isActive) {
+                        Log.w(TAG, "SocketException in response listener: ${e.message}, reconnecting...")
+                        // Attempt to reconnect
+                        delay(1000)
+                        if (isActive && !isShuttingDown.get()) {
+                            establish()
+                        }
+                    }
+                    break
+                } catch (e: Exception) {
+                    if (!isShuttingDown.get() && isActive) {
+                        Log.e(TAG, "Error in response listener: ${e.message}", e)
+                        delay(1000) // Brief delay before retrying
+                    } else {
+                        break
+                    }
+                }
+            }
+            
+            Log.d(TAG, "🛑 Background response listener stopped")
+        }
+    }
+    
+    /**
+     * Start keep-alive monitor to check connection health
+     */
+    private fun startKeepAliveMonitor() {
+        clientScope.launch {
+            while (isActive && !isShuttingDown.get()) {
+                delay(KEEP_ALIVE_CHECK_INTERVAL_MS)
+                
+                // Check TCP socket health
+                val tcp = tcpSocket
+                if (tcp == null || tcp.isClosed || !tcp.isConnected) {
+                    Log.w(TAG, "⚠️ TCP socket unhealthy, reconnecting...")
+                    if (!isShuttingDown.get()) {
+                        establish()
+                    }
+                    continue
+                }
+                
+                // Check UDP socket health
+                val udp = udpSocket
+                if (udp == null || udp.isClosed) {
+                    Log.w(TAG, "⚠️ UDP socket unhealthy, reconnecting...")
+                    if (!isShuttingDown.get()) {
+                        establish()
+                    }
+                    continue
+                }
+            }
+        }
+    }
+    
+    /**
+     * Check if connection is established and healthy
+     */
+    private suspend fun ensureConnection(): Boolean {
+        if (isShuttingDown.get()) return false
+        
+        val tcp = tcpSocket
+        val udp = udpSocket
+        val relayAddr = udpRelayAddress
+        val relayPort = udpRelayPort
+        
+        // Check if connection is valid
+        if (tcp != null && !tcp.isClosed && tcp.isConnected &&
+            udp != null && !udp.isClosed &&
+            relayAddr != null && relayPort != 0) {
+            return true
+        }
+        
+        // Connection is invalid, try to reestablish
+        Log.w(TAG, "Connection invalid, reestablishing...")
+        return establish()
     }
     
     /**
@@ -137,13 +343,11 @@ class Socks5UdpClient(
      */
     private fun unwrapUdpPacket(wrapped: ByteArray): ByteArray? {
         if (wrapped.size < 6) {
-            Log.w(TAG, "SOCKS5 UDP packet too short: ${wrapped.size} bytes (minimum 6)")
             return null
         }
         
         // Check RSV (must be 0x0000)
         if (wrapped[0] != 0x00.toByte() || wrapped[1] != 0x00.toByte()) {
-            Log.w(TAG, "Invalid SOCKS5 UDP packet: RSV=${wrapped[0].toInt() and 0xFF},${wrapped[1].toInt() and 0xFF}")
             return null
         }
         
@@ -172,72 +376,147 @@ class Socks5UdpClient(
         // Calculate header size: RSV(2) + FRAG(1) + ATYP(1) + ADDR(variable) + PORT(2)
         val headerSize = 4 + addrSize + 2
         if (wrapped.size < headerSize) {
-            Log.w(TAG, "SOCKS5 UDP packet too short: ${wrapped.size} bytes (expected at least $headerSize)")
             return null
         }
         
         // Extract data (skip header)
         val data = wrapped.sliceArray(headerSize until wrapped.size)
         if (data.isEmpty()) {
-            Log.w(TAG, "SOCKS5 UDP packet has no data after header")
             return null
-        }
-        
-        // Verify extracted data looks like a DNS packet (starts with valid DNS header)
-        if (data.size >= 12) {
-            val flags = ((data[2].toInt() and 0xFF) shl 8) or (data[3].toInt() and 0xFF)
-            val qr = (flags shr 15) and 0x01
-            if (qr == 1) {
-                // Valid DNS response
-                Log.d(TAG, "✅ SOCKS5 UDP packet unwrapped successfully: ${data.size} bytes DNS data")
-            } else {
-                // Might be a DNS query, log for debugging
-                Log.d(TAG, "⚠️ SOCKS5 UDP packet unwrapped but QR bit is 0 (might be query, not response)")
-            }
         }
         
         return data
     }
     
     /**
-     * Get or create UDP socket for SOCKS5 relay
-     * SOCKS5 UDP requires using the same socket for send and receive
-     * Thread-safe: Uses double-checked locking pattern
+     * Send UDP packet through SOCKS5 proxy and wait for response
+     * 
+     * CRITICAL: This method extracts Transaction ID from DNS query, registers a deferred,
+     * sends the packet, and waits for the matching response via the dispatcher.
+     * 
+     * @param data DNS query packet (must contain Transaction ID in first 2 bytes)
+     * @param targetAddress Target DNS server address
+     * @param targetPort Target DNS server port (usually 53)
+     * @param timeoutMs Timeout in milliseconds
+     * @return DNS response packet or null on timeout/error
      */
-    private fun getUdpSocket(): DatagramSocket? {
-        var socket = udpSocket
-        if (socket == null || socket.isClosed) {
-            synchronized(this) {
-                socket = udpSocket
-                if (socket == null || socket!!.isClosed) {
-                    try {
-                        socket = DatagramSocket()
-                        socket!!.soTimeout = 5000 // Default timeout
-                        udpSocket = socket
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to create UDP socket for SOCKS5: ${e.message}", e)
-                        return null
+    suspend fun sendUdpAndReceive(
+        data: ByteArray,
+        targetAddress: InetAddress,
+        targetPort: Int,
+        timeoutMs: Int = 5000
+    ): ByteArray? = withContext(Dispatchers.IO) {
+        if (isShuttingDown.get()) {
+            return@withContext null
+        }
+        
+        // Ensure connection is established
+        if (!ensureConnection()) {
+            Log.e(TAG, "Failed to establish connection")
+            return@withContext null
+        }
+        
+        // Extract Transaction ID from DNS query
+        val transactionId = extractTransactionId(data)
+        if (transactionId == null) {
+            Log.e(TAG, "Failed to extract Transaction ID from DNS query (${data.size} bytes)")
+            return@withContext null
+        }
+        
+        // Create deferred for this response
+        val deferred = CompletableDeferred<ByteArray>()
+        pendingResponses[transactionId] = deferred
+        
+        try {
+            // Wrap packet with SOCKS5 header
+            val wrapped = wrapUdpPacket(data, targetAddress, targetPort)
+            val relayAddr = udpRelayAddress!!
+            val relayPort = udpRelayPort
+            
+            // Send with mutex protection (serialize writes)
+            var sendSuccess = false
+            var retries = 0
+            
+            while (!sendSuccess && retries <= MAX_RETRIES) {
+                try {
+                    writeMutex.withLock {
+                        val socket = udpSocket
+                        if (socket == null || socket.isClosed) {
+                            throw SocketException("UDP socket is closed")
+                        }
+                        
+                        val packet = DatagramPacket(wrapped, wrapped.size, relayAddr, relayPort)
+                        socket.send(packet)
+                        sendSuccess = true
+                        Log.d(TAG, "📤 Sent DNS query via SOCKS5: TXID=0x%04x, ${data.size} bytes".format(transactionId))
+                    }
+                } catch (e: SocketException) {
+                    retries++
+                    if (retries <= MAX_RETRIES) {
+                        Log.w(TAG, "Send failed (attempt $retries/$MAX_RETRIES), reconnecting...")
+                        if (!ensureConnection()) {
+                            throw e
+                        }
+                        delay(100) // Brief delay before retry
+                    } else {
+                        throw e
                     }
                 }
             }
+            
+            if (!sendSuccess) {
+                pendingResponses.remove(transactionId)
+                return@withContext null
+            }
+            
+            // Wait for response with timeout
+            val response = withTimeoutOrNull(timeoutMs.toLong()) {
+                deferred.await()
+            }
+            
+            if (response == null) {
+                Log.w(TAG, "⏱️ Timeout waiting for response: TXID=0x%04x (${timeoutMs}ms)".format(transactionId))
+            } else {
+                Log.d(TAG, "📥 Received DNS response via SOCKS5: TXID=0x%04x, ${response.size} bytes".format(transactionId))
+            }
+            
+            return@withContext response
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in sendUdpAndReceive: ${e.message}", e)
+            pendingResponses.remove(transactionId)
+            return@withContext null
+        } finally {
+            // Cleanup: remove deferred if still present (timeout case)
+            pendingResponses.remove(transactionId)
         }
-        return socket
     }
     
     /**
-     * Send UDP packet through SOCKS5 proxy
+     * Legacy method: Send UDP packet (for backward compatibility)
+     * Note: This doesn't wait for response - use sendUdpAndReceive for full request/response
      */
     suspend fun sendUdp(data: ByteArray, targetAddress: InetAddress, targetPort: Int): Boolean {
-        val relayAddr = udpRelayAddress ?: return false
-        val relayPort = udpRelayPort
-        if (relayPort == 0) return false
+        if (isShuttingDown.get()) return false
+        
+        if (!ensureConnection()) {
+            return false
+        }
         
         return try {
             val wrapped = wrapUdpPacket(data, targetAddress, targetPort)
-            val socket = getUdpSocket() ?: return false
-            val packet = DatagramPacket(wrapped, wrapped.size, relayAddr, relayPort)
-            socket.send(packet)
-            true
+            val relayAddr = udpRelayAddress!!
+            val relayPort = udpRelayPort
+            
+            writeMutex.withLock {
+                val socket = udpSocket
+                if (socket == null || socket.isClosed) {
+                    return false
+                }
+                
+                val packet = DatagramPacket(wrapped, wrapped.size, relayAddr, relayPort)
+                socket.send(packet)
+                true
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send UDP through SOCKS5: ${e.message}", e)
             false
@@ -245,47 +524,23 @@ class Socks5UdpClient(
     }
     
     /**
-     * Receive UDP packet from SOCKS5 proxy
-     * Must use the same socket as sendUdp
+     * Legacy method: Receive UDP packet (for backward compatibility)
+     * Note: This blocks and may receive wrong response - use sendUdpAndReceive instead
      */
     suspend fun receiveUdp(buffer: ByteArray, timeoutMs: Int): ByteArray? {
-        val relayAddr = udpRelayAddress ?: return null
-        val relayPort = udpRelayPort
-        if (relayPort == 0) return null
-        
-        return try {
-            val socket = getUdpSocket() ?: return null
-            socket.soTimeout = timeoutMs
-            val packet = DatagramPacket(buffer, buffer.size)
-            socket.receive(packet)
-            
-            // Unwrap SOCKS5 header
-            val received = ByteArray(packet.length)
-            System.arraycopy(packet.data, 0, received, 0, packet.length)
-            
-            Log.d(TAG, "📥 Received SOCKS5 UDP packet: ${received.size} bytes from ${packet.address}:${packet.port}")
-            
-            val unwrapped = unwrapUdpPacket(received)
-            if (unwrapped == null) {
-                val firstBytes = received.take(16).joinToString(" ") { "%02x".format(it) }
-                Log.w(TAG, "⚠️ Failed to unwrap SOCKS5 UDP packet (${received.size} bytes, first 16 bytes: $firstBytes)")
-            } else {
-                Log.d(TAG, "✅ Unwrapped SOCKS5 UDP packet: ${unwrapped.size} bytes DNS data")
-            }
-            
-            unwrapped
-        } catch (e: SocketTimeoutException) {
-            null
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to receive UDP from SOCKS5: ${e.message}", e)
-            null
-        }
+        // This method is deprecated - responses are handled by the dispatcher
+        // But we keep it for backward compatibility
+        Log.w(TAG, "receiveUdp() is deprecated - use sendUdpAndReceive() instead")
+        return null
     }
     
     /**
-     * Close SOCKS5 connection and cleanup resources
+     * Internal close method (doesn't cancel scope)
      */
-    fun close() {
+    private fun closeInternal() {
+        responseListenerJob?.cancel()
+        responseListenerJob = null
+        
         val socket = udpSocket
         if (socket != null) {
             synchronized(this) {
@@ -293,10 +548,29 @@ class Socks5UdpClient(
                 udpSocket = null
             }
         }
+        
         tcpSocket?.close()
         tcpSocket = null
         udpRelayAddress = null
         udpRelayPort = 0
+        
+        // Cancel all pending responses
+        pendingResponses.values.forEach { deferred ->
+            if (deferred.isActive) {
+                deferred.cancel()
+            }
+        }
+        pendingResponses.clear()
+        
+        isEstablished.set(false)
+    }
+    
+    /**
+     * Close SOCKS5 connection and cleanup resources
+     */
+    fun close() {
+        isShuttingDown.set(true)
+        closeInternal()
+        clientScope.cancel()
     }
 }
-

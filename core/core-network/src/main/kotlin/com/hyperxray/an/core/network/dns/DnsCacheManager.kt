@@ -8,9 +8,14 @@ import java.io.File
 import java.io.FileReader
 import java.io.FileWriter
 import java.net.InetAddress
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.ReentrantReadWriteLock
 import kotlin.concurrent.read
 import kotlin.concurrent.write
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.channels.Channel
 
 private const val TAG = "DnsCacheManager"
 private const val CACHE_FILE_NAME = "dns_cache.json"
@@ -19,6 +24,11 @@ private const val POPULAR_DOMAIN_TTL = 172800L // 48 hours for popular domains
 private const val DYNAMIC_DOMAIN_TTL = 86400L // 24 hours for dynamic domains (CDN, etc.)
 private const val MAX_ENTRIES = 10000
 private const val CACHE_VERSION = 1
+private const val CACHE_DEBOUNCE_MS = 200L // Wait 200ms after last write before saving to disk (minimum debounce)
+private const val AVERAGE_ENTRY_SIZE_BYTES = 100L // Approximate memory per cache entry (hostname + IPs + metadata)
+private const val MEMORY_LIMIT_MB = 10L // Maximum cache memory limit in MB
+private const val MOVING_AVERAGE_ALPHA = 0.1 // Exponential moving average factor for latency (0.0-1.0)
+private const val TOP_DOMAIN_COUNT = 10 // Number of top domains to track for hit rate
 
 // Popular domains that rarely change - use longer TTL
 private val popularDomains = setOf(
@@ -50,9 +60,84 @@ object DnsCacheManager {
     private var cacheFile: File? = null
     private val cacheLock = ReentrantReadWriteLock()
     private val cache = mutableMapOf<String, DnsCacheEntry>()
-    private var cacheHits = 0L
-    private var cacheMisses = 0L
+    
+    // Thread-safe atomic counters for statistics
+    private val totalLookups = AtomicLong(0L)
+    private val cacheHits = AtomicLong(0L)
+    private val cacheMisses = AtomicLong(0L)
+    
+    // Latency tracking using exponential moving average (prevents overflow)
+    // avgHitLatency: Average latency for cache hits (in milliseconds)
+    // avgMissLatency: Average latency for cache misses (in milliseconds)
+    @Volatile
+    private var avgHitLatency = 0.0
+    @Volatile
+    private var avgMissLatency = 0.0
+    
+    // Domain-specific hit tracking (top N most accessed domains)
+    private val domainHits = mutableMapOf<String, AtomicLong>()
+    private val domainMisses = mutableMapOf<String, AtomicLong>()
+    private val domainStatsLock = ReentrantReadWriteLock()
+    
+    // StateFlow for real-time metrics updates
+    private val _dashboardStats = MutableStateFlow<DnsCacheMetrics>(
+        DnsCacheMetrics(
+            entryCount = 0,
+            totalLookups = 0L,
+            hits = 0L,
+            misses = 0L,
+            hitRate = 0,
+            memoryUsageBytes = 0L,
+            memoryLimitBytes = MEMORY_LIMIT_MB * 1024 * 1024,
+            memoryUsagePercent = 0,
+            avgHitLatencyMs = 0.0,
+            avgMissLatencyMs = 0.0,
+            avgDomainHitRate = 0,
+            topDomains = emptyList()
+        )
+    )
+    
+    // Public StateFlow for dashboard consumption
+    val dashboardStats: StateFlow<DnsCacheMetrics> = _dashboardStats.asStateFlow()
+    
+    // Metrics update job
+    private var metricsUpdateJob: Job? = null
+    private val metricsScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    
+    // Debounced cache I/O: Channel for triggering saves, Flow for debouncing
+    private val saveTriggerChannel = Channel<Unit>(Channel.UNLIMITED)
+    private var saveJob: Job? = null
+    private val saveScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    /**
+     * Comprehensive DNS cache metrics data class
+     * Contains all statistics needed for dashboard display
+     */
+    data class DnsCacheMetrics(
+        val entryCount: Int,
+        val totalLookups: Long,
+        val hits: Long,
+        val misses: Long,
+        val hitRate: Int, // 0-100 percentage
+        val memoryUsageBytes: Long,
+        val memoryLimitBytes: Long,
+        val memoryUsagePercent: Int, // 0-100 percentage
+        val avgHitLatencyMs: Double,
+        val avgMissLatencyMs: Double,
+        val avgDomainHitRate: Int, // 0-100 percentage (average hit rate across top domains)
+        val topDomains: List<DomainHitRate> // Top N domains by access count
+    )
+    
+    /**
+     * Domain hit rate information
+     */
+    data class DomainHitRate(
+        val domain: String,
+        val hits: Long,
+        val misses: Long,
+        val hitRate: Int // 0-100 percentage
+    )
+    
     /**
      * DNS cache entry with IP addresses, timestamp, and TTL
      */
@@ -65,10 +150,26 @@ object DnsCacheManager {
             val currentTime = System.currentTimeMillis() / 1000
             return (currentTime - timestamp) > ttl
         }
+        
+        /**
+         * Estimate memory usage for this entry
+         * Includes: hostname string, IP addresses, metadata overhead
+         */
+        fun estimateMemoryBytes(hostname: String): Long {
+            val hostnameSize = hostname.length * 2L // UTF-16 encoding
+            val ipsSize = ips.sumOf { it.length * 2L } // Each IP as string
+            val metadataOverhead = 64L // Timestamp, TTL, map overhead, etc.
+            return hostnameSize + ipsSize + metadataOverhead
+        }
     }
 
     /**
      * Initialize the DNS cache manager with application context
+     * 
+     * CRITICAL FIX: Debounced Cache I/O
+     * - Starts debounced save job that waits 200ms after last write
+     * - Batches disk writes instead of writing on every lookup
+     * - Prevents blocking I/O on every DNS resolution
      */
     fun initialize(context: Context) {
         if (isInitialized) {
@@ -79,11 +180,206 @@ object DnsCacheManager {
         try {
             cacheFile = File(context.cacheDir, CACHE_FILE_NAME)
             loadCacheFromFile()
+            
+            // Start debounced save job
+            startDebouncedSaveJob()
+            
+            // Start metrics update job (updates StateFlow periodically)
+            startMetricsUpdateJob()
+            
+            // Update metrics immediately on initialization
+            updateMetrics()
+            
             isInitialized = true
-            Log.d(TAG, "DnsCacheManager initialized: ${cache.size} entries loaded, hits=$cacheHits, misses=$cacheMisses")
+            Log.d(TAG, "DnsCacheManager initialized: ${cache.size} entries loaded, hits=${cacheHits.get()}, misses=${cacheMisses.get()}")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize DnsCacheManager", e)
             isInitialized = true // Allow operation even if cache file fails
+        }
+    }
+    
+    /**
+     * Start debounced save job that batches disk writes
+     * Waits 200ms after the last save trigger before writing to disk
+     */
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
+    private fun startDebouncedSaveJob() {
+        saveJob?.cancel()
+        saveJob = saveScope.launch {
+            saveTriggerChannel.receiveAsFlow()
+                .debounce(CACHE_DEBOUNCE_MS)
+                .collect {
+                    // Debounce period elapsed, save to disk
+                    saveCacheToFileSync()
+                }
+        }
+    }
+    
+    /**
+     * Start metrics update job that periodically updates the StateFlow
+     * Updates every 500ms to provide real-time dashboard updates
+     */
+    private fun startMetricsUpdateJob() {
+        metricsUpdateJob?.cancel()
+        metricsUpdateJob = metricsScope.launch {
+            while (isActive) {
+                try {
+                    updateMetrics()
+                    delay(500) // Update every 500ms
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error updating metrics", e)
+                    delay(1000) // Wait longer on error
+                }
+            }
+        }
+    }
+    
+    /**
+     * Update metrics and emit to StateFlow
+     * Calculates all statistics including memory usage, latency, and domain hit rates
+     */
+    private fun updateMetrics() {
+        val (hits, misses, total, entryCount, memoryUsageBytes) = cacheLock.read {
+            val h = cacheHits.get()
+            val m = cacheMisses.get()
+            val t = totalLookups.get()
+            val ec = cache.size
+            val mem = cache.entries.sumOf { (hostname, entry) ->
+                entry.estimateMemoryBytes(hostname)
+            }
+            return@read Quintet(h, m, t, ec, mem)
+        }
+        
+        // Calculate hit rate
+        val hitRate = if (total > 0) {
+            (hits * 100.0 / total).toInt()
+        } else {
+            0
+        }
+        
+        // Calculate memory usage
+        val memoryLimitBytes = MEMORY_LIMIT_MB * 1024 * 1024
+        val memoryUsagePercent = if (memoryLimitBytes > 0) {
+            ((memoryUsageBytes * 100.0) / memoryLimitBytes).toInt().coerceIn(0, 100)
+        } else {
+            0
+        }
+        
+        // Get top domains by access count
+        val (topDomains, avgDomainHitRate) = domainStatsLock.read {
+            val domainStats = (domainHits.keys + domainMisses.keys).distinct().mapNotNull { domain ->
+                val domainHitsCount = domainHits[domain]?.get() ?: 0L
+                val domainMissesCount = domainMisses[domain]?.get() ?: 0L
+                val domainTotal = domainHitsCount + domainMissesCount
+                if (domainTotal > 0) {
+                    val domainHitRate = (domainHitsCount * 100.0 / domainTotal).toInt()
+                    DomainHitRate(
+                        domain = domain,
+                        hits = domainHitsCount,
+                        misses = domainMissesCount,
+                        hitRate = domainHitRate
+                    )
+                } else {
+                    null
+                }
+            }
+                .sortedByDescending { it.hits + it.misses }
+                .take(TOP_DOMAIN_COUNT)
+            
+            // Calculate average domain hit rate
+            val avgDomainHitRate = if (domainStats.isNotEmpty()) {
+                domainStats.map { it.hitRate }.average().toInt()
+            } else {
+                0
+            }
+            
+            Pair(domainStats, avgDomainHitRate)
+        }
+        
+        // Create metrics object
+        val metrics = DnsCacheMetrics(
+            entryCount = entryCount,
+            totalLookups = total,
+            hits = hits,
+            misses = misses,
+            hitRate = hitRate,
+            memoryUsageBytes = memoryUsageBytes,
+            memoryLimitBytes = memoryLimitBytes,
+            memoryUsagePercent = memoryUsagePercent,
+            avgHitLatencyMs = avgHitLatency,
+            avgMissLatencyMs = avgMissLatency,
+            avgDomainHitRate = avgDomainHitRate,
+            topDomains = topDomains
+        )
+        
+        // Emit to StateFlow
+        _dashboardStats.value = metrics
+    }
+    
+    /**
+     * Helper data class for returning multiple values from cacheLock.read
+     */
+    private data class Quintet<A, B, C, D, E>(
+        val first: A,
+        val second: B,
+        val third: C,
+        val fourth: D,
+        val fifth: E
+    )
+    
+    /**
+     * Record latency for a cache hit
+     * Uses exponential moving average to prevent overflow and provide smooth updates
+     */
+    private fun recordHitLatency(latencyMs: Double) {
+        if (avgHitLatency == 0.0) {
+            avgHitLatency = latencyMs
+        } else {
+            // Exponential moving average: new_avg = alpha * new_value + (1 - alpha) * old_avg
+            avgHitLatency = MOVING_AVERAGE_ALPHA * latencyMs + (1.0 - MOVING_AVERAGE_ALPHA) * avgHitLatency
+        }
+    }
+    
+    /**
+     * Record latency for a cache miss
+     * Uses exponential moving average to prevent overflow and provide smooth updates
+     */
+    private fun recordMissLatency(latencyMs: Double) {
+        if (avgMissLatency == 0.0) {
+            avgMissLatency = latencyMs
+        } else {
+            // Exponential moving average: new_avg = alpha * new_value + (1 - alpha) * old_avg
+            avgMissLatency = MOVING_AVERAGE_ALPHA * latencyMs + (1.0 - MOVING_AVERAGE_ALPHA) * avgMissLatency
+        }
+    }
+    
+    /**
+     * Record domain access (for hit rate tracking)
+     */
+    private fun recordDomainAccess(domain: String, isHit: Boolean) {
+        domainStatsLock.write {
+            val lowerDomain = domain.lowercase()
+            if (isHit) {
+                domainHits.getOrPut(lowerDomain) { AtomicLong(0) }.incrementAndGet()
+            } else {
+                domainMisses.getOrPut(lowerDomain) { AtomicLong(0) }.incrementAndGet()
+            }
+            
+            // Limit domain tracking to prevent memory bloat
+            // Keep only top domains, remove least accessed
+            if (domainHits.size + domainMisses.size > TOP_DOMAIN_COUNT * 2) {
+                val allDomains = (domainHits.keys + domainMisses.keys).distinct()
+                val domainTotals = allDomains.map { dom ->
+                    val hits = domainHits[dom]?.get() ?: 0L
+                    val misses = domainMisses[dom]?.get() ?: 0L
+                    dom to (hits + misses)
+                }.sortedByDescending { it.second }
+                
+                // Remove domains beyond top N
+                val domainsToKeep = domainTotals.take(TOP_DOMAIN_COUNT).map { it.first }.toSet()
+                domainHits.keys.removeAll { it !in domainsToKeep }
+                domainMisses.keys.removeAll { it !in domainsToKeep }
+            }
         }
     }
 
@@ -97,11 +393,17 @@ object DnsCacheManager {
             return null
         }
 
+        val startTime = System.nanoTime()
+        totalLookups.incrementAndGet()
+        
         Log.d(TAG, "🔍 Checking DNS cache for: $hostname")
         return cacheLock.read {
             val entry = cache[hostname.lowercase()]
             if (entry != null && !entry.isExpired()) {
-                cacheHits++
+                // Cache hit
+                cacheHits.incrementAndGet()
+                recordDomainAccess(hostname, isHit = true)
+                
                 try {
                     val addresses = entry.ips.mapNotNull { ip ->
                         try {
@@ -112,7 +414,9 @@ object DnsCacheManager {
                         }
                     }
                     if (addresses.isNotEmpty()) {
-                        Log.i(TAG, "✅ DNS cache HIT: $hostname -> ${entry.ips} (age: ${(System.currentTimeMillis() / 1000 - entry.timestamp)}s)")
+                        val latencyMs = (System.nanoTime() - startTime) / 1_000_000.0
+                        recordHitLatency(latencyMs)
+                        Log.i(TAG, "✅ DNS cache HIT: $hostname -> ${entry.ips} (age: ${(System.currentTimeMillis() / 1000 - entry.timestamp)}s, latency: ${latencyMs}ms)")
                         return@read addresses
                     }
                 } catch (e: Exception) {
@@ -124,7 +428,12 @@ object DnsCacheManager {
                     cache.remove(hostname.lowercase())
                 }
             }
-            cacheMisses++
+            
+            // Cache miss
+            cacheMisses.incrementAndGet()
+            recordDomainAccess(hostname, isHit = false)
+            val latencyMs = (System.nanoTime() - startTime) / 1_000_000.0
+            recordMissLatency(latencyMs)
             null
         }
     }
@@ -180,8 +489,17 @@ object DnsCacheManager {
                 Log.i(TAG, "💾 DNS cache SAVED: $hostname -> $ips (TTL: ${entry.ttl}s, total entries: ${cache.size})")
             }
 
-            // Save to file asynchronously (don't block)
-            saveCacheToFile()
+            // CRITICAL FIX: Debounced save - trigger save but don't block
+            // Save will happen 200ms after the last write (batched)
+            try {
+                saveTriggerChannel.trySend(Unit)
+            } catch (e: Exception) {
+                // Channel might be closed, fallback to immediate save
+                Log.w(TAG, "Failed to trigger debounced save, saving immediately", e)
+                saveScope.launch {
+                    saveCacheToFileSync()
+                }
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to save DNS cache entry for $hostname", e)
         }
@@ -256,9 +574,12 @@ object DnsCacheManager {
     }
 
     /**
-     * Save cache to JSON file
+     * Save cache to JSON file (synchronous version for debounced saves)
+     * 
+     * CRITICAL FIX: Renamed to saveCacheToFileSync for clarity
+     * This is called by the debounced save job after 5 seconds of inactivity
      */
-    private fun saveCacheToFile() {
+    private fun saveCacheToFileSync() {
         val file = cacheFile ?: return
 
         try {
@@ -287,7 +608,7 @@ object DnsCacheManager {
                     writer.write(jsonObject.toString(2))
                 }
 
-                Log.d(TAG, "DNS cache saved to file: ${cache.size} entries")
+                Log.d(TAG, "💾 DNS cache saved to file (debounced): ${cache.size} entries")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save DNS cache to file", e)
@@ -308,7 +629,15 @@ object DnsCacheManager {
                 expiredKeys.forEach { cache.remove(it) }
                 if (expiredKeys.isNotEmpty()) {
                     Log.d(TAG, "Cleaned up ${expiredKeys.size} expired DNS cache entries")
-                    saveCacheToFile()
+                    // Trigger debounced save
+                    try {
+                        saveTriggerChannel.trySend(Unit)
+                    } catch (e: Exception) {
+                        // Fallback to immediate save
+                        saveScope.launch {
+                            saveCacheToFileSync()
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -317,8 +646,10 @@ object DnsCacheManager {
     }
 
     /**
-     * Structured DNS cache statistics data class
+     * Structured DNS cache statistics data class (legacy, for backward compatibility)
+     * @deprecated Use DnsCacheMetrics and dashboardStats StateFlow instead
      */
+    @Deprecated("Use DnsCacheMetrics and dashboardStats StateFlow instead", ReplaceWith("dashboardStats.value"))
     data class DnsCacheStatsData(
         val entryCount: Int,
         val hits: Long,
@@ -327,32 +658,26 @@ object DnsCacheManager {
     )
 
     /**
-     * Get cache statistics as structured data
-     * This is the preferred method for programmatic access
+     * Get cache statistics as structured data (legacy method)
+     * @deprecated Use dashboardStats StateFlow instead for real-time updates
      */
+    @Deprecated("Use dashboardStats StateFlow instead for real-time updates", ReplaceWith("dashboardStats.value"))
     fun getStatsStructured(): DnsCacheStatsData {
-        return cacheLock.read {
-            val totalQueries = cacheHits + cacheMisses
-            val hitRate = if (totalQueries > 0) {
-                (cacheHits * 100.0 / totalQueries).toInt()
-            } else {
-                0
-            }
-            DnsCacheStatsData(
-                entryCount = cache.size,
-                hits = cacheHits,
-                misses = cacheMisses,
-                hitRate = hitRate
-            )
-        }
+        val metrics = dashboardStats.value
+        return DnsCacheStatsData(
+            entryCount = metrics.entryCount,
+            hits = metrics.hits,
+            misses = metrics.misses,
+            hitRate = metrics.hitRate
+        )
     }
 
     /**
      * Get cache statistics as string (for backward compatibility and logging)
      */
     fun getStats(): String {
-        val stats = getStatsStructured()
-        return "DNS Cache: ${stats.entryCount} entries, hits=${stats.hits}, misses=${stats.misses}, hitRate=${stats.hitRate}%"
+        val metrics = dashboardStats.value
+        return "DNS Cache: ${metrics.entryCount} entries, hits=${metrics.hits}, misses=${metrics.misses}, hitRate=${metrics.hitRate}%"
     }
 
     /**
@@ -361,10 +686,36 @@ object DnsCacheManager {
     fun clearCache() {
         cacheLock.write {
             cache.clear()
-            cacheHits = 0L
-            cacheMisses = 0L
+            cacheHits.set(0L)
+            cacheMisses.set(0L)
+            totalLookups.set(0L)
             cacheFile?.delete()
             Log.d(TAG, "DNS cache cleared")
         }
+        
+        domainStatsLock.write {
+            domainHits.clear()
+            domainMisses.clear()
+        }
+        
+        avgHitLatency = 0.0
+        avgMissLatency = 0.0
+        
+        // Update metrics immediately after clear
+        updateMetrics()
+    }
+    
+    /**
+     * Shutdown and cleanup debounced save job and metrics update job
+     */
+    fun shutdown() {
+        saveJob?.cancel()
+        saveJob = null
+        saveTriggerChannel.close()
+        saveScope.cancel()
+        
+        metricsUpdateJob?.cancel()
+        metricsUpdateJob = null
+        metricsScope.cancel()
     }
 }

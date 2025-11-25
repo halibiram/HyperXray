@@ -49,22 +49,99 @@ object DnsQueryParser {
     
     /**
      * Parse hostname from DNS packet buffer
+     * 
+     * CRITICAL FIX: DNS Compression Support
+     * - Now handles compression pointers (0xC0) correctly
+     * - Ported skipDnsName logic from DnsResponseParser
+     * - Supports nested compression pointers
      */
     private fun parseHostname(buffer: ByteBuffer): String? {
+        val startPos = buffer.position()
         val parts = mutableListOf<String>()
+        var maxJumps = 10 // Prevent infinite loops
+        var jumps = 0
+        var encounteredCompression = false
+        var compressionPointerPos = startPos
+        var compressionEndPos = startPos + 2
         
-        while (buffer.hasRemaining()) {
-            val length = buffer.get().toInt() and 0xFF
-            if (length == 0) {
+        while (buffer.hasRemaining() && jumps < maxJumps) {
+            if (buffer.remaining() < 1) {
                 break
             }
-            if (length > 63) {
-                // Compression pointer - simplified handling
+            
+            val currentPos = buffer.position()
+            val length = buffer.get().toInt() and 0xFF
+            
+            if (length == 0) {
+                // End of name
+                if (encounteredCompression) {
+                    buffer.position(compressionEndPos)
+                }
+                break
+            } else if ((length and 0xC0) == 0xC0) {
+                // Compression pointer detected (0xC0-0xFF)
+                if (!encounteredCompression) {
+                    compressionPointerPos = currentPos
+                    if (buffer.remaining() < 1) {
+                        Log.w(TAG, "Compression pointer incomplete: missing second byte at position $compressionPointerPos")
+                        return null
+                    }
+                    val lowByte = buffer.get().toInt() and 0xFF
+                    compressionEndPos = buffer.position()
+                    encounteredCompression = true
+                    
+                    val offset = ((length and 0x3F) shl 8) or lowByte
+                    
+                    if (offset < 12 || offset >= buffer.limit()) {
+                        Log.w(TAG, "Invalid compression pointer offset: $offset (limit: ${buffer.limit()}, start: 12) at position $compressionPointerPos")
+                        return null
+                    }
+                    
+                    // Jump to compressed name location
+                    buffer.position(offset)
+                    jumps++
+                    continue
+                } else {
+                    // Nested compression pointer
+                    if (buffer.remaining() < 1) {
+                        Log.w(TAG, "Nested compression pointer incomplete: missing second byte")
+                        return null
+                    }
+                    val lowByte = buffer.get().toInt() and 0xFF
+                    val offset = ((length and 0x3F) shl 8) or lowByte
+                    
+                    if (offset < 12 || offset >= buffer.limit()) {
+                        Log.w(TAG, "Invalid nested compression pointer offset: $offset")
+                        return null
+                    }
+                    
+                    buffer.position(offset)
+                    jumps++
+                    continue
+                }
+            } else if (length > 63) {
+                // Invalid length
+                Log.w(TAG, "Invalid DNS label length: $length (max 63) at position $currentPos")
                 return null
+            } else {
+                // Normal label - read label bytes
+                if (buffer.remaining() < length) {
+                    Log.w(TAG, "Not enough bytes for DNS label: need $length, have ${buffer.remaining()} at position $currentPos")
+                    return null
+                }
+                val bytes = ByteArray(length)
+                buffer.get(bytes)
+                parts.add(String(bytes, Charsets.UTF_8))
             }
-            val bytes = ByteArray(length)
-            buffer.get(bytes)
-            parts.add(String(bytes, Charsets.UTF_8))
+        }
+        
+        if (jumps >= maxJumps) {
+            Log.w(TAG, "Max compression jumps reached ($maxJumps), stopping name parse")
+            return null
+        }
+        
+        if (encounteredCompression) {
+            buffer.position(compressionEndPos)
         }
         
         return if (parts.isNotEmpty()) parts.joinToString(".") else null

@@ -55,70 +55,22 @@ fun AggregatedTelemetry.toFeatureState(): FeatureAggregatedTelemetry {
 }
 
 /**
- * Extension function to convert DnsCacheManager structured stats to feature module DnsCacheStats
- * Uses the new getStatsStructured() method for robust parsing
+ * Extension function to convert DnsCacheManager metrics to feature module DnsCacheStats
+ * Maps all fields from the comprehensive DnsCacheMetrics to FeatureDnsCacheStats
  */
-private fun com.hyperxray.an.core.network.dns.DnsCacheManager.DnsCacheStatsData.toFeatureState(): FeatureDnsCacheStats {
+private fun com.hyperxray.an.core.network.dns.DnsCacheManager.DnsCacheMetrics.toFeatureState(): FeatureDnsCacheStats {
     return FeatureDnsCacheStats(
         entryCount = entryCount,
-        memoryUsageMB = 0L, // Not available in current implementation
-        memoryLimitMB = 0L, // Not available in current implementation
-        memoryUsagePercent = 0, // Not available in current implementation
+        memoryUsageMB = memoryUsageBytes / (1024 * 1024), // Convert bytes to MB
+        memoryLimitMB = memoryLimitBytes / (1024 * 1024), // Convert bytes to MB
+        memoryUsagePercent = memoryUsagePercent,
         hits = hits,
         misses = misses,
         hitRate = hitRate,
-        avgDomainHitRate = 0, // Not available in current implementation
-        avgHitLatencyMs = 0.0, // Not available in current implementation
-        avgMissLatencyMs = 0.0 // Not available in current implementation
+        avgDomainHitRate = avgDomainHitRate,
+        avgHitLatencyMs = avgHitLatencyMs,
+        avgMissLatencyMs = avgMissLatencyMs
     )
-}
-
-/**
- * Fallback function to parse DnsCacheManager.getStats() string (for backward compatibility)
- * This is more robust than the previous implementation with better error handling
- */
-private fun parseDnsCacheStatsFallback(statsString: String): FeatureDnsCacheStats {
-    return try {
-        // Parse stats string: "DNS Cache: X entries, hits=Y, misses=Z, hitRate=W%"
-        // Use more flexible regex patterns to handle format variations
-        val entriesMatch = Regex("(\\d+)\\s+entries?", RegexOption.IGNORE_CASE).find(statsString)
-        val hitsMatch = Regex("hits\\s*=\\s*(\\d+)", RegexOption.IGNORE_CASE).find(statsString)
-        val missesMatch = Regex("misses\\s*=\\s*(\\d+)", RegexOption.IGNORE_CASE).find(statsString)
-        val hitRateMatch = Regex("hitRate\\s*=\\s*(\\d+)%?", RegexOption.IGNORE_CASE).find(statsString)
-        
-        val entryCount = entriesMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
-        val hits = hitsMatch?.groupValues?.get(1)?.toLongOrNull() ?: 0L
-        val misses = missesMatch?.groupValues?.get(1)?.toLongOrNull() ?: 0L
-        val hitRate = hitRateMatch?.groupValues?.get(1)?.toIntOrNull() ?: 0
-        
-        FeatureDnsCacheStats(
-            entryCount = entryCount,
-            memoryUsageMB = 0L,
-            memoryLimitMB = 0L,
-            memoryUsagePercent = 0,
-            hits = hits,
-            misses = misses,
-            hitRate = hitRate,
-            avgDomainHitRate = 0,
-            avgHitLatencyMs = 0.0,
-            avgMissLatencyMs = 0.0
-        )
-    } catch (e: Exception) {
-        Log.e(TAG, "Error parsing DNS cache stats string: $statsString", e)
-        // Return safe default values instead of zeros to indicate parsing failure
-        FeatureDnsCacheStats(
-            entryCount = 0,
-            memoryUsageMB = 0L,
-            memoryLimitMB = 0L,
-            memoryUsagePercent = 0,
-            hits = 0L,
-            misses = 0L,
-            hitRate = 0,
-            avgDomainHitRate = 0,
-            avgHitLatencyMs = 0.0,
-            avgMissLatencyMs = 0.0
-        )
-    }
 }
 
 /**
@@ -147,9 +99,27 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
                 initialValue = mainViewModel.telemetryState.value?.toFeatureState()
             )
     
-    private val dnsCacheStatsFlow = MutableStateFlow<FeatureDnsCacheStats?>(null)
+    // Connect directly to DnsCacheManager's StateFlow and map to feature state
     override val dnsCacheStats: StateFlow<FeatureDnsCacheStats?> =
-        dnsCacheStatsFlow.asStateFlow()
+        DnsCacheManager.dashboardStats
+            .map { metrics ->
+                try {
+                    metrics.toFeatureState()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error converting DNS cache metrics to feature state", e)
+                    null
+                }
+            }
+            .stateIn(
+                scope = mainViewModel.viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = try {
+                    DnsCacheManager.dashboardStats.value.toFeatureState()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error getting initial DNS cache metrics", e)
+                    null
+                }
+            )
     
     override val isServiceEnabled: StateFlow<Boolean> =
         mainViewModel.isServiceEnabled
@@ -183,27 +153,14 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
                 val context = mainViewModel.prefs.getContext()
                 try {
                     DnsCacheManager.initialize(context)
+                    // StateFlow is automatically updated by DnsCacheManager's metrics update job
+                    // No manual update needed - the StateFlow connection handles it
+                    Log.d(TAG, "DNS cache stats StateFlow connected and will update automatically")
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to initialize DnsCacheManager: ${e.message}", e)
                 }
-                
-                // Prefer structured method for robust parsing
-                val stats = try {
-                    val structuredStats = DnsCacheManager.getStatsStructured()
-                    structuredStats.toFeatureState()
-                } catch (e: Exception) {
-                    // Fallback to string parsing if structured method fails
-                    Log.w(TAG, "Failed to get structured DNS stats, falling back to string parsing: ${e.message}", e)
-                    val statsString = DnsCacheManager.getStats()
-                    parseDnsCacheStatsFallback(statsString)
-                }
-                
-                dnsCacheStatsFlow.value = stats
-                Log.d(TAG, "DNS cache stats updated: entries=${stats.entryCount}, hits=${stats.hits}, misses=${stats.misses}, hitRate=${stats.hitRate}%")
             } catch (e: Exception) {
-                Log.e(TAG, "Error updating DNS cache stats: ${e.message}", e)
-                // Keep last value instead of setting to null, so UI doesn't reset to zero
-                // dnsCacheStatsFlow.value remains unchanged on error
+                Log.e(TAG, "Error initializing DNS cache stats: ${e.message}", e)
             }
         }
     }

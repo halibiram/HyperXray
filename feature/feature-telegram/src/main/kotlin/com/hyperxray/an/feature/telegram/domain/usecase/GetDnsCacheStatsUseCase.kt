@@ -7,7 +7,8 @@ import kotlinx.coroutines.withContext
 
 /**
  * Get DNS cache statistics use case
- * Returns formatted DNS cache statistics string
+ * Returns formatted DNS cache statistics string using structured metrics
+ * Now uses DnsCacheMetrics for accurate, real-time data (consistent with Dashboard)
  */
 class GetDnsCacheStatsUseCase(
     private val context: Context
@@ -16,27 +17,36 @@ class GetDnsCacheStatsUseCase(
         try {
             // Ensure DnsCacheManager is initialized
             DnsCacheManager.initialize(context)
-            val stats = DnsCacheManager.getStats()
             
-            // Parse stats string: "DNS Cache: X entries, hits=Y, misses=Z, hitRate=W%"
-            val entriesMatch = Regex("(\\d+) entries").find(stats)
-            val hitsMatch = Regex("hits=(\\d+)").find(stats)
-            val missesMatch = Regex("misses=(\\d+)").find(stats)
-            val hitRateMatch = Regex("hitRate=(\\d+)%").find(stats)
+            // Get structured metrics (same source as Dashboard)
+            val metrics = DnsCacheManager.dashboardStats.value
             
-            val entries = entriesMatch?.groupValues?.get(1) ?: "0"
-            val hits = hitsMatch?.groupValues?.get(1) ?: "0"
-            val misses = missesMatch?.groupValues?.get(1) ?: "0"
-            val hitRate = hitRateMatch?.groupValues?.get(1) ?: "0"
-            
+            // Format message with comprehensive statistics
             val message = buildString {
                 appendLine("<b>🌐 DNS CACHE STATISTICS</b>")
                 appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                appendLine("<b>📦 Entries:</b> $entries")
-                appendLine("<b>✅ Hits:</b> $hits")
-                appendLine("<b>❌ Misses:</b> $misses")
+                appendLine("<b>📦 Entries:</b> ${metrics.entryCount}")
+                appendLine("<b>🔍 Total Lookups:</b> ${metrics.totalLookups}")
+                appendLine("<b>✅ Hits:</b> ${metrics.hits}")
+                appendLine("<b>❌ Misses:</b> ${metrics.misses}")
                 appendLine("")
-                appendLine("<b>📊 Hit Rate:</b> $hitRate%")
+                appendLine("<b>📊 Hit Rate:</b> ${metrics.hitRate}%")
+                appendLine("<b>📈 Avg Domain Hit Rate:</b> ${metrics.avgDomainHitRate}%")
+                appendLine("")
+                appendLine("<b>💾 Memory Usage:</b> ${metrics.memoryUsageBytes / (1024 * 1024)} MB / ${metrics.memoryLimitBytes / (1024 * 1024)} MB")
+                appendLine("<b>📉 Memory Usage:</b> ${metrics.memoryUsagePercent}%")
+                appendLine("")
+                appendLine("<b>⚡ Avg Hit Latency:</b> ${String.format("%.2f", metrics.avgHitLatencyMs)} ms")
+                appendLine("<b>🐌 Avg Miss Latency:</b> ${String.format("%.2f", metrics.avgMissLatencyMs)} ms")
+                
+                // Show top domains if available
+                if (metrics.topDomains.isNotEmpty()) {
+                    appendLine("")
+                    appendLine("<b>🏆 Top Domains:</b>")
+                    metrics.topDomains.take(5).forEachIndexed { index, domain ->
+                        appendLine("  ${index + 1}. ${domain.domain}: ${domain.hitRate}% (${domain.hits} hits, ${domain.misses} misses)")
+                    }
+                }
             }
             Result.success(message)
         } catch (e: Exception) {

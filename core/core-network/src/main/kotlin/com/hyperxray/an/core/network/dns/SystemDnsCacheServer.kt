@@ -11,6 +11,7 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.Semaphore
 
 private const val TAG = "SystemDnsCacheServer"
 private const val DNS_PORT = 53
@@ -18,6 +19,7 @@ private const val DNS_PORT_ALT = 5353 // Alternative port (no root required)
 private const val BUFFER_SIZE = 512
 private const val SOCKET_TIMEOUT_MS = 5000
 private const val WARM_UP_INTERVAL_MS = 6 * 60 * 60 * 1000L // 6 hours
+private const val MAX_CONCURRENT_REQUESTS = 50 // Limit concurrent DNS handling coroutines
 
 /**
  * System-level DNS cache server that intercepts DNS queries from all apps.
@@ -37,6 +39,9 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     private var serverJob: Job? = null
     private var warmUpJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    
+    // Semaphore to limit concurrent DNS handling coroutines (prevents OOM on UDP floods)
+    private val requestSemaphore = Semaphore(MAX_CONCURRENT_REQUESTS)
     
     private val _serverStatus = MutableStateFlow<ServerStatus>(ServerStatus.Stopped)
     val serverStatus: StateFlow<ServerStatus> = _serverStatus
@@ -295,24 +300,50 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     
     /**
      * Main server loop - handles incoming DNS queries
+     * 
+     * CRITICAL FIX: Buffer Race Condition Prevention
+     * - Allocates a NEW ByteArray buffer for every iteration
+     * - Copies packet data immediately before launching coroutine
+     * - Prevents buffer overwrite when multiple packets arrive concurrently
      */
     private suspend fun serverLoop() {
         val socket = socket ?: return
-        val buffer = ByteArray(BUFFER_SIZE)
         
         Log.i(TAG, "🔍 DNS server loop started, waiting for queries on port ${socket.localPort}...")
         Log.i(TAG, "📡 Listening on all interfaces (0.0.0.0) - modem can send queries")
         
         while (isRunning.get() && scope.isActive) {
             try {
+                // CRITICAL FIX: Allocate NEW buffer for each iteration to prevent race condition
+                val buffer = ByteArray(BUFFER_SIZE)
                 val packet = DatagramPacket(buffer, buffer.size)
                 socket.receive(packet)
                 
                 Log.i(TAG, "📥 DNS query received from ${packet.address.hostAddress}:${packet.port}, length: ${packet.length}")
                 
-                // Handle query in separate coroutine
+                // CRITICAL FIX: Copy packet data immediately before launching coroutine
+                // This prevents the buffer from being overwritten by the next socket.receive() call
+                val packetData = ByteArray(packet.length)
+                System.arraycopy(packet.data, packet.offset, packetData, 0, packet.length)
+                val clientAddress = packet.address
+                val clientPort = packet.port
+                
+                // Handle query in separate coroutine with semaphore limiting
                 scope.launch {
-                    handleDnsQuery(packet, socket)
+                    // Acquire semaphore to limit concurrent requests (prevents OOM on UDP floods)
+                    if (!requestSemaphore.tryAcquire()) {
+                        Log.w(TAG, "⚠️ Max concurrent requests reached ($MAX_CONCURRENT_REQUESTS), dropping query from ${clientAddress.hostAddress}:$clientPort")
+                        return@launch
+                    }
+                    
+                    try {
+                        // Create new DatagramPacket with copied data
+                        val copiedPacket = DatagramPacket(packetData, packetData.size, clientAddress, clientPort)
+                        handleDnsQuery(copiedPacket, socket)
+                    } finally {
+                        // Always release semaphore
+                        requestSemaphore.release()
+                    }
                 }
             } catch (e: SocketTimeoutException) {
                 // Timeout is normal, continue waiting
