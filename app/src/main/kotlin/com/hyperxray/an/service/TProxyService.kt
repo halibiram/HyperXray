@@ -177,9 +177,21 @@ class TProxyService : VpnService() {
                     session.socks5ReadinessJob?.cancel()
                     session.socks5ReadinessJob = serviceScope.launch {
                         // Wait 2 seconds for Xray to fully initialize SOCKS5 server
-                        delay(2000)
+                        // Check isStopping periodically during delay to avoid unnecessary wait
+                        var waited = 0L
+                        val checkInterval = 200L // Check every 200ms
+                        while (waited < 2000 && !session.isStopping) {
+                            delay(checkInterval)
+                            waited += checkInterval
+                        }
+                        
+                        if (session.isStopping) {
+                            Log.w(TAG, "⚠️ Service is stopping during SOCKS5 readiness check delay, aborting")
+                            return@launch
+                        }
+                        
                         if (!session.socks5ReadinessChecked && !session.isStopping) {
-                            Log.d(TAG, "Starting SOCKS5 readiness check after Xray startup")
+                            Log.d(TAG, "Starting SOCKS5 readiness check after Xray startup (waited ${waited}ms)")
                             checkSocks5Readiness(session.prefs)
                         } else {
                             Log.d(TAG, "Skipping SOCKS5 readiness check: already checked=${session.socks5ReadinessChecked}, stopping=${session.isStopping}")

@@ -135,6 +135,18 @@ fun DnsCacheManagerScreen() {
     // Collect metrics from StateFlow
     val metrics by DnsCacheManager.dashboardStats.collectAsStateWithLifecycle()
     
+    // Debug: Log metrics updates
+    LaunchedEffect(metrics.entryCount, metrics.activeEntries.size) {
+        Log.d(TAG, "📊 UI Metrics update: entryCount=${metrics.entryCount}, activeEntries=${metrics.activeEntries.size}, hits=${metrics.hits}, misses=${metrics.misses}")
+        if (metrics.activeEntries.isNotEmpty()) {
+            val firstEntry = metrics.activeEntries.first()
+            Log.d(TAG, "📊 Sample entry: domain=${firstEntry.domain}, ips=${firstEntry.ips.joinToString(", ")}, ipsCount=${firstEntry.ips.size}, expiryTime=${firstEntry.expiryTime}")
+            Log.d(TAG, "📊 First 3 entries: ${metrics.activeEntries.take(3).map { "${it.domain}(${it.ips.size} IPs)" }.joinToString(", ")}")
+        } else {
+            Log.w(TAG, "⚠️ WARNING: activeEntries is EMPTY! entryCount=${metrics.entryCount}")
+        }
+    }
+    
     // UI State
     var searchQuery by remember { mutableStateOf("") }
     var sortOption by remember { mutableStateOf(SortOption.NEWEST) }
@@ -151,6 +163,13 @@ fun DnsCacheManagerScreen() {
     val filteredAndSortedEntries = remember(metrics.activeEntries, searchQuery, sortOption, filterOption) {
         val currentTime = System.currentTimeMillis() / 1000
         var filtered = metrics.activeEntries
+        
+        // Debug: Log filtering input
+        if (metrics.activeEntries.isNotEmpty()) {
+            Log.d(TAG, "🔍 Filtering ${metrics.activeEntries.size} entries, searchQuery='$searchQuery', filterOption=$filterOption, sortOption=$sortOption")
+        } else {
+            Log.w(TAG, "⚠️ WARNING: metrics.activeEntries is EMPTY in filter! entryCount=${metrics.entryCount}")
+        }
         
         // Apply search filter
         if (searchQuery.isNotBlank()) {
@@ -184,6 +203,11 @@ fun DnsCacheManagerScreen() {
                     metrics.avgHitLatencyMs
                 }
             }
+        }
+        
+        // Debug: Log filtering result
+        if (filtered.isEmpty() && metrics.activeEntries.isNotEmpty()) {
+            Log.d(TAG, "⚠️ All entries filtered out! Original: ${metrics.activeEntries.size}, Filtered: ${filtered.size}, filterOption=$filterOption")
         }
         
         filtered

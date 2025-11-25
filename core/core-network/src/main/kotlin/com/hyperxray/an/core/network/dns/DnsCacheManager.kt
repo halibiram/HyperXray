@@ -1,6 +1,7 @@
 package com.hyperxray.an.core.network.dns
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.util.Log
 import org.json.JSONObject
 import org.json.JSONArray
@@ -32,6 +33,14 @@ private const val MEMORY_LIMIT_MB = 10L // Maximum cache memory limit in MB
 private const val MOVING_AVERAGE_ALPHA = 0.1 // Exponential moving average factor for latency (0.0-1.0)
 private const val TOP_DOMAIN_COUNT = 10 // Number of top domains to track for hit rate
 
+// SharedPreferences keys for cross-process data sharing
+private const val PREFS_NAME = "dns_cache_stats"
+private const val PREFS_KEY_HITS = "dns_cache_hits"
+private const val PREFS_KEY_MISSES = "dns_cache_misses"
+private const val PREFS_KEY_TOTAL_LOOKUPS = "dns_cache_total_lookups"
+private const val PREFS_KEY_AVG_HIT_LATENCY = "dns_cache_avg_hit_latency"
+private const val PREFS_KEY_AVG_MISS_LATENCY = "dns_cache_avg_miss_latency"
+
 // Popular domains that rarely change - use longer TTL
 private val popularDomains = setOf(
     "google.com", "www.google.com", "googleapis.com",
@@ -60,6 +69,7 @@ private val dynamicDomainPatterns = listOf(
 object DnsCacheManager {
     private var isInitialized = false
     private var cacheFile: File? = null
+    private var sharedPrefs: SharedPreferences? = null
     private val cacheLock = ReentrantReadWriteLock()
     private val cache = mutableMapOf<String, DnsCacheEntry>()
     
@@ -208,6 +218,12 @@ object DnsCacheManager {
 
         try {
             cacheFile = File(context.cacheDir, CACHE_FILE_NAME)
+            // Initialize SharedPreferences for cross-process data sharing
+            sharedPrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_MULTI_PROCESS)
+            
+            // Load stats from SharedPreferences (for UI process to see main process stats)
+            loadStatsFromSharedPrefs()
+            
             loadCacheFromFile()
             
             // Start debounced save job
@@ -297,8 +313,14 @@ object DnsCacheManager {
      * Update metrics and emit to StateFlow
      * Calculates all statistics including memory usage, latency, and domain hit rates
      * This function is called periodically by the metrics update job
+     * 
+     * CRITICAL: For cross-process data sharing, reads stats from SharedPreferences
+     * if local counters are zero (UI process reads main process stats)
      */
     private fun updateMetrics() {
+        // Try to sync stats from SharedPreferences (for UI process to see main process stats)
+        syncStatsFromSharedPrefs()
+        
         val (hits, misses, total, entryCount, memoryUsageBytes, activeEntriesList) = cacheLock.read {
             val h = cacheHits.get()
             val m = cacheMisses.get()
@@ -313,15 +335,26 @@ object DnsCacheManager {
             val entries = cache.entries
                 .sortedByDescending { it.value.timestamp } // Most recent first
                 .take(100) // Limit to top 100
-                .map { (hostname, entry) ->
-                    val currentTime = System.currentTimeMillis() / 1000
-                    val expiryTime = entry.timestamp + entry.ttl
-                    DnsCacheEntryUiModel(
-                        domain = hostname,
-                        ips = entry.ips,
-                        expiryTime = expiryTime
-                    )
+                .mapNotNull { (hostname, entry) ->
+                    // Skip entries with empty IPs
+                    if (entry.ips.isEmpty()) {
+                        Log.w(TAG, "⚠️ Skipping entry with empty IPs: $hostname")
+                        null
+                    } else {
+                        val currentTime = System.currentTimeMillis() / 1000
+                        val expiryTime = entry.timestamp + entry.ttl
+                        DnsCacheEntryUiModel(
+                            domain = hostname,
+                            ips = entry.ips,
+                            expiryTime = expiryTime
+                        )
+                    }
                 }
+            
+            // Log active entries count for debugging
+            if (entries.size != ec && ec > 0) {
+                Log.d(TAG, "📊 Active entries: ${entries.size} (total cache: $ec, showing top 100)")
+            }
             
             Sextet<Long, Long, Long, Int, Long, List<DnsCacheEntryUiModel>>(h, m, t, ec, mem, entries)
         }
@@ -398,10 +431,80 @@ object DnsCacheManager {
             activeEntries = activeEntriesList
         )
         
+        // Save stats to SharedPreferences for cross-process access (main process writes, UI process reads)
+        saveStatsToSharedPrefs(hits, misses, total, avgHitLatency, avgMissLatency)
+        
         // Emit to StateFlow atomically
         _dashboardStats.value = metrics
+        
+        // Log active entries count for debugging (only when entries change significantly)
+        if (activeEntriesList.size != entryCount && entryCount > 0) {
+            Log.d(TAG, "📊 Metrics updated: entries=$entryCount, activeEntries=${activeEntriesList.size}, hits=$hits, misses=$misses, hitRate=$hitRate%")
+        }
+        
         // Log at DEBUG level for periodic visibility (called every 500ms, so verbose would be too noisy)
         // Detailed logging is done in startMetricsUpdateJob() every 10 updates
+    }
+    
+    /**
+     * Save stats to SharedPreferences for cross-process access.
+     * Main process writes stats here, UI process reads from here.
+     */
+    private fun saveStatsToSharedPrefs(hits: Long, misses: Long, total: Long, avgHitLatency: Double, avgMissLatency: Double) {
+        try {
+            sharedPrefs?.edit()?.apply {
+                putLong(PREFS_KEY_HITS, hits)
+                putLong(PREFS_KEY_MISSES, misses)
+                putLong(PREFS_KEY_TOTAL_LOOKUPS, total)
+                putFloat(PREFS_KEY_AVG_HIT_LATENCY, avgHitLatency.toFloat())
+                putFloat(PREFS_KEY_AVG_MISS_LATENCY, avgMissLatency.toFloat())
+                apply() // Use apply() for async write (non-blocking)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to save stats to SharedPreferences: ${e.message}")
+        }
+    }
+    
+    /**
+     * Load stats from SharedPreferences (for UI process to see main process stats).
+     * This is called during initialization to sync stats across processes.
+     */
+    private fun loadStatsFromSharedPrefs() {
+        syncStatsFromSharedPrefs()
+    }
+    
+    /**
+     * Sync stats from SharedPreferences (for UI process to see main process stats).
+     * This is called periodically to keep UI process stats in sync with main process.
+     */
+    private fun syncStatsFromSharedPrefs() {
+        try {
+            sharedPrefs?.let { prefs ->
+                val savedHits = prefs.getLong(PREFS_KEY_HITS, 0L)
+                val savedMisses = prefs.getLong(PREFS_KEY_MISSES, 0L)
+                val savedTotal = prefs.getLong(PREFS_KEY_TOTAL_LOOKUPS, 0L)
+                val savedAvgHitLatency = prefs.getFloat(PREFS_KEY_AVG_HIT_LATENCY, 0f).toDouble()
+                val savedAvgMissLatency = prefs.getFloat(PREFS_KEY_AVG_MISS_LATENCY, 0f).toDouble()
+                
+                // Only sync if we have saved stats (main process has written them)
+                // and local counters are zero or less (UI process hasn't done any DNS queries)
+                val localHits = cacheHits.get()
+                val localMisses = cacheMisses.get()
+                val localTotal = totalLookups.get()
+                
+                // If main process has stats and local process has no stats, sync from main process
+                if (savedTotal > 0 && (localTotal == 0L || savedTotal > localTotal)) {
+                    // Update atomic counters (for UI process to show correct stats from main process)
+                    cacheHits.set(savedHits)
+                    cacheMisses.set(savedMisses)
+                    totalLookups.set(savedTotal)
+                    avgHitLatency = savedAvgHitLatency
+                    avgMissLatency = savedAvgMissLatency
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to sync stats from SharedPreferences: ${e.message}")
+        }
     }
     
     /**
@@ -571,6 +674,11 @@ object DnsCacheManager {
 
         try {
             val ips = addresses.mapNotNull { it.hostAddress }
+            // Skip entries with empty IPs
+            if (ips.isEmpty()) {
+                Log.w(TAG, "⚠️ Skipping cache save for $hostname: no valid IP addresses")
+                return
+            }
             // Use provided TTL if available, otherwise use optimized TTL
             val finalTtl = ttl ?: getOptimizedTtl(hostname)
             
