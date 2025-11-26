@@ -105,11 +105,28 @@ class XrayStatsManager(
         // This ensures fresh stats for new connection
         resetStats()
         
+        // FIXED: Reset client cooldown when starting new monitoring session
+        // This allows immediate client creation on first stats update
+        // instead of waiting for cooldown period (5 seconds)
+        synchronized(coreStatsClientLock) {
+            lastClientCloseTime = 0L
+            consecutiveFailures = 0
+            if (clientState == ClientState.FAILED) {
+                clientState = ClientState.STOPPED
+            }
+            Log.d(TAG, "Reset client cooldown for new monitoring session")
+        }
+        
         // Start monitoring loop with dynamic interval based on traffic load
         monitoringJob = scope.launch {
+            // FIXED: Perform immediate first stats update without delay
+            // This ensures stats appear immediately when connection is established
+            // instead of waiting for the first interval delay (2 seconds)
+            Log.d(TAG, "Performing immediate first stats update")
+            updateCoreStats()
+            
+            // Then start the regular polling loop
             while (isActive && isMonitoring) {
-                updateCoreStats()
-                
                 // Dynamic interval based on current throughput
                 // High traffic -> fast polling (1s), low traffic -> slow polling (2s)
                 val currentStats = _statsState.value
@@ -120,6 +137,11 @@ class XrayStatsManager(
                     else -> 2000L                          // Low/Idle: 2s (battery saving)
                 }
                 delay(interval)
+                
+                // Only update stats if still monitoring (check after delay)
+                if (isActive && isMonitoring) {
+                    updateCoreStats()
+                }
             }
         }
     }
@@ -730,59 +752,36 @@ class XrayStatsManager(
             }
             Log.i(TAG, "verifyXrayConnection: System stats check PASSED - uptime=${systemStats.uptime}s, numGoroutine=${systemStats.numGoroutine}, numGC=${systemStats.numGC}")
             
-            // Test 2: Traffic stats - verify we can actually get traffic data with retry mechanism
-            Log.d(TAG, "verifyXrayConnection: Testing traffic stats connection with retries (500ms intervals)...")
-            var hasTraffic = false
-            var lastTrafficStats: TrafficState? = null
-            val maxRetries = 6 // 6 retries with 500ms intervals = up to 3 seconds wait
-            val retryDelay = 500L // 500ms between retries
+            // Test 2: Traffic stats - verify we can actually get traffic data
+            // NOTE: Traffic can be 0 initially (no traffic yet), so we only verify that the API is accessible
+            Log.d(TAG, "verifyXrayConnection: Testing traffic stats API accessibility...")
+            val trafficStats = withTimeoutOrNull(3000L) {
+                client.getTraffic()
+            }
             
-            for (retry in 1..maxRetries) {
-                Log.d(TAG, "verifyXrayConnection: Traffic stats retry $retry/$maxRetries...")
-                val trafficStats = withTimeoutOrNull(3000L) {
-                    client.getTraffic()
-                }
-                
-                if (trafficStats == null) {
-                    Log.w(TAG, "verifyXrayConnection: getTraffic returned null on retry $retry/$maxRetries")
-                    if (retry < maxRetries) {
-                        delay(retryDelay)
-                        continue
-                    } else {
-                        Log.e(TAG, "verifyXrayConnection FAILED: getTraffic returned null on all retries (port: $apiPort) - connection may not be fully functional")
-                        client.close()
-                        return false
-                    }
-                }
-                
-                lastTrafficStats = trafficStats
-                val totalTraffic = trafficStats.uplink + trafficStats.downlink
-                Log.d(TAG, "verifyXrayConnection: Retry $retry/$maxRetries - uplink=${trafficStats.uplink} bytes, downlink=${trafficStats.downlink} bytes, total=$totalTraffic bytes")
-                
-                if (totalTraffic > 0) {
-                    hasTraffic = true
-                    Log.i(TAG, "verifyXrayConnection: Traffic detected on retry $retry/$maxRetries - connection is functional")
-                    break
-                }
-                
-                // Wait before next retry (except on last retry)
-                if (retry < maxRetries) {
-                    delay(retryDelay)
-                }
+            if (trafficStats == null) {
+                Log.e(TAG, "verifyXrayConnection FAILED: getTraffic returned null (port: $apiPort) - traffic stats API not accessible")
+                client.close()
+                return false
+            }
+            
+            val totalTraffic = trafficStats.uplink + trafficStats.downlink
+            Log.d(TAG, "verifyXrayConnection: Traffic stats API accessible - uplink=${trafficStats.uplink} bytes, downlink=${trafficStats.downlink} bytes, total=$totalTraffic bytes")
+            
+            // Traffic can be 0 initially - this is normal for a fresh connection
+            // We only verify that the API is accessible, not that there's actual traffic
+            if (totalTraffic > 0) {
+                Log.i(TAG, "verifyXrayConnection: Traffic detected - connection is active")
+            } else {
+                Log.d(TAG, "verifyXrayConnection: No traffic yet (0 bytes) - this is normal for a fresh connection")
             }
             
             client.close()
             Log.d(TAG, "verifyXrayConnection: CoreStatsClient closed")
             
-            // If all retries showed 0 traffic, connection is considered failed
-            if (!hasTraffic) {
-                val finalUplink = lastTrafficStats?.uplink ?: 0
-                val finalDownlink = lastTrafficStats?.downlink ?: 0
-                Log.e(TAG, "verifyXrayConnection FAILED: All $maxRetries retries showed 0 traffic (uplink=$finalUplink, downlink=$finalDownlink) - connection may not be functional")
-                return false
-            }
-            
-            Log.i(TAG, "verifyXrayConnection SUCCESS: All checks passed - System stats OK, Traffic stats available (uplink=${lastTrafficStats?.uplink} bytes, downlink=${lastTrafficStats?.downlink} bytes)")
+            // Success: System stats OK and traffic stats API is accessible
+            // Traffic being 0 is acceptable - it means connection is ready but no traffic yet
+            Log.i(TAG, "verifyXrayConnection SUCCESS: All checks passed - System stats OK, Traffic stats API accessible (uplink=${trafficStats.uplink} bytes, downlink=${trafficStats.downlink} bytes)")
             true
         } catch (e: Exception) {
             Log.e(TAG, "verifyXrayConnection EXCEPTION: Error verifying Xray connection on port $apiPort: ${e.message}", e)

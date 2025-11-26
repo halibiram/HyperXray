@@ -5,9 +5,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
@@ -35,6 +38,15 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -42,6 +54,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.background
@@ -78,6 +91,16 @@ fun ConfigEditScreen(
     val hasConfigChanged by viewModel.hasConfigChanged.collectAsStateWithLifecycle()
     val sni by viewModel.sni.collectAsStateWithLifecycle()
     val streamSecurity by viewModel.streamSecurity.collectAsStateWithLifecycle()
+    val fingerprint by viewModel.fingerprint.collectAsStateWithLifecycle()
+    val alpn by viewModel.alpn.collectAsStateWithLifecycle()
+    val allowInsecure by viewModel.allowInsecure.collectAsStateWithLifecycle()
+    
+    // DPI Evasion (God Mode) settings
+    val enableFragment by viewModel.enableFragment.collectAsStateWithLifecycle()
+    val fragmentLength by viewModel.fragmentLength.collectAsStateWithLifecycle()
+    val fragmentInterval by viewModel.fragmentInterval.collectAsStateWithLifecycle()
+    val enableMux by viewModel.enableMux.collectAsStateWithLifecycle()
+    val muxConcurrency by viewModel.muxConcurrency.collectAsStateWithLifecycle()
 
     val scrollState = rememberScrollState()
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
@@ -258,6 +281,376 @@ fun ConfigEditScreen(
                                 keyboardType = KeyboardType.Text
                             )
                         )
+
+                        // Advanced TLS Settings Card
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = Color(0xFF1A1A1A)
+                            ),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Text(
+                                    text = "Advanced TLS Settings",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = Color(0xFFE0E0E0)
+                                )
+
+                                // Fingerprint Dropdown
+                                var fingerprintExpanded by remember { mutableStateOf(false) }
+                                ExposedDropdownMenuBox(
+                                    expanded = fingerprintExpanded,
+                                    onExpandedChange = { fingerprintExpanded = it }
+                                ) {
+                                    OutlinedTextField(
+                                        value = fingerprint,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        label = { 
+                                            Text(
+                                                "uTLS Fingerprint",
+                                                color = Color(0xFFB0B0B0)
+                                            ) 
+                                        },
+                                        trailingIcon = {
+                                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = fingerprintExpanded)
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .menuAnchor(MenuAnchorType.PrimaryEditable, true),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = Color(0xFFE0E0E0),
+                                            unfocusedTextColor = Color(0xFFE0E0E0),
+                                            focusedBorderColor = Color(0xFF4A9EFF),
+                                            unfocusedBorderColor = Color(0xFF404040),
+                                            focusedLabelColor = Color(0xFFB0B0B0),
+                                            unfocusedLabelColor = Color(0xFF808080)
+                                        )
+                                    )
+                                    DropdownMenu(
+                                        expanded = fingerprintExpanded,
+                                        onDismissRequest = { fingerprintExpanded = false }
+                                    ) {
+                                        listOf("chrome", "firefox", "safari", "ios", "android", "randomized", "360", "qq").forEach { option ->
+                                            DropdownMenuItem(
+                                                text = { Text(option, color = Color(0xFFE0E0E0)) },
+                                                onClick = {
+                                                    viewModel.updateFingerprint(option)
+                                                    fingerprintExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // ALPN Dropdown
+                                var alpnExpanded by remember { mutableStateOf(false) }
+                                ExposedDropdownMenuBox(
+                                    expanded = alpnExpanded,
+                                    onExpandedChange = { alpnExpanded = it }
+                                ) {
+                                    OutlinedTextField(
+                                        value = alpn,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        label = { 
+                                            Text(
+                                                "ALPN (Application-Layer Protocol Negotiation)",
+                                                color = Color(0xFFB0B0B0)
+                                            ) 
+                                        },
+                                        trailingIcon = {
+                                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = alpnExpanded)
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .menuAnchor(MenuAnchorType.PrimaryEditable, true),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = Color(0xFFE0E0E0),
+                                            unfocusedTextColor = Color(0xFFE0E0E0),
+                                            focusedBorderColor = Color(0xFF4A9EFF),
+                                            unfocusedBorderColor = Color(0xFF404040),
+                                            focusedLabelColor = Color(0xFFB0B0B0),
+                                            unfocusedLabelColor = Color(0xFF808080)
+                                        )
+                                    )
+                                    DropdownMenu(
+                                        expanded = alpnExpanded,
+                                        onDismissRequest = { alpnExpanded = false }
+                                    ) {
+                                        listOf("default", "h2", "http/1.1", "h2,http/1.1").forEach { option ->
+                                            DropdownMenuItem(
+                                                text = { Text(option, color = Color(0xFFE0E0E0)) },
+                                                onClick = {
+                                                    viewModel.updateAlpn(option)
+                                                    alpnExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Allow Insecure Switch
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Allow Insecure",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = Color(0xFFE0E0E0)
+                                        )
+                                        Text(
+                                            text = "Skip certificate verification",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFF808080)
+                                        )
+                                    }
+                                    Switch(
+                                        checked = allowInsecure,
+                                        onCheckedChange = { viewModel.updateAllowInsecure(it) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // DPI Evasion (God Mode) Settings Card
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFF1A1A1A)
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Text(
+                                text = "⚡ DPI Evasion (God Mode)",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = Color(0xFFE0E0E0)
+                            )
+
+                            // TLS Fragmentation Section
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Enable TLS Fragmentation",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = Color(0xFFE0E0E0)
+                                        )
+                                        Text(
+                                            text = "Fragment packets to evade DPI analysis",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFF808080)
+                                        )
+                                    }
+                                    Switch(
+                                        checked = enableFragment,
+                                        onCheckedChange = { enabled ->
+                                            viewModel.updateFragmentSettings(
+                                                enabled = enabled,
+                                                length = if (enabled) fragmentLength else "",
+                                                interval = if (enabled) fragmentInterval else ""
+                                            )
+                                        }
+                                    )
+                                }
+
+                                // Fragment Length Range
+                                if (enableFragment) {
+                                    OutlinedTextField(
+                                        value = fragmentLength,
+                                        onValueChange = { newValue ->
+                                            viewModel.updateFragmentSettings(
+                                                enabled = true,
+                                                length = newValue,
+                                                interval = fragmentInterval
+                                            )
+                                        },
+                                        label = { 
+                                            Text(
+                                                "Length Range (packets)",
+                                                color = Color(0xFFB0B0B0)
+                                            ) 
+                                        },
+                                        placeholder = { 
+                                            Text(
+                                                "100-200",
+                                                color = Color(0xFF808080)
+                                            ) 
+                                        },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = Color(0xFFE0E0E0),
+                                            unfocusedTextColor = Color(0xFFE0E0E0),
+                                            focusedBorderColor = Color(0xFF4A9EFF),
+                                            unfocusedBorderColor = Color(0xFF404040),
+                                            focusedLabelColor = Color(0xFFB0B0B0),
+                                            unfocusedLabelColor = Color(0xFF808080)
+                                        ),
+                                        keyboardOptions = KeyboardOptions.Default.copy(
+                                            keyboardType = KeyboardType.Text
+                                        )
+                                    )
+
+                                    // Fragment Interval
+                                    OutlinedTextField(
+                                        value = fragmentInterval,
+                                        onValueChange = { newValue ->
+                                            viewModel.updateFragmentSettings(
+                                                enabled = true,
+                                                length = fragmentLength,
+                                                interval = newValue
+                                            )
+                                        },
+                                        label = { 
+                                            Text(
+                                                "Interval (ms)",
+                                                color = Color(0xFFB0B0B0)
+                                            ) 
+                                        },
+                                        placeholder = { 
+                                            Text(
+                                                "10-30",
+                                                color = Color(0xFF808080)
+                                            ) 
+                                        },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = Color(0xFFE0E0E0),
+                                            unfocusedTextColor = Color(0xFFE0E0E0),
+                                            focusedBorderColor = Color(0xFF4A9EFF),
+                                            unfocusedBorderColor = Color(0xFF404040),
+                                            focusedLabelColor = Color(0xFFB0B0B0),
+                                            unfocusedLabelColor = Color(0xFF808080)
+                                        ),
+                                        keyboardOptions = KeyboardOptions.Default.copy(
+                                            keyboardType = KeyboardType.Text
+                                        )
+                                    )
+                                }
+                            }
+
+                            // Divider
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .background(Color(0xFF404040))
+                            )
+
+                            // Mux (Multiplexing) Section
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Enable Mux (Multiplexing)",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = Color(0xFFE0E0E0)
+                                        )
+                                        Text(
+                                            text = "Reduces handshake latency",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFF808080)
+                                        )
+                                    }
+                                    Switch(
+                                        checked = enableMux,
+                                        onCheckedChange = { enabled ->
+                                            viewModel.updateMuxSettings(
+                                                enabled = enabled,
+                                                concurrency = muxConcurrency
+                                            )
+                                        }
+                                    )
+                                }
+
+                                // Mux Concurrency Slider
+                                if (enableMux) {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Mux Concurrency",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = Color(0xFFE0E0E0)
+                                            )
+                                            Text(
+                                                text = muxConcurrency.toString(),
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontWeight = FontWeight.Bold
+                                                ),
+                                                color = Color(0xFF4A9EFF)
+                                            )
+                                        }
+                                        Slider(
+                                            value = muxConcurrency.toFloat(),
+                                            onValueChange = { newValue ->
+                                                viewModel.updateMuxSettings(
+                                                    enabled = true,
+                                                    concurrency = newValue.toInt()
+                                                )
+                                            },
+                                            valueRange = 1f..1024f,
+                                            steps = 1023, // 1024 steps (1 to 1024)
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = androidx.compose.material3.SliderDefaults.colors(
+                                                thumbColor = Color(0xFF4A9EFF),
+                                                activeTrackColor = Color(0xFF4A9EFF),
+                                                inactiveTrackColor = Color(0xFF404040)
+                                            )
+                                        )
+                                        Text(
+                                            text = "Range: 1 to 1024",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFF808080)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     TextField(
