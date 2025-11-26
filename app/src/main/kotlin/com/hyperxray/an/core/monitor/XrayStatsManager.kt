@@ -43,6 +43,11 @@ class XrayStatsManager(
     private val instanceClients: MutableMap<Int, CoreStatsClient> = mutableMapOf()
     private val instanceClientsMutex = Mutex()
     
+    // Track consecutive failures per instance for recreation
+    private val instanceFailureCounts: MutableMap<Int, Int> = mutableMapOf()
+    private val instanceLastFailureTime: MutableMap<Int, Long> = mutableMapOf()
+    private val MAX_INSTANCE_FAILURES = 3 // Recreate client after 3 consecutive failures
+    
     // Client lifecycle state management to prevent rebuild loops
     @Volatile
     private var clientState: ClientState = ClientState.STOPPED
@@ -96,6 +101,10 @@ class XrayStatsManager(
         
         Log.d(TAG, "Starting Xray stats monitoring")
         
+        // Reset stats when starting new monitoring session to clear old data
+        // This ensures fresh stats for new connection
+        resetStats()
+        
         // Start monitoring loop with dynamic interval based on traffic load
         monitoringJob = scope.launch {
             while (isActive && isMonitoring) {
@@ -118,6 +127,8 @@ class XrayStatsManager(
     /**
      * Stops monitoring Xray stats.
      * Should be called when connection is lost or service is disabled.
+     * Note: Stats are NOT reset here - they are reset when new monitoring starts.
+     * This allows stats to remain visible briefly after disconnection.
      */
     fun stopMonitoring() {
         if (!isMonitoring) {
@@ -132,6 +143,26 @@ class XrayStatsManager(
         monitoringJob = null
         
         closeCoreStatsClient()
+        
+        // Do NOT reset stats here - they will be reset when startMonitoring() is called
+        // This ensures stats remain visible briefly after disconnection and are properly
+        // reset when a new connection starts
+    }
+    
+    /**
+     * Resets all statistics to zero.
+     * Should be called when starting a new connection to clear old data.
+     */
+    fun resetStats() {
+        Log.d(TAG, "Resetting stats state to zero")
+        
+        // Reset throughput calculation state
+        lastUplink = 0L
+        lastDownlink = 0L
+        lastStatsTime = 0L
+        
+        // Reset stats state to zero
+        _statsState.value = CoreStatsState()
     }
     
     /**
@@ -367,22 +398,52 @@ class XrayStatsManager(
             instancesToRemove.forEach { index ->
                 instanceClients[index]?.close()
                 instanceClients.remove(index)
+                instanceFailureCounts.remove(index)
+                instanceLastFailureTime.remove(index)
                 Log.d(TAG, "Removed client for inactive instance $index")
             }
             
-            // Create clients for new instances
+            // Create clients for new instances or recreate failed ones
             activeInstances.forEach { (index, port) ->
-                if (index !in instanceClients) {
+                val shouldRecreate = if (index !in instanceClients) {
+                    // New instance, create client
+                    true
+                } else {
+                    // Existing client - check if it needs recreation
+                    val failureCount = instanceFailureCounts[index] ?: 0
+                    val lastFailureTime = instanceLastFailureTime[index] ?: 0L
+                    val now = System.currentTimeMillis()
+                    
+                    // Recreate if too many failures or last failure was recent
+                    if (failureCount >= MAX_INSTANCE_FAILURES) {
+                        Log.w(TAG, "Instance $index has $failureCount consecutive failures, recreating client")
+                        instanceClients[index]?.close()
+                        instanceClients.remove(index)
+                        instanceFailureCounts.remove(index)
+                        instanceLastFailureTime.remove(index)
+                        true
+                    } else {
+                        false
+                    }
+                }
+                
+                if (shouldRecreate) {
                     try {
                         val client = CoreStatsClient.create("127.0.0.1", port)
                         if (client != null) {
                             instanceClients[index] = client
+                            instanceFailureCounts[index] = 0 // Reset failure count
+                            instanceLastFailureTime.remove(index)
                             Log.d(TAG, "Created client for instance $index on port $port")
                         } else {
                             Log.w(TAG, "Failed to create client for instance $index on port $port")
+                            instanceFailureCounts[index] = (instanceFailureCounts[index] ?: 0) + 1
+                            instanceLastFailureTime[index] = System.currentTimeMillis()
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Exception creating client for instance $index: ${e.message}", e)
+                        instanceFailureCounts[index] = (instanceFailureCounts[index] ?: 0) + 1
+                        instanceLastFailureTime[index] = System.currentTimeMillis()
                     }
                 }
             }
@@ -403,9 +464,29 @@ class XrayStatsManager(
                             if (!isServiceEnabled) return@withTimeoutOrNull null
                             client.getSystemStats()
                         }
+                        // Reset failure count on success
+                        if (stats != null) {
+                            instanceClientsMutex.withLock {
+                                instanceFailureCounts[index] = 0
+                                instanceLastFailureTime.remove(index)
+                            }
+                        } else {
+                            // Increment failure count on null result
+                            instanceClientsMutex.withLock {
+                                val currentCount = instanceFailureCounts[index] ?: 0
+                                instanceFailureCounts[index] = currentCount + 1
+                                instanceLastFailureTime[index] = System.currentTimeMillis()
+                            }
+                        }
                         Pair(index, stats)
                     } catch (e: Exception) {
                         Log.e(TAG, "Error getting system stats from instance $index: ${e.message}", e)
+                        // Increment failure count on exception
+                        instanceClientsMutex.withLock {
+                            val currentCount = instanceFailureCounts[index] ?: 0
+                            instanceFailureCounts[index] = currentCount + 1
+                            instanceLastFailureTime[index] = System.currentTimeMillis()
+                        }
                         Pair(index, null)
                     }
                 }
@@ -426,9 +507,17 @@ class XrayStatsManager(
                             if (!isServiceEnabled) return@withTimeoutOrNull null
                             client.getTraffic()
                         }
+                        // Note: Failure count is already tracked in system stats call above
+                        // We don't double-count failures here
                         Pair(index, traffic)
                     } catch (e: Exception) {
                         Log.e(TAG, "Error getting traffic stats from instance $index: ${e.message}", e)
+                        // Increment failure count on exception
+                        instanceClientsMutex.withLock {
+                            val currentCount = instanceFailureCounts[index] ?: 0
+                            instanceFailureCounts[index] = currentCount + 1
+                            instanceLastFailureTime[index] = System.currentTimeMillis()
+                        }
                         Pair(index, null)
                     }
                 }
@@ -745,6 +834,8 @@ class XrayStatsManager(
                 }
             }
             instanceClients.clear()
+            instanceFailureCounts.clear()
+            instanceLastFailureTime.clear()
         }
     }
     

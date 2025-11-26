@@ -300,14 +300,23 @@ class MainViewModel(
             connectionState.collect { state ->
                 when (state) {
                     is com.hyperxray.an.feature.dashboard.ConnectionState.Connected -> {
+                        // Start monitoring - stats will be reset automatically in startMonitoring()
                         startMonitoring()
+                    }
+                    is com.hyperxray.an.feature.dashboard.ConnectionState.Connecting -> {
+                        // Clear telemetry state when starting new connection
+                        // Stats will be reset when startMonitoring() is called
+                        Log.d(TAG, "New connection starting, clearing telemetry state")
+                        _telemetryState.value = null
                     }
                     is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected,
                     is com.hyperxray.an.feature.dashboard.ConnectionState.Failed -> {
                         stopMonitoring()
+                        // Clear telemetry state on disconnection
+                        _telemetryState.value = null
                     }
                     else -> {
-                        // Connecting or Disconnecting states - no action needed
+                        // Disconnecting state - no action needed
                     }
                 }
             }
