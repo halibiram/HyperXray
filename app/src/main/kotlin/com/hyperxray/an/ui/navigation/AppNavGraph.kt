@@ -11,6 +11,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
@@ -36,6 +37,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.hyperxray.an.viewmodel.AiInsightsViewModel
+import com.hyperxray.an.viewmodel.AppListViewModel
+import com.hyperxray.an.viewmodel.ConfigEditViewModel
 import com.hyperxray.an.viewmodel.MainViewModel
 import com.hyperxray.an.feature.telegram.presentation.ui.TelegramSettingsScreen
 import com.hyperxray.an.feature.telegram.presentation.viewmodel.TelegramSettingsViewModel
@@ -74,10 +77,23 @@ fun AppNavHost(
             popEnterTransition = { EnterTransition.None },
             popExitTransition = { popExitTransition() }
         ) {
-            AppListScreen(
-                viewModel = mainViewModel.appListViewModel,
-                onBackClick = { navController.popBackStack() }
-            )
+            // Safe access: appListViewModel is initialized in navigateToAppList()
+            val viewModel = mainViewModel.appListViewModel
+            if (viewModel != null) {
+                AppListScreen(
+                    viewModel = viewModel,
+                    onBackClick = { navController.popBackStack() }
+                )
+            } else {
+                // Fallback: create ViewModel if somehow not initialized
+                // This should not happen in normal flow, but prevents crash
+                val context = LocalContext.current
+                val application = context.applicationContext as Application
+                AppListScreen(
+                    viewModel = AppListViewModel(application),
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
         }
 
         composable(
@@ -87,11 +103,21 @@ fun AppNavHost(
             popEnterTransition = { EnterTransition.None },
             popExitTransition = { popExitTransition() }
         ) {
-            ConfigEditScreen(
-                onBackClick = { navController.popBackStack() },
-                snackbarHostState = remember { SnackbarHostState() },
-                viewModel = mainViewModel.configEditViewModel
-            )
+            // Safe access: configEditViewModel is initialized in editConfig()
+            val viewModel = mainViewModel.configEditViewModel
+            if (viewModel != null) {
+                ConfigEditScreen(
+                    onBackClick = { navController.popBackStack() },
+                    snackbarHostState = remember { SnackbarHostState() },
+                    viewModel = viewModel
+                )
+            } else {
+                // Fallback: navigate back if ViewModel not initialized
+                // This should not happen in normal flow, but prevents crash
+                LaunchedEffect(Unit) {
+                    navController.popBackStack()
+                }
+            }
         }
 
         composable(

@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.res.AssetManager
 import android.net.Uri
 import android.util.Log
+import com.hyperxray.an.common.AiLogHelper
 import com.hyperxray.an.core.network.NetworkModule
 import com.hyperxray.an.data.source.FileManager
 import com.hyperxray.an.prefs.Preferences
@@ -66,44 +67,75 @@ class ConfigRepository(
      */
     suspend fun loadConfigs() {
         withContext(Dispatchers.IO) {
-            val filesDir = application.filesDir
-            val actualFiles =
-                filesDir.listFiles { file -> file.isFile && file.name.endsWith(".json") }?.toList()
-                    ?: emptyList()
-            val actualFilesByName = actualFiles.associateBy { it.name }
-            val savedOrder = prefs.configFilesOrder
+            Log.d(TAG, "loadConfigs() called")
+            AiLogHelper.d(TAG, "🔄 LOAD CONFIGS: Starting config files loading")
+            try {
+                val filesDir = application.filesDir
+                Log.d(TAG, "Loading configs from: ${filesDir.absolutePath}")
+                AiLogHelper.d(TAG, "🔄 LOAD CONFIGS: Loading from directory: ${filesDir.absolutePath}")
+                
+                val actualFiles =
+                    filesDir.listFiles { file -> file.isFile && file.name.endsWith(".json") }?.toList()
+                        ?: emptyList()
+                Log.d(TAG, "Found ${actualFiles.size} config files in directory")
+                AiLogHelper.d(TAG, "🔄 LOAD CONFIGS: Found ${actualFiles.size} config files: ${actualFiles.map { it.name }}")
+                
+                val actualFilesByName = actualFiles.associateBy { it.name }
+                val savedOrder = prefs.configFilesOrder
+                Log.d(TAG, "Saved order has ${savedOrder.size} files")
+                AiLogHelper.d(TAG, "🔄 LOAD CONFIGS: Saved order has ${savedOrder.size} files: $savedOrder")
 
-            val newOrder = mutableListOf<File>()
-            val remainingActualFileNames = actualFilesByName.toMutableMap()
+                val newOrder = mutableListOf<File>()
+                val remainingActualFileNames = actualFilesByName.toMutableMap()
 
-            savedOrder.forEach { filename ->
-                actualFilesByName[filename]?.let { file ->
-                    newOrder.add(file)
-                    remainingActualFileNames.remove(filename)
+                savedOrder.forEach { filename ->
+                    actualFilesByName[filename]?.let { file ->
+                        newOrder.add(file)
+                        remainingActualFileNames.remove(filename)
+                    }
                 }
-            }
 
-            newOrder.addAll(remainingActualFileNames.values.filter { it !in newOrder })
+                newOrder.addAll(remainingActualFileNames.values.filter { it !in newOrder })
+                Log.d(TAG, "Final config order has ${newOrder.size} files: ${newOrder.map { it.name }}")
+                AiLogHelper.d(TAG, "🔄 LOAD CONFIGS: Final order has ${newOrder.size} files: ${newOrder.map { it.name }}")
 
-            _configFiles.value = newOrder
-            prefs.configFilesOrder = newOrder.map { it.name }
+                _configFiles.value = newOrder
+                prefs.configFilesOrder = newOrder.map { it.name }
+                Log.d(TAG, "Config files StateFlow updated with ${newOrder.size} files")
+                AiLogHelper.i(TAG, "✅ LOAD CONFIGS: StateFlow updated with ${newOrder.size} files")
 
-            val currentSelectedPath = prefs.selectedConfigPath
-            var fileToSelect: File? = null
+                val currentSelectedPath = prefs.selectedConfigPath
+                var fileToSelect: File? = null
 
-            if (currentSelectedPath != null) {
-                val foundSelected = newOrder.find { it.absolutePath == currentSelectedPath }
-                if (foundSelected != null) {
-                    fileToSelect = foundSelected
+                if (currentSelectedPath != null) {
+                    Log.d(TAG, "Looking for selected config: $currentSelectedPath")
+                    AiLogHelper.d(TAG, "🔄 LOAD CONFIGS: Looking for selected config: $currentSelectedPath")
+                    val foundSelected = newOrder.find { it.absolutePath == currentSelectedPath }
+                    if (foundSelected != null) {
+                        fileToSelect = foundSelected
+                        Log.d(TAG, "Found selected config: ${foundSelected.name}")
+                        AiLogHelper.d(TAG, "✅ LOAD CONFIGS: Found selected config: ${foundSelected.name}")
+                    } else {
+                        Log.w(TAG, "Selected config path not found in current files: $currentSelectedPath")
+                        AiLogHelper.w(TAG, "⚠️ LOAD CONFIGS: Selected config path not found: $currentSelectedPath")
+                    }
                 }
-            }
 
-            if (fileToSelect == null) {
-                fileToSelect = newOrder.firstOrNull()
-            }
+                if (fileToSelect == null) {
+                    fileToSelect = newOrder.firstOrNull()
+                    Log.d(TAG, "No selected config found, using first file: ${fileToSelect?.name}")
+                    AiLogHelper.d(TAG, "🔄 LOAD CONFIGS: No selected config, using first: ${fileToSelect?.name}")
+                }
 
-            _selectedConfigFile.value = fileToSelect
-            prefs.selectedConfigPath = fileToSelect?.absolutePath
+                _selectedConfigFile.value = fileToSelect
+                prefs.selectedConfigPath = fileToSelect?.absolutePath
+                Log.d(TAG, "Selected config file set to: ${fileToSelect?.name}")
+                AiLogHelper.i(TAG, "✅ LOAD CONFIGS: Selected config set to: ${fileToSelect?.name}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in loadConfigs()", e)
+                AiLogHelper.e(TAG, "❌ LOAD CONFIGS ERROR: ${e.message}", e)
+                throw e
+            }
         }
     }
 

@@ -26,6 +26,12 @@ android {
         compose true
         buildConfig true
     }
+    
+    buildTypes {
+        release {
+            consumerProguardFiles 'proguard-rules.pro'
+        }
+    }
 }
 
 dependencies {

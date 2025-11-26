@@ -61,3 +61,4 @@ echo "Detaylı log için: adb logcat | grep -iE 'TProxyService|xray'"
 
 
 
+

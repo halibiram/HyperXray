@@ -12,9 +12,80 @@
 # ============================================================================
 
 # ConfigFormatConverter uses Class.forName to load VlessLinkConverter dynamically
--keep class com.hyperxray.an.feature.vless.config.VlessLinkConverter { *; }
+# CRITICAL: Keep VlessLinkConverter class, constructor, and all methods for reflection
+# R8 Full Mode aggressively obfuscates, so we must explicitly preserve exact names and signatures
+
+# STEP 1: Preserve class name for Class.forName("com.hyperxray.an.feature.vless.config.VlessLinkConverter")
+# -keepnames ensures the class name string literal resolves correctly
+-keepnames class com.hyperxray.an.feature.vless.config.VlessLinkConverter
+
+# STEP 2: Keep the class itself (prevents removal) and preserve exact method signatures
+# getMethod() requires exact method names and parameter types, so we must explicitly list them
+-keep class com.hyperxray.an.feature.vless.config.VlessLinkConverter {
+    # Preserve no-args constructor for getDeclaredConstructor().newInstance()
+    <init>();
+    
+    # Preserve detect(String) method signature for getMethod("detect", String.class)
+    # R8 Full Mode may rename methods even with <methods> wildcard, so explicit signature is required
+    boolean detect(java.lang.String);
+    
+    # Preserve convert(Context, String) method signature for getMethod("convert", Context.class, String.class)
+    # Return type must match exactly: Result<Pair<String, String>> (Kotlin compiles as kotlin.Result)
+    # Note: Kotlin may mangle method names (e.g., convert-gIAlu-s), so we also keep by name pattern
+    kotlin.Result convert(android.content.Context, java.lang.String);
+    
+    # Fallback: Keep all methods starting with "convert" (handles Kotlin name mangling)
+    # The reflection code searches for methods starting with "convert" as fallback
+    <methods>;
+    
+    # Keep all fields (may be needed for reflection)
+    <fields>;
+}
+
+# STEP 3: Preserve method names (critical for getMethod() calls)
+# getMethod() requires exact method names, so we must prevent R8 from renaming them
+-keepclassmembernames class com.hyperxray.an.feature.vless.config.VlessLinkConverter {
+    boolean detect(java.lang.String);
+    kotlin.Result convert(android.content.Context, java.lang.String);
+    <init>();
+}
+
+# STEP 4: Preserve Kotlin metadata for reflection compatibility
+# Kotlin reflection and some JVM reflection features require metadata annotations
+-keepclassmembers class com.hyperxray.an.feature.vless.config.VlessLinkConverter {
+    @kotlin.Metadata <methods>;
+}
+
+# STEP 5: Keep the interface that VlessLinkConverter implements
+# This ensures the interface methods are preserved and match the implementation
+-keep interface com.hyperxray.an.feature.vless.config.ConfigFormatConverter {
+    boolean detect(java.lang.String);
+    kotlin.Result convert(android.content.Context, java.lang.String);
+}
+
+# STEP 6: Preserve DetectedConfig typealias (Pair<String, String>) for Result type
+# The convert method returns Result<DetectedConfig> where DetectedConfig = Pair<String, String>
+-keep class kotlin.Pair { *; }
+-keep class kotlin.Result { *; }
+
+# STEP 7: Keep the entire feature.vless.config package as fallback
+# This ensures any related classes are also preserved
+-keep class com.hyperxray.an.feature.vless.config.** { *; }
+-keep interface com.hyperxray.an.feature.vless.config.** { *; }
+
+# STEP 8: Preserve class names for Class.forName() string literals
+# This ensures any Class.forName() calls in the feature module work correctly
+-keepnames class com.hyperxray.an.feature.vless.** { *; }
+
+# Keep ConfigFormatConverter in app module
 -keep class com.hyperxray.an.common.configFormat.ConfigFormatConverter { *; }
 -keep class com.hyperxray.an.common.configFormat.ConfigFormatConverter$* { *; }
+-keep class com.hyperxray.an.common.configFormat.** { *; }
+
+# Keep all classes that use Class.forName for dynamic loading
+-keepclassmembers class * {
+    static java.lang.Class forName(java.lang.String);
+}
 
 # AiOptimizerProfileManager uses reflection to access SystemProperties
 -keep class com.hyperxray.an.telemetry.AiOptimizerProfileManager { *; }
@@ -154,3 +225,4 @@
 -keep class kotlin.Metadata { *; }
 -keep class kotlin.reflect.** { *; }
 -dontwarn kotlin.reflect.**
+

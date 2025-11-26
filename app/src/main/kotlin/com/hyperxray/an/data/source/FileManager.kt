@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.res.AssetManager
 import android.net.Uri
 import android.util.Log
+import com.hyperxray.an.common.AiLogHelper
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.hyperxray.an.R
@@ -81,27 +82,52 @@ class FileManager(private val application: Application, private val prefs: Prefe
 
     suspend fun createConfigFile(assets: AssetManager): String? {
         return withContext(Dispatchers.IO) {
+            Log.d(TAG, "createConfigFile() called in FileManager")
+            AiLogHelper.d(TAG, "📝 FILE CREATE: Starting config file creation in FileManager")
             val filename = System.currentTimeMillis().toString() + ".json"
             val newFile = File(application.filesDir, filename)
+            Log.d(TAG, "Creating config file: ${newFile.absolutePath}")
+            AiLogHelper.d(TAG, "📝 FILE CREATE: Target file: ${newFile.absolutePath}")
             try {
                 val fileContent: String
                 if (prefs.useTemplate) {
+                    Log.d(TAG, "Using template for new config file")
+                    AiLogHelper.d(TAG, "📝 FILE CREATE: Using template (useTemplate=true)")
                     assets.open("template").use { assetInputStream ->
                         val size = assetInputStream.available()
+                        Log.d(TAG, "Template size: $size bytes")
+                        AiLogHelper.d(TAG, "📝 FILE CREATE: Template size: $size bytes")
                         val buffer = ByteArray(size)
                         assetInputStream.read(buffer)
                         fileContent = String(buffer, StandardCharsets.UTF_8)
                     }
                 } else {
+                    Log.d(TAG, "Creating empty config file (template disabled)")
+                    AiLogHelper.d(TAG, "📝 FILE CREATE: Creating empty config (useTemplate=false)")
                     fileContent = "{}"
                 }
                 FileOutputStream(newFile).use { fileOutputStream ->
-                    fileOutputStream.write(fileContent.toByteArray())
+                    val contentBytes = fileContent.toByteArray()
+                    fileOutputStream.write(contentBytes)
+                    Log.d(TAG, "Wrote ${contentBytes.size} bytes to file")
+                    AiLogHelper.d(TAG, "📝 FILE CREATE: Wrote ${contentBytes.size} bytes to file")
                 }
-                Log.d(TAG, "Created new config file: ${newFile.absolutePath}")
+                Log.d(TAG, "Successfully created new config file: ${newFile.absolutePath}")
+                if (!newFile.exists()) {
+                    Log.e(TAG, "ERROR: File was created but does not exist!")
+                    AiLogHelper.e(TAG, "❌ FILE CREATE ERROR: File was written but does not exist!")
+                    return@withContext null
+                }
+                Log.d(TAG, "File exists: ${newFile.exists()}, size: ${newFile.length()} bytes")
+                AiLogHelper.i(TAG, "✅ FILE CREATE SUCCESS: File exists: ${newFile.exists()}, size: ${newFile.length()} bytes, path: ${newFile.absolutePath}")
                 newFile.absolutePath
             } catch (e: IOException) {
                 Log.e(TAG, "Error creating new config file", e)
+                AiLogHelper.e(TAG, "❌ FILE CREATE IO ERROR: ${e.message}", e)
+                return@withContext null
+            } catch (e: Exception) {
+                Log.e(TAG, "Unexpected error creating new config file", e)
+                AiLogHelper.e(TAG, "❌ FILE CREATE EXCEPTION: ${e.message}", e)
                 return@withContext null
             }
         }
@@ -109,22 +135,51 @@ class FileManager(private val application: Application, private val prefs: Prefe
 
     suspend fun importConfigFromClipboard(): String? {
         return withContext(Dispatchers.IO) {
-            val clipboardContent = getClipboardContent(application)
+            Log.d(TAG, "importConfigFromClipboard() called in FileManager")
+            AiLogHelper.d(TAG, "📋 FILE IMPORT: Starting config import from clipboard in FileManager")
+            
+            try {
+                val clipboardContent = getClipboardContent(application)
+                AiLogHelper.d(TAG, "📋 FILE IMPORT: Clipboard content retrieved: ${if (clipboardContent == null) "null" else "not null (length: ${clipboardContent.length})"}")
 
-            if (clipboardContent.isNullOrEmpty()) {
-                Log.w(TAG, "Clipboard is empty, null, or does not contain text.")
+                if (clipboardContent.isNullOrEmpty()) {
+                    Log.w(TAG, "Clipboard is empty, null, or does not contain text.")
+                    AiLogHelper.w(TAG, "⚠️ FILE IMPORT: Clipboard is empty or null. Cannot import config.")
+                    return@withContext null
+                }
+            
+                Log.d(TAG, "Clipboard content length: ${clipboardContent.length} characters")
+                Log.d(TAG, "Clipboard content preview: ${clipboardContent.take(100)}...")
+                AiLogHelper.d(TAG, "📋 FILE IMPORT: Clipboard content length: ${clipboardContent.length} chars, preview: ${clipboardContent.take(100)}...")
+            
+                AiLogHelper.d(TAG, "📋 FILE IMPORT: Calling importConfigFromContent()...")
+                val result = importConfigFromContent(clipboardContent)
+            
+                if (result == null) {
+                    AiLogHelper.e(TAG, "❌ FILE IMPORT: importConfigFromContent() returned null")
+                } else {
+                    AiLogHelper.i(TAG, "✅ FILE IMPORT: importConfigFromContent() succeeded: $result")
+                }
+            
+                result
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in importConfigFromClipboard()", e)
+                AiLogHelper.e(TAG, "❌ FILE IMPORT EXCEPTION: ${e.message}", e)
                 return@withContext null
             }
-            importConfigFromContent(clipboardContent)
         }
     }
 
     suspend fun importConfigFromContent(content: String): String? {
         return withContext(Dispatchers.IO) {
+            AiLogHelper.d(TAG, "📋 CONTENT IMPORT: Starting importConfigFromContent()")
             if (content.isEmpty()) {
                 Log.w(TAG, "Content to import is empty.")
+                AiLogHelper.w(TAG, "⚠️ CONTENT IMPORT: Content is empty")
                 return@withContext null
             }
+
+            AiLogHelper.d(TAG, "📋 CONTENT IMPORT: Content length: ${content.length} chars, first 200 chars: ${content.take(200)}")
 
             // SimpleXray approach: First check if content is already valid JSON
             val isDirectJson = try {
@@ -134,39 +189,53 @@ class FileManager(private val application: Application, private val prefs: Prefe
                 false
             }
 
+            AiLogHelper.d(TAG, "📋 CONTENT IMPORT: Is direct JSON: $isDirectJson")
+
             val (name, configContent) = if (isDirectJson) {
                 // Direct JSON content - use it as-is (SimpleXray approach)
                 val configName = "imported_${System.currentTimeMillis()}"
+                AiLogHelper.d(TAG, "📋 CONTENT IMPORT: Direct JSON detected, using name: $configName")
                 Pair(configName, content)
             } else {
                 // Try to convert using converters (vless://, hyperxray://, etc.)
+                AiLogHelper.d(TAG, "📋 CONTENT IMPORT: Not direct JSON, trying converters...")
                 ConfigFormatConverter.convert(application, content).getOrElse { e ->
                     Log.e(TAG, "Failed to parse config: ${e.message}", e)
+                    AiLogHelper.e(TAG, "❌ CONTENT IMPORT: ConfigFormatConverter failed: ${e.message}", e)
                     return@withContext null
                 }
             }
+            
+            AiLogHelper.d(TAG, "📋 CONTENT IMPORT: Config name: $name, content length: ${configContent.length}")
 
             // Validate that configContent is valid JSON (SimpleXray approach)
+            AiLogHelper.d(TAG, "📋 CONTENT IMPORT: Validating JSON...")
             val isJson = try {
                 org.json.JSONObject(configContent)
                 true
             } catch (e: org.json.JSONException) {
                 Log.e(TAG, "Config content is not valid JSON after conversion", e)
+                AiLogHelper.e(TAG, "❌ CONTENT IMPORT: Config content is not valid JSON after conversion: ${e.message}", e)
                 false
             }
 
             if (!isJson) {
                 Log.e(TAG, "Config content is not valid JSON. Content starts with: ${configContent.take(100)}")
+                AiLogHelper.e(TAG, "❌ CONTENT IMPORT: Config content is not valid JSON. First 100 chars: ${configContent.take(100)}")
                 return@withContext null
             }
 
+            AiLogHelper.d(TAG, "📋 CONTENT IMPORT: JSON validation passed, formatting content...")
             // Format and save the config (SimpleXray approach: minimal formatting)
             val formattedContent = try {
                 ConfigUtils.formatConfigContent(configContent)
             } catch (e: JSONException) {
                 Log.e(TAG, "Invalid JSON format in provided content.", e)
+                AiLogHelper.e(TAG, "❌ CONTENT IMPORT: ConfigUtils.formatConfigContent failed: ${e.message}", e)
                 return@withContext null
             }
+            
+            AiLogHelper.d(TAG, "📋 CONTENT IMPORT: Content formatted, length: ${formattedContent.length} chars")
 
             // SimpleXray approach: Use timestamp-based filename, handle conflicts
             val filename = "$name.json"
@@ -182,13 +251,30 @@ class FileManager(private val application: Application, private val prefs: Prefe
             }
 
             try {
+                val contentBytes = formattedContent.toByteArray(StandardCharsets.UTF_8)
+                Log.d(TAG, "Writing ${contentBytes.size} bytes to file: ${finalFile.absolutePath}")
+                AiLogHelper.d(TAG, "📋 CONTENT IMPORT: Writing ${contentBytes.size} bytes to file: ${finalFile.absolutePath}")
                 FileOutputStream(finalFile).use { fileOutputStream ->
-                    fileOutputStream.write(formattedContent.toByteArray(StandardCharsets.UTF_8))
+                    fileOutputStream.write(contentBytes)
                 }
+                Log.d(TAG, "File write completed. Checking file existence...")
+                AiLogHelper.d(TAG, "📋 CONTENT IMPORT: File write completed, checking existence...")
+                if (!finalFile.exists()) {
+                    Log.e(TAG, "ERROR: File was written but does not exist!")
+                    AiLogHelper.e(TAG, "❌ CONTENT IMPORT ERROR: File was written but does not exist!")
+                    return@withContext null
+                }
+                Log.d(TAG, "File exists: ${finalFile.exists()}, size: ${finalFile.length()} bytes")
                 Log.d(TAG, "Successfully imported config from content to: ${finalFile.absolutePath}")
+                AiLogHelper.i(TAG, "✅ CONTENT IMPORT SUCCESS: File exists: ${finalFile.exists()}, size: ${finalFile.length()} bytes, path: ${finalFile.absolutePath}")
                 finalFile.absolutePath
             } catch (e: IOException) {
                 Log.e(TAG, "Error saving imported config file from content.", e)
+                AiLogHelper.e(TAG, "❌ CONTENT IMPORT IO ERROR: ${e.message}", e)
+                return@withContext null
+            } catch (e: Exception) {
+                Log.e(TAG, "Unexpected error saving imported config file", e)
+                AiLogHelper.e(TAG, "❌ CONTENT IMPORT EXCEPTION: ${e.message}", e)
                 return@withContext null
             }
         }

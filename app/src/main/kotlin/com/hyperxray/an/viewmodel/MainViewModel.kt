@@ -16,6 +16,7 @@ import androidx.lifecycle.application
 import androidx.lifecycle.viewModelScope
 import com.hyperxray.an.BuildConfig
 import com.hyperxray.an.R
+import com.hyperxray.an.common.AiLogHelper
 import com.hyperxray.an.common.ROUTE_AI_INSIGHTS
 import com.hyperxray.an.common.ROUTE_APP_LIST
 import com.hyperxray.an.common.formatBytes
@@ -98,8 +99,10 @@ class MainViewModel(
 
     var reloadView: (() -> Unit)? = null
 
-    lateinit var appListViewModel: AppListViewModel
-    lateinit var configEditViewModel: ConfigEditViewModel
+    // Use nullable types to prevent UninitializedPropertyAccessException
+    // These are initialized when navigation occurs (navigateToAppList, editConfig)
+    var appListViewModel: AppListViewModel? = null
+    var configEditViewModel: ConfigEditViewModel? = null
     
     // Cached dashboard adapter instance
     private var _dashboardAdapter: MainViewModelDashboardAdapter? = null
@@ -108,7 +111,8 @@ class MainViewModel(
         if (_dashboardAdapter == null) {
             _dashboardAdapter = MainViewModelDashboardAdapter(this)
         }
-        return _dashboardAdapter!!
+        // Safe: we just checked and created if null
+        return requireNotNull(_dashboardAdapter) { "Dashboard adapter should not be null after creation" }
     }
 
     // Settings state is now managed by SettingsRepository
@@ -466,13 +470,38 @@ class MainViewModel(
     }
 
     suspend fun createConfigFile(): String? {
-        val filePath = configRepository.createConfigFile(application.assets)
-        if (filePath == null) {
+        Log.d(TAG, "createConfigFile() called")
+        AiLogHelper.i(TAG, "📝 CONFIG CREATE: Starting config file creation")
+        try {
+            AiLogHelper.d(TAG, "📝 CONFIG CREATE: Calling configRepository.createConfigFile()")
+            val filePath = configRepository.createConfigFile(application.assets)
+            if (filePath == null) {
+                Log.e(TAG, "createConfigFile() failed: filePath is null")
+                AiLogHelper.e(TAG, "❌ CONFIG CREATE FAILED: filePath is null")
+                _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(application.getString(R.string.create_config_failed)))
+            } else {
+                Log.d(TAG, "createConfigFile() succeeded: $filePath")
+                AiLogHelper.i(TAG, "✅ CONFIG CREATE SUCCESS: File created at $filePath")
+                // Small delay to ensure file is fully written to disk
+                AiLogHelper.d(TAG, "⏳ CONFIG CREATE: Waiting 100ms for file write to complete...")
+                delay(100)
+                Log.d(TAG, "Calling loadConfigs() to refresh config list...")
+                AiLogHelper.d(TAG, "🔄 CONFIG CREATE: Calling loadConfigs() to refresh config list...")
+                configRepository.loadConfigs()
+                Log.d(TAG, "loadConfigs() completed. Current config files count: ${configFiles.value.size}")
+                Log.d(TAG, "Selected config file: ${selectedConfigFile.value?.name}")
+                AiLogHelper.i(TAG, "✅ CONFIG CREATE: loadConfigs() completed. Config files count: ${configFiles.value.size}, Selected: ${selectedConfigFile.value?.name}")
+                // Trigger UI refresh to ensure list is updated
+                _uiEvent.trySend(MainViewUiEvent.RefreshConfigList)
+                AiLogHelper.d(TAG, "🔄 CONFIG CREATE: RefreshConfigList event sent to UI")
+            }
+            return filePath
+        } catch (e: Exception) {
+            Log.e(TAG, "createConfigFile() threw exception", e)
+            AiLogHelper.e(TAG, "❌ CONFIG CREATE EXCEPTION: ${e.message}", e)
             _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(application.getString(R.string.create_config_failed)))
-        } else {
-            configRepository.loadConfigs()
+            return null
         }
-        return filePath
     }
 
     /**
@@ -525,13 +554,38 @@ class MainViewModel(
     }
 
     suspend fun importConfigFromClipboard(): String? {
-        val filePath = configRepository.importConfigFromClipboard()
-        if (filePath == null) {
+        Log.d(TAG, "importConfigFromClipboard() called")
+        AiLogHelper.i(TAG, "📋 CONFIG IMPORT: Starting config import from clipboard")
+        try {
+            AiLogHelper.d(TAG, "📋 CONFIG IMPORT: Calling configRepository.importConfigFromClipboard()")
+            val filePath = configRepository.importConfigFromClipboard()
+            if (filePath == null) {
+                Log.e(TAG, "importConfigFromClipboard() failed: filePath is null")
+                AiLogHelper.e(TAG, "❌ CONFIG IMPORT FAILED: filePath is null (clipboard may be empty or invalid)")
+                _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(application.getString(R.string.import_failed)))
+            } else {
+                Log.d(TAG, "importConfigFromClipboard() succeeded: $filePath")
+                AiLogHelper.i(TAG, "✅ CONFIG IMPORT SUCCESS: File imported at $filePath")
+                // Small delay to ensure file is fully written to disk
+                AiLogHelper.d(TAG, "⏳ CONFIG IMPORT: Waiting 100ms for file write to complete...")
+                delay(100)
+                Log.d(TAG, "Calling loadConfigs() to refresh config list...")
+                AiLogHelper.d(TAG, "🔄 CONFIG IMPORT: Calling loadConfigs() to refresh config list...")
+                configRepository.loadConfigs()
+                Log.d(TAG, "loadConfigs() completed. Current config files count: ${configFiles.value.size}")
+                Log.d(TAG, "Selected config file: ${selectedConfigFile.value?.name}")
+                AiLogHelper.i(TAG, "✅ CONFIG IMPORT: loadConfigs() completed. Config files count: ${configFiles.value.size}, Selected: ${selectedConfigFile.value?.name}")
+                // Trigger UI refresh to ensure list is updated
+                _uiEvent.trySend(MainViewUiEvent.RefreshConfigList)
+                AiLogHelper.d(TAG, "🔄 CONFIG IMPORT: RefreshConfigList event sent to UI")
+            }
+            return filePath
+        } catch (e: Exception) {
+            Log.e(TAG, "importConfigFromClipboard() threw exception", e)
+            AiLogHelper.e(TAG, "❌ CONFIG IMPORT EXCEPTION: ${e.message}", e)
             _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(application.getString(R.string.import_failed)))
-        } else {
-            configRepository.loadConfigs()
+            return null
         }
-        return filePath
     }
 
     suspend fun handleSharedContent(content: String) {
@@ -781,6 +835,7 @@ class MainViewModel(
 
     fun editConfig(filePath: String) {
         viewModelScope.launch {
+            // Always create new instance for each edit operation
             configEditViewModel = ConfigEditViewModel(application, filePath, prefs)
             _uiEvent.trySend(MainViewUiEvent.Navigate(ROUTE_CONFIG_EDIT))
         }
@@ -859,7 +914,10 @@ class MainViewModel(
 
     fun navigateToAppList() {
         viewModelScope.launch {
-            appListViewModel = AppListViewModel(application)
+            // Initialize if not already initialized
+            if (appListViewModel == null) {
+                appListViewModel = AppListViewModel(application)
+            }
             _uiEvent.trySend(MainViewUiEvent.Navigate(ROUTE_APP_LIST))
         }
     }

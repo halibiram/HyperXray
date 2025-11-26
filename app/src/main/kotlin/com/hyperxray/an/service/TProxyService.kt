@@ -146,13 +146,25 @@ class TProxyService : VpnService() {
         cleanupResources()
         
         // Stop Xray and clean up all resources
-        serviceScope.launch {
-            stopVpn("Service onDestroy() called")
+        // Use runBlocking to ensure cleanup completes before serviceScope is cancelled
+        // This prevents race condition where stopVpn tries to use serviceScope after it's cancelled
+        try {
+            runBlocking {
+                stopVpn("Service onDestroy() called")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping VPN in onDestroy", e)
+            AiLogHelper.e(TAG, "❌ SERVICE DESTROY: Error stopping VPN: ${e.message}", e)
         }
         
         // Flush log file buffer before shutdown
-        serviceScope.launch {
-            session.logFileManager.flush()
+        try {
+            runBlocking {
+                session.logFileManager.flush()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error flushing log file in onDestroy", e)
+            AiLogHelper.e(TAG, "❌ SERVICE DESTROY: Error flushing log file: ${e.message}", e)
         }
         
         dependencyManager.cleanup()

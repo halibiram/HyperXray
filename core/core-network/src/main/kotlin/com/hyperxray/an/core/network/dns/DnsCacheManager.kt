@@ -116,7 +116,8 @@ object DnsCacheManager {
             avgDomainHitRate = 0,
             topDomains = emptyList(),
             avgTtlSeconds = 0L,
-            activeEntries = emptyList()
+            activeEntries = emptyList(),
+            updateTimestamp = System.currentTimeMillis()
         )
     )
     
@@ -160,7 +161,8 @@ object DnsCacheManager {
         val avgDomainHitRate: Int, // 0-100 percentage (average hit rate across top domains)
         val topDomains: List<DomainHitRate>, // Top N domains by access count
         val avgTtlSeconds: Long, // Average TTL of cached entries
-        val activeEntries: List<DnsCacheEntryUiModel> // Top 100 most recently updated entries
+        val activeEntries: List<DnsCacheEntryUiModel>, // Top 100 most recently updated entries
+        val updateTimestamp: Long = System.currentTimeMillis() // Timestamp to ensure StateFlow always emits
     )
     
     /**
@@ -323,7 +325,8 @@ object DnsCacheManager {
      * if local counters are zero (UI process reads main process stats)
      */
     private fun updateMetrics() {
-        // Try to sync stats from SharedPreferences (for UI process to see main process stats)
+        // CRITICAL: Always sync stats from SharedPreferences first (for UI process to see main process stats)
+        // This ensures UI process always has latest data from main process
         syncStatsFromSharedPrefs()
         
         val (hits, misses, total, entryCount, memoryUsageBytes, activeEntriesList) = cacheLock.read {
@@ -418,7 +421,9 @@ object DnsCacheManager {
             Pair(domainStats, avgDomainHitRate)
         }
         
-        // Create metrics object
+        // Create metrics object (always create new instance with timestamp to ensure StateFlow emits)
+        // CRITICAL: Adding updateTimestamp ensures StateFlow always emits, even if other values are the same
+        // This is important for UI process which needs continuous updates from main process
         val metrics = DnsCacheMetrics(
             entryCount = entryCount,
             totalLookups = total,
@@ -433,14 +438,23 @@ object DnsCacheManager {
             avgDomainHitRate = avgDomainHitRate,
             topDomains = topDomains,
             avgTtlSeconds = avgTtlSeconds,
-            activeEntries = activeEntriesList
+            activeEntries = activeEntriesList,
+            updateTimestamp = System.currentTimeMillis() // Always different, ensures StateFlow emits
         )
         
         // Save stats to SharedPreferences for cross-process access (main process writes, UI process reads)
         saveStatsToSharedPrefs(hits, misses, total, avgHitLatency, avgMissLatency)
         
-        // Emit to StateFlow atomically
+        // CRITICAL FIX: Always emit to StateFlow
+        // updateTimestamp ensures StateFlow always emits, even if other values are the same
+        // This is important for UI process which needs continuous updates from main process
         _dashboardStats.value = metrics
+        
+        // DEBUG: Log when metrics are emitted (only occasionally to avoid spam)
+        // This helps verify that StateFlow is being updated
+        if (System.currentTimeMillis() % 5000 < 500) { // Log roughly every 5 seconds
+            Log.v(TAG, "📊 StateFlow updated: entries=$entryCount, hits=$hits, misses=$misses, hitRate=$hitRate%, avgHitLatency=${String.format("%.3f", avgHitLatency)}ms")
+        }
         
         // Log active entries count for debugging (only when entries change significantly)
         if (activeEntriesList.size != entryCount && entryCount > 0) {

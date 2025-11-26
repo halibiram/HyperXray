@@ -1,0 +1,88 @@
+11-26 00:25:45.645 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Starting config files loading
+11-26 00:25:45.646 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Loading from directory: /data/user/0/com.hyperxray.an/files
+11-26 00:25:45.647 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Found 2 config files: [yetergari-absolute-max-simple.json, xray_reality_policy_v10.json]
+11-26 00:25:45.648 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Saved order has 2 files: [xray_reality_policy_v10.json, yetergari-absolute-max-simple.json]
+11-26 00:25:45.648 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Final order has 2 files: [xray_reality_policy_v10.json, yetergari-absolute-max-simple.json]
+11-26 00:25:45.650 I/ConfigRepository(19247): ✅ LOAD CONFIGS: StateFlow updated with 2 files
+11-26 00:25:45.650 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Looking for selected config: /data/user/0/com.hyperxray.an/files/yetergari-absolute-max-simple.json
+11-26 00:25:45.650 D/ConfigRepository(19247): ✅ LOAD CONFIGS: Found selected config: yetergari-absolute-max-simple.json
+11-26 00:25:45.651 I/ConfigRepository(19247): ✅ LOAD CONFIGS: Selected config set to: yetergari-absolute-max-simple.json
+11-26 00:25:52.028 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Starting config files loading
+11-26 00:25:52.028 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Loading from directory: /data/user/0/com.hyperxray.an/files
+11-26 00:25:52.028 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Found 2 config files: [yetergari-absolute-max-simple.json, xray_reality_policy_v10.json]
+11-26 00:25:52.029 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Saved order has 2 files: [xray_reality_policy_v10.json, yetergari-absolute-max-simple.json]
+11-26 00:25:52.029 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Final order has 2 files: [xray_reality_policy_v10.json, yetergari-absolute-max-simple.json]
+11-26 00:25:52.029 I/ConfigRepository(19247): ✅ LOAD CONFIGS: StateFlow updated with 2 files
+11-26 00:25:52.030 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Looking for selected config: /data/user/0/com.hyperxray.an/files/yetergari-absolute-max-simple.json
+11-26 00:25:52.030 D/ConfigRepository(19247): ✅ LOAD CONFIGS: Found selected config: yetergari-absolute-max-simple.json
+11-26 00:25:52.030 I/ConfigRepository(19247): ✅ LOAD CONFIGS: Selected config set to: yetergari-absolute-max-simple.json
+11-26 00:25:52.234 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Starting config files loading
+11-26 00:25:52.234 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Loading from directory: /data/user/0/com.hyperxray.an/files
+11-26 00:25:52.234 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Found 2 config files: [yetergari-absolute-max-simple.json, xray_reality_policy_v10.json]
+11-26 00:25:52.235 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Saved order has 2 files: [xray_reality_policy_v10.json, yetergari-absolute-max-simple.json]
+11-26 00:25:52.235 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Final order has 2 files: [xray_reality_policy_v10.json, yetergari-absolute-max-simple.json]
+11-26 00:25:52.236 I/ConfigRepository(19247): ✅ LOAD CONFIGS: StateFlow updated with 2 files
+11-26 00:25:52.236 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Looking for selected config: /data/user/0/com.hyperxray.an/files/yetergari-absolute-max-simple.json
+11-26 00:25:52.236 D/ConfigRepository(19247): ✅ LOAD CONFIGS: Found selected config: yetergari-absolute-max-simple.json
+11-26 00:25:52.237 I/ConfigRepository(19247): ✅ LOAD CONFIGS: Selected config set to: yetergari-absolute-max-simple.json
+11-26 00:25:54.821 I/MainViewModel(19247): 📋 CONFIG IMPORT: Starting config import from clipboard
+11-26 00:25:54.821 D/MainViewModel(19247): 📋 CONFIG IMPORT: Calling configRepository.importConfigFromClipboard()
+11-26 00:25:54.822 D/FileManager(19247): 📋 FILE IMPORT: Starting config import from clipboard in FileManager
+11-26 00:25:54.826 D/FileManager(19247): 📋 FILE IMPORT: Clipboard content retrieved: not null (length: 161)
+11-26 00:25:54.826 D/FileManager(19247): 📋 FILE IMPORT: Clipboard content length: 161 chars, preview: https://services.sheerid.com/verify/68d47554aa292d20b9bec8f7/?verificationId=69261e745a832870540d51d...
+11-26 00:25:54.826 D/FileManager(19247): 📋 FILE IMPORT: Calling importConfigFromContent()...
+11-26 00:25:54.827 D/FileManager(19247): 📋 CONTENT IMPORT: Starting importConfigFromContent()
+11-26 00:25:54.828 D/FileManager(19247): 📋 CONTENT IMPORT: Content length: 161 chars, first 200 chars: https://services.sheerid.com/verify/68d47554aa292d20b9bec8f7/?verificationId=69261e745a832870540d51d0&redirectUrl=https%3A%2F%2Fchatgpt.com%2Fk12-verification%2F
+11-26 00:25:54.828 D/FileManager(19247): 📋 CONTENT IMPORT: Is direct JSON: false
+11-26 00:25:54.828 D/FileManager(19247): 📋 CONTENT IMPORT: Not direct JSON, trying converters...
+11-26 00:25:54.828 D/FileManager(19247): 📋 CONTENT IMPORT: Config name: imported_1764105954828, content length: 161
+11-26 00:25:54.829 D/FileManager(19247): 📋 CONTENT IMPORT: Validating JSON...
+11-26 00:25:54.829 E/FileManager(19247): ❌ CONTENT IMPORT: Config content is not valid JSON after conversion: A JSONObject text must begin with '{' at 1 [character 2 line 1]
+11-26 00:25:54.829 E/FileManager(19247): ❌ CONTENT IMPORT: Config content is not valid JSON after conversion: A JSONObject text must begin with '{' at 1 [character 2 line 1]
+11-26 00:25:54.829 E/FileManager(19247): ❌ CONTENT IMPORT: Config content is not valid JSON. First 100 chars: https://services.sheerid.com/verify/68d47554aa292d20b9bec8f7/?verificationId=69261e745a832870540d51d
+11-26 00:25:54.829 E/FileManager(19247): ❌ FILE IMPORT: importConfigFromContent() returned null
+11-26 00:25:54.830 E/MainViewModel(19247): ❌ CONFIG IMPORT FAILED: filePath is null (clipboard may be empty or invalid)
+11-26 00:26:03.262 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Starting config files loading
+11-26 00:26:03.262 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Loading from directory: /data/user/0/com.hyperxray.an/files
+11-26 00:26:03.262 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Found 2 config files: [yetergari-absolute-max-simple.json, xray_reality_policy_v10.json]
+11-26 00:26:03.263 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Saved order has 2 files: [xray_reality_policy_v10.json, yetergari-absolute-max-simple.json]
+11-26 00:26:03.263 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Final order has 2 files: [xray_reality_policy_v10.json, yetergari-absolute-max-simple.json]
+11-26 00:26:03.263 I/ConfigRepository(19247): ✅ LOAD CONFIGS: StateFlow updated with 2 files
+11-26 00:26:03.263 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Looking for selected config: /data/user/0/com.hyperxray.an/files/yetergari-absolute-max-simple.json
+11-26 00:26:03.263 D/ConfigRepository(19247): ✅ LOAD CONFIGS: Found selected config: yetergari-absolute-max-simple.json
+11-26 00:26:03.264 I/ConfigRepository(19247): ✅ LOAD CONFIGS: Selected config set to: yetergari-absolute-max-simple.json
+11-26 00:26:03.480 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Starting config files loading
+11-26 00:26:03.480 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Loading from directory: /data/user/0/com.hyperxray.an/files
+11-26 00:26:03.480 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Found 2 config files: [yetergari-absolute-max-simple.json, xray_reality_policy_v10.json]
+11-26 00:26:03.481 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Saved order has 2 files: [xray_reality_policy_v10.json, yetergari-absolute-max-simple.json]
+11-26 00:26:03.481 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Final order has 2 files: [xray_reality_policy_v10.json, yetergari-absolute-max-simple.json]
+11-26 00:26:03.482 I/ConfigRepository(19247): ✅ LOAD CONFIGS: StateFlow updated with 2 files
+11-26 00:26:03.482 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Looking for selected config: /data/user/0/com.hyperxray.an/files/yetergari-absolute-max-simple.json
+11-26 00:26:03.483 D/ConfigRepository(19247): ✅ LOAD CONFIGS: Found selected config: yetergari-absolute-max-simple.json
+11-26 00:26:03.483 I/ConfigRepository(19247): ✅ LOAD CONFIGS: Selected config set to: yetergari-absolute-max-simple.json
+11-26 00:26:22.406 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Starting config files loading
+11-26 00:26:22.406 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Loading from directory: /data/user/0/com.hyperxray.an/files
+11-26 00:26:22.406 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Found 2 config files: [yetergari-absolute-max-simple.json, xray_reality_policy_v10.json]
+11-26 00:26:22.407 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Saved order has 2 files: [xray_reality_policy_v10.json, yetergari-absolute-max-simple.json]
+11-26 00:26:22.407 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Final order has 2 files: [xray_reality_policy_v10.json, yetergari-absolute-max-simple.json]
+11-26 00:26:22.407 I/ConfigRepository(19247): ✅ LOAD CONFIGS: StateFlow updated with 2 files
+11-26 00:26:22.407 D/ConfigRepository(19247): 🔄 LOAD CONFIGS: Looking for selected config: /data/user/0/com.hyperxray.an/files/yetergari-absolute-max-simple.json
+11-26 00:26:22.407 D/ConfigRepository(19247): ✅ LOAD CONFIGS: Found selected config: yetergari-absolute-max-simple.json
+11-26 00:26:22.407 I/ConfigRepository(19247): ✅ LOAD CONFIGS: Selected config set to: yetergari-absolute-max-simple.json
+11-26 00:26:25.541 I/MainViewModel(19247): 📋 CONFIG IMPORT: Starting config import from clipboard
+11-26 00:26:25.541 D/MainViewModel(19247): 📋 CONFIG IMPORT: Calling configRepository.importConfigFromClipboard()
+11-26 00:26:25.542 D/FileManager(19247): 📋 FILE IMPORT: Starting config import from clipboard in FileManager
+11-26 00:26:25.545 D/FileManager(19247): 📋 FILE IMPORT: Clipboard content retrieved: not null (length: 208)
+11-26 00:26:25.546 D/FileManager(19247): 📋 FILE IMPORT: Clipboard content length: 208 chars, preview: vless://df1c9148-a700-44c2-bfff-77b6afc94a9e@sus.halibiram.online:8443?type=tcp&encryption=none&secu...
+11-26 00:26:25.546 D/FileManager(19247): 📋 FILE IMPORT: Calling importConfigFromContent()...
+11-26 00:26:25.546 D/FileManager(19247): 📋 CONTENT IMPORT: Starting importConfigFromContent()
+11-26 00:26:25.547 D/FileManager(19247): 📋 CONTENT IMPORT: Content length: 208 chars, first 200 chars: vless://df1c9148-a700-44c2-bfff-77b6afc94a9e@sus.halibiram.online:8443?type=tcp&encryption=none&security=tls&fp=chrome&alpn=h2%2Chttp%2F1.1%2Ch3&allowInsecure=1&sni=play.googleapis.com#youtubae%20tls-
+11-26 00:26:25.547 D/FileManager(19247): 📋 CONTENT IMPORT: Is direct JSON: false
+11-26 00:26:25.551 D/FileManager(19247): 📋 CONTENT IMPORT: Not direct JSON, trying converters...
+11-26 00:26:25.552 D/FileManager(19247): 📋 CONTENT IMPORT: Config name: imported_1764105985552, content length: 208
+11-26 00:26:25.552 D/FileManager(19247): 📋 CONTENT IMPORT: Validating JSON...
+11-26 00:26:25.553 E/FileManager(19247): ❌ CONTENT IMPORT: Config content is not valid JSON after conversion: A JSONObject text must begin with '{' at 1 [character 2 line 1]
+11-26 00:26:25.553 E/FileManager(19247): ❌ CONTENT IMPORT: Config content is not valid JSON after conversion: A JSONObject text must begin with '{' at 1 [character 2 line 1]
+11-26 00:26:25.553 E/FileManager(19247): ❌ CONTENT IMPORT: Config content is not valid JSON. First 100 chars: vless://df1c9148-a700-44c2-bfff-77b6afc94a9e@sus.halibiram.online:8443?type=tcp&encryption=none&secu
+11-26 00:26:25.553 E/FileManager(19247): ❌ FILE IMPORT: importConfigFromContent() returned null
+11-26 00:26:25.553 E/MainViewModel(19247): ❌ CONFIG IMPORT FAILED: filePath is null (clipboard may be empty or invalid)
