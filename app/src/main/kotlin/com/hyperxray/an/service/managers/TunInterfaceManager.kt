@@ -97,8 +97,8 @@ class TunInterfaceManager(private val vpnService: VpnService) {
                 AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Creating SystemDnsCacheServer instance...")
                 sessionState.systemDnsCacheServer = SystemDnsCacheServer.getInstance(context)
             }
-            AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Starting DNS cache server...")
-            sessionState.systemDnsCacheServer?.start()
+            AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Starting DNS cache server on port 5353 (Xray uses this port)...")
+            sessionState.systemDnsCacheServer?.start(5353)
             val dnsServerDuration = System.currentTimeMillis() - dnsServerStartTime
             val listeningPort = sessionState.systemDnsCacheServer?.getListeningPort()
             Log.d(TAG, "DNS cache server started successfully")

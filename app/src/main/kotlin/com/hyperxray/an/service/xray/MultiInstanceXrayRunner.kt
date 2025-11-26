@@ -3,7 +3,7 @@ package com.hyperxray.an.service.xray
 import android.content.Intent
 import android.util.Log
 import com.hyperxray.an.common.AiLogHelper
-import com.hyperxray.an.common.ConfigUtils.extractPortsFromJson
+import com.hyperxray.an.core.config.utils.ConfigParser
 import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.core.network.dns.SystemDnsCacheServer
 import com.hyperxray.an.prefs.Preferences
@@ -128,15 +128,17 @@ class MultiInstanceXrayRunner(
             }
             AiLogHelper.i(TAG, "✅ XRAY START: Config content read successfully (${configContent.length} bytes, duration: ${configReadDuration}ms)")
             
-            // Pre-resolve server address BEFORE starting Xray (using system DNS, not VPN DNS)
-            // This ensures server IP is available even if only YouTube package exists
-            val serverAddress = TProxyUtils.extractServerAddressFromConfig(configContent)
+            // Pre-resolve server addresses (VLESS/VMess and WireGuard) and replace domains with IPs in config
+            // This prevents DNS bootstrap failures by ensuring Xray receives IP addresses instead of domains
+            val resolvedConfigContent = preResolveAndReplaceDomainsInConfig(configContent)
+            
+            // Extract server address for DNS caching (for logging and DNS cache)
+            val serverAddress = TProxyUtils.extractServerAddressFromConfig(resolvedConfigContent)
             if (serverAddress != null && !TProxyUtils.isValidIpAddress(serverAddress)) {
-                // Server address is a domain name, resolve it using system DNS (not VPN DNS)
+                // Server address is still a domain (shouldn't happen after pre-resolve, but cache it anyway)
                 Log.d(TAG, "Pre-resolving server address: $serverAddress (using system DNS before VPN start)")
                 try {
                     val resolvedAddresses = withContext(Dispatchers.IO) {
-                        // Use system DNS (InetAddress) - works before VPN starts
                         InetAddress.getAllByName(serverAddress)
                     }
                     if (resolvedAddresses.isNotEmpty()) {
@@ -146,23 +148,15 @@ class MultiInstanceXrayRunner(
                         if (systemDnsCacheServer != null && systemDnsCacheServer.isRunning()) {
                             try {
                                 DnsCacheManager.saveToCache(serverAddress, resolvedAddresses.toList())
-                                Log.d(TAG, "💾 Cached server address resolution in DNS cache")
+                                systemDnsCacheServer.setServerDomains(setOf(serverAddress))
+                                Log.d(TAG, "💾 Cached server address resolution in DNS cache and registered for proxy bypass")
                             } catch (e: Exception) {
                                 Log.w(TAG, "Failed to cache server address: ${e.message}")
                             }
                         }
-                    } else {
-                        Log.w(TAG, "⚠️ Server address resolved but no IPs found: $serverAddress")
                     }
                 } catch (e: Exception) {
-                    val errorMessage = "Failed to resolve server address: $serverAddress (${e.message})"
-                    Log.w(TAG, errorMessage, e)
-                    // Broadcast warning to UI but don't stop - Xray can resolve DNS itself
-                    val errorIntent = Intent(runnerContext.getActionError())
-                    errorIntent.setPackage(runnerContext.getApplicationPackageName())
-                    errorIntent.putExtra(runnerContext.getExtraErrorMessage(), "DNS resolution failed for server. Xray will try to resolve it.")
-                    runnerContext.sendBroadcast(errorIntent)
-                    // Continue anyway - Xray-core can resolve DNS itself
+                    Log.w(TAG, "Failed to resolve server address: $serverAddress (${e.message})")
                 }
             } else if (serverAddress != null && TProxyUtils.isValidIpAddress(serverAddress)) {
                 Log.d(TAG, "Server address is already an IP: $serverAddress (no DNS resolution needed)")
@@ -280,7 +274,7 @@ class MultiInstanceXrayRunner(
                     }
                 }
                 
-                val excludedPorts = extractPortsFromJson(configContent)
+                val excludedPorts = ConfigParser.extractPortsFromJson(resolvedConfigContent)
                 Log.i(TAG, "🔧 Starting $instanceCount xray-core instances with excluded ports: $excludedPorts")
                 Log.d(TAG, "Instance startup parameters: count=$instanceCount, configPath=$selectedConfigPath, excludedPortsCount=${excludedPorts.size}")
                 
@@ -301,7 +295,7 @@ class MultiInstanceXrayRunner(
                     val result = manager.startInstances(
                         count = instanceCount,
                         configPath = selectedConfigPath,
-                        configContent = configContent,
+                        configContent = resolvedConfigContent,
                         excludedPorts = excludedPorts
                     )
                     val completedCount = result.size
@@ -570,6 +564,125 @@ class MultiInstanceXrayRunner(
     
     override fun isRunning(): Boolean {
         return isRunning && (runnerContext.multiXrayCoreManager?.hasRunningInstances() == true)
+    }
+    
+    /**
+     * Pre-resolve server addresses (VLESS/VMess and WireGuard) and replace domains with IPs in config.
+     * This prevents DNS bootstrap failures by ensuring Xray receives IP addresses instead of domains.
+     * 
+     * @param configContent Original config JSON string
+     * @return Modified config JSON string with resolved IP addresses, or original if no changes needed
+     */
+    private suspend fun preResolveAndReplaceDomainsInConfig(configContent: String): String {
+        var modifiedConfig = configContent
+        
+        try {
+            val jsonObject = org.json.JSONObject(configContent)
+            val outbounds = jsonObject.optJSONArray("outbounds") ?: jsonObject.optJSONArray("outbound")
+            if (outbounds == null || outbounds.length() == 0) {
+                return modifiedConfig
+            }
+            
+            var configModified = false
+            
+            // Process each outbound
+            for (i in 0 until outbounds.length()) {
+                val outbound = outbounds.getJSONObject(i)
+                val protocol = outbound.optString("protocol", "").lowercase()
+                val settings = outbound.optJSONObject("settings")
+                
+                // Handle VLESS/VMess protocols
+                if (settings != null) {
+                    val vnext = settings.optJSONArray("vnext")
+                    if (vnext != null && vnext.length() > 0) {
+                        val server = vnext.getJSONObject(0)
+                        val address = server.optString("address", "")
+                        if (address.isNotEmpty() && !TProxyUtils.isValidIpAddress(address)) {
+                            // Domain name found, resolve it
+                            val resolvedIp = resolveDomainToIp(address)
+                            if (resolvedIp != null) {
+                                server.put("address", resolvedIp)
+                                configModified = true
+                                Log.i(TAG, "✅ Pre-resolved VLESS/VMess address: $address -> $resolvedIp")
+                                AiLogHelper.i(TAG, "✅ DNS PRE-RESOLVE: VLESS/VMess $address -> $resolvedIp")
+                            }
+                        }
+                    }
+                    
+                    // Handle WireGuard protocol
+                    if (protocol == "wireguard") {
+                        val peers = settings.optJSONArray("peers")
+                        if (peers != null && peers.length() > 0) {
+                            for (j in 0 until peers.length()) {
+                                val peer = peers.getJSONObject(j)
+                                val endpoint = peer.optString("endpoint", "")
+                                if (endpoint.isNotEmpty()) {
+                                    // Extract domain from endpoint (format: "domain.com:port")
+                                    val endpointParts = endpoint.split(":")
+                                    if (endpointParts.size >= 2) {
+                                        val domain = endpointParts[0]
+                                        val port = endpointParts[1]
+                                        
+                                        if (!TProxyUtils.isValidIpAddress(domain)) {
+                                            // Domain name found, resolve it
+                                            val resolvedIp = resolveDomainToIp(domain)
+                                            if (resolvedIp != null) {
+                                                // Replace domain with IP in endpoint
+                                                val newEndpoint = "$resolvedIp:$port"
+                                                peer.put("endpoint", newEndpoint)
+                                                configModified = true
+                                                Log.i(TAG, "✅ Pre-resolved WireGuard endpoint: $endpoint -> $newEndpoint")
+                                                AiLogHelper.i(TAG, "✅ DNS PRE-RESOLVE: WireGuard $endpoint -> $newEndpoint")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Return modified config if changes were made
+            if (configModified) {
+                modifiedConfig = jsonObject.toString()
+                Log.i(TAG, "✅ Config modified with pre-resolved IP addresses")
+                AiLogHelper.i(TAG, "✅ DNS PRE-RESOLVE: Config modified with resolved IP addresses")
+            } else {
+                Log.d(TAG, "No domain names found to resolve (all addresses are already IPs)")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error during pre-resolve: ${e.message}", e)
+            AiLogHelper.w(TAG, "⚠️ DNS PRE-RESOLVE: Error during pre-resolve: ${e.message}")
+            // Return original config on error
+        }
+        
+        return modifiedConfig
+    }
+    
+    /**
+     * Resolve a domain name to IP address using system DNS.
+     * 
+     * @param domain Domain name to resolve
+     * @return First resolved IP address, or null if resolution fails
+     */
+    private suspend fun resolveDomainToIp(domain: String): String? {
+        return try {
+            val resolvedAddresses = withContext(Dispatchers.IO) {
+                InetAddress.getAllByName(domain)
+            }
+            if (resolvedAddresses.isNotEmpty()) {
+                // Return first IPv4 address, or first address if no IPv4
+                val ipv4 = resolvedAddresses.firstOrNull { it.hostAddress?.contains(".") == true }
+                ipv4?.hostAddress ?: resolvedAddresses[0].hostAddress
+            } else {
+                Log.w(TAG, "⚠️ Domain resolved but no IPs found: $domain")
+                null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to resolve domain: $domain (${e.message})")
+            null
+        }
     }
 }
 

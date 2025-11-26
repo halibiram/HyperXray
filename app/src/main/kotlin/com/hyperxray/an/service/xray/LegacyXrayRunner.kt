@@ -2,8 +2,8 @@ package com.hyperxray.an.service.xray
 
 import android.content.Intent
 import android.util.Log
-import com.hyperxray.an.common.ConfigUtils
-import com.hyperxray.an.common.ConfigUtils.extractPortsFromJson
+import com.hyperxray.an.core.config.utils.ConfigInjector
+import com.hyperxray.an.core.config.utils.ConfigParser
 import com.hyperxray.an.service.TProxyService
 import com.hyperxray.an.service.utils.TProxyUtils
 import kotlinx.coroutines.Dispatchers
@@ -67,7 +67,7 @@ class LegacyXrayRunner(
             
             // Use libxray.so directly with Android linker
             val xrayPath = "$libraryDir/libxray.so"
-            val excludedPorts = extractPortsFromJson(config.configContent)
+            val excludedPorts = ConfigParser.extractPortsFromJson(config.configContent)
             val apiPort = TProxyUtils.findAvailablePort(excludedPorts)
             if (apiPort == null) {
                 val errorMessage = "Failed to find available port. All ports in range 10000-65535 are in use or excluded."
@@ -206,7 +206,7 @@ class LegacyXrayRunner(
 
             Log.d(TAG, "Writing config to xray stdin from: ${config.configFile.canonicalPath}")
             val injectedConfigContent =
-                ConfigUtils.injectStatsService(runnerContext.prefs, config.configContent)
+                ConfigInjector.injectStatsService(runnerContext.prefs, config.configContent)
             
             // CRITICAL: Verify UDP support is enabled in dokodemo-door inbounds before sending to Xray
             try {

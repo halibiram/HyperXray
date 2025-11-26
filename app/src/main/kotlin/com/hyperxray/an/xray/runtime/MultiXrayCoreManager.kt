@@ -27,7 +27,7 @@ import kotlin.coroutines.coroutineContext
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.Volatile
-import com.hyperxray.an.common.ConfigUtils
+import com.hyperxray.an.core.config.utils.ConfigInjector
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.xray.runtime.LogLineCallback
 
@@ -185,7 +185,7 @@ class MultiXrayCoreManager(private val context: Context) {
             // OPTIMIZATION: Inject common config once (without API port)
             // Then each instance only needs lightweight port injection
             val commonConfigContent = try {
-                ConfigUtils.injectCommonConfig(prefs, configContent ?: "")
+                ConfigInjector.injectCommonConfig(prefs, configContent ?: "")
             } catch (e: Exception) {
                 Log.e(TAG, "Error injecting common config", e)
                 configContent ?: ""
@@ -234,12 +234,12 @@ class MultiXrayCoreManager(private val context: Context) {
                     Log.d(TAG, "Instance $i: Injecting API port $apiPort into config...")
                     AiLogHelper.d(TAG, "🔧 XRAY MANAGER START: Instance $i - Injecting API port $apiPort into config...")
                     val injectedConfigContent = try {
-                        ConfigUtils.injectApiPort(commonConfigContent, apiPort)
+                        ConfigInjector.injectApiPort(commonConfigContent, apiPort)
                             .also { Log.d(TAG, "Instance $i: Config injection completed (config size: ${it.length} bytes)") }
                     } catch (e: Exception) {
                         Log.e(TAG, "❌ Instance $i: Error injecting API port", e)
                         try {
-                            ConfigUtils.injectStatsServiceWithPort(prefs, configContent ?: "", apiPort)
+                            ConfigInjector.injectStatsServiceWithPort(prefs, configContent ?: "", apiPort)
                                 .also { Log.d(TAG, "Instance $i: Fallback config injection completed") }
                         } catch (e2: Exception) {
                             Log.e(TAG, "❌ Instance $i: Error in fallback config injection", e2)

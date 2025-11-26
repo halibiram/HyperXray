@@ -221,6 +221,22 @@ object TProxyUtils {
                 }
             }
             
+            // Handle WireGuard protocol
+            if (protocol == "wireguard") {
+                val peers = settings.optJSONArray("peers")
+                if (peers != null && peers.length() > 0) {
+                    val peer = peers.getJSONObject(0)
+                    val endpoint = peer.optString("endpoint", "")
+                    if (endpoint.isNotEmpty()) {
+                        // Extract domain from endpoint (format: "domain.com:port")
+                        val endpointParts = endpoint.split(":")
+                        if (endpointParts.isNotEmpty()) {
+                            return endpointParts[0]
+                        }
+                    }
+                }
+            }
+            
             null
         } catch (e: Exception) {
             Log.w(TAG, "Failed to extract server address from config: ${e.message}")

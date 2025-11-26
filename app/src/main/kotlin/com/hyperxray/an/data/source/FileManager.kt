@@ -11,7 +11,7 @@ import com.hyperxray.an.common.AiLogHelper
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.hyperxray.an.R
-import com.hyperxray.an.common.ConfigUtils
+import com.hyperxray.an.core.config.utils.ConfigParser
 import com.hyperxray.an.common.FilenameValidator
 import com.hyperxray.an.common.configFormat.ConfigFormatConverter
 import com.hyperxray.an.prefs.Preferences
@@ -228,10 +228,10 @@ class FileManager(private val application: Application, private val prefs: Prefe
             AiLogHelper.d(TAG, "📋 CONTENT IMPORT: JSON validation passed, formatting content...")
             // Format and save the config (SimpleXray approach: minimal formatting)
             val formattedContent = try {
-                ConfigUtils.formatConfigContent(configContent)
+                ConfigParser.formatConfigContent(configContent)
             } catch (e: JSONException) {
                 Log.e(TAG, "Invalid JSON format in provided content.", e)
-                AiLogHelper.e(TAG, "❌ CONTENT IMPORT: ConfigUtils.formatConfigContent failed: ${e.message}", e)
+                AiLogHelper.e(TAG, "❌ CONTENT IMPORT: ConfigParser.formatConfigContent failed: ${e.message}", e)
                 return@withContext null
             }
             

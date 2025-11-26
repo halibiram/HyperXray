@@ -47,6 +47,13 @@ fun UtilsScreen(
             }
             item {
                 UtilsToolCard(
+                    title = "WARP Account",
+                    description = "Register and manage Cloudflare WARP account",
+                    onClick = { navController?.navigate(ROUTE_UTILS_WARP) }
+                )
+            }
+            item {
+                UtilsToolCard(
                     title = "DNS Cache Manager",
                     description = "View and manage DNS cache records",
                     onClick = { navController?.navigate(ROUTE_UTILS_DNS_CACHE) }

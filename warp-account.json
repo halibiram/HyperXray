@@ -1,0 +1,50 @@
+{
+  "account_id": "094b4ef6-c774-4362-9efc-aa25fde5c4b5",
+  "token": "c9e541c7-fef1-4da5-8bd8-f26b5310e1c5",
+  "private_key": "2KrDaM7BzwZmecJa1vnfFFPxL8l8ZxNg5TfIAHYsgVk=",
+  "public_key": "MbTOAsZVlzoBbROW1MNEFqEW1yj21vM4tgTJIq47MQ4=",
+  "config": {
+    "client_id": "r/z9",
+    "peers": [
+      {
+        "public_key": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+        "endpoint": {
+          "v4": "162.159.192.6:0",
+          "v6": "[2606:4700:d0::a29f:c006]:0",
+          "host": "engage.cloudflareclient.com:2408",
+          "ports": [
+            2408,
+            500,
+            1701,
+            4500
+          ]
+        }
+      }
+    ],
+    "interface": {
+      "addresses": {
+        "v4": "172.16.0.2",
+        "v6": "2606:4700:110:8102:b265:7180:63e5:4c80"
+      }
+    },
+    "services": {
+      "http_proxy": "172.16.0.1:2480"
+    }
+  },
+  "account": {
+    "id": "8c753ce2-41c1-4e55-8a06-931ec30359c9",
+    "account_type": "free",
+    "created": "2025-11-26T15:32:46.960065495Z",
+    "updated": "2025-11-26T15:32:46.960065495Z",
+    "premium_data": 0,
+    "quota": 0,
+    "usage": 0,
+    "warp_plus": true,
+    "referral_count": 0,
+    "referral_renewal_countdown": 0,
+    "role": "child",
+    "license": "4IoQC579-6k89ib5o-b5Ix7i30",
+    "ttl": "2026-02-24T15:32:46.960063825Z"
+  },
+  "created": "2025-11-26T15:32:49.000Z"
+}

@@ -223,11 +223,14 @@ class DnsUpstreamClient(
      * Stop Flood: Query only Top 3 Fastest servers initially
      * Wave 2: If no response in 400ms, query next 3
      * Winner Takes All: Cancel pending queries safely upon first success
+     * 
+     * @param bypassProxy If true, bypass SOCKS5 proxy for this query (used for server domain resolution during VPN startup)
      */
     suspend fun forwardQuery(
         queryData: ByteArray,
         hostname: String,
-        timeoutMs: Long = DEFAULT_TIMEOUT_MS
+        timeoutMs: Long = DEFAULT_TIMEOUT_MS,
+        bypassProxy: Boolean = false
     ): ByteArray? {
         val lowerHostname = hostname.lowercase()
         
@@ -253,11 +256,12 @@ class DnsUpstreamClient(
         val startTime = System.currentTimeMillis()
         return supervisorScope {
             try {
-                Log.d(TAG, "🔍 DNS UPSTREAM QUERY START: $hostname (query size: ${queryData.size} bytes, timeout: ${timeoutMs}ms)")
+                val proxyInfo = if (bypassProxy) " (BYPASS PROXY)" else ""
+                Log.d(TAG, "🔍 DNS UPSTREAM QUERY START: $hostname$proxyInfo (query size: ${queryData.size} bytes, timeout: ${timeoutMs}ms)")
                 
                 // Try UDP first with Happy Eyeballs
                 val udpStartTime = System.currentTimeMillis()
-                val result = forwardToUpstreamDnsWithHappyEyeballs(queryData, hostname, timeoutMs)
+                val result = forwardToUpstreamDnsWithHappyEyeballs(queryData, hostname, timeoutMs, bypassProxy)
                 val udpDuration = System.currentTimeMillis() - udpStartTime
                 
                 if (result != null) {
@@ -271,7 +275,7 @@ class DnsUpstreamClient(
                 
                 // Try DoT fallback if UDP failed
                 val dotStartTime = System.currentTimeMillis()
-                val dotResult = tryDoTFallback(queryData, hostname)
+                val dotResult = tryDoTFallback(queryData, hostname, bypassProxy)
                 val dotDuration = System.currentTimeMillis() - dotStartTime
                 if (dotResult != null) {
                     val totalDuration = System.currentTimeMillis() - startTime
@@ -284,7 +288,7 @@ class DnsUpstreamClient(
                 
                 // Try DoH fallback if DoT failed
                 val dohStartTime = System.currentTimeMillis()
-                val dohResult = tryDoHFallback(hostname)
+                val dohResult = tryDoHFallback(hostname, bypassProxy)
                 val dohDuration = System.currentTimeMillis() - dohStartTime
                 if (dohResult != null) {
                     val totalDuration = System.currentTimeMillis() - startTime
@@ -297,7 +301,7 @@ class DnsUpstreamClient(
                 
                 // Try TCP DNS fallback if DoH failed
                 val tcpStartTime = System.currentTimeMillis()
-                val tcpResult = tryTcpDnsFallback(queryData, hostname)
+                val tcpResult = tryTcpDnsFallback(queryData, hostname, bypassProxy)
                 val tcpDuration = System.currentTimeMillis() - tcpStartTime
                 if (tcpResult != null) {
                     val totalDuration = System.currentTimeMillis() - startTime
@@ -328,11 +332,14 @@ class DnsUpstreamClient(
      * Step 1: Query top 3 fastest servers
      * Step 2: If no response in 400ms, launch queries to next 3 servers
      * This prevents network congestion and "Self-DoS" scenarios
+     * 
+     * @param bypassProxy If true, bypass SOCKS5 proxy for this query (used for server domain resolution during VPN startup)
      */
     private suspend fun forwardToUpstreamDnsWithHappyEyeballs(
         queryData: ByteArray,
         hostname: String,
-        timeoutMs: Long
+        timeoutMs: Long,
+        bypassProxy: Boolean = false
     ): ByteArray? {
         return withContext(Dispatchers.IO) {
             val startTime = System.currentTimeMillis()
@@ -368,7 +375,7 @@ class DnsUpstreamClient(
                     try {
                         val adaptiveTimeout = getAdaptiveTimeout(dnsServer).coerceAtMost(timeoutMs)
                         withTimeoutOrNull(adaptiveTimeout) {
-                            queryDnsServerUdp(queryData, hostname, dnsServer, adaptiveTimeout)
+                            queryDnsServerUdp(queryData, hostname, dnsServer, adaptiveTimeout, bypassProxy)
                         }
                     } catch (e: CancellationException) {
                         null
@@ -465,7 +472,7 @@ class DnsUpstreamClient(
                         try {
                             val adaptiveTimeout = getAdaptiveTimeout(dnsServer).coerceAtMost(timeoutMs)
                             withTimeoutOrNull(adaptiveTimeout) {
-                                queryDnsServerUdp(queryData, hostname, dnsServer, adaptiveTimeout)
+                                queryDnsServerUdp(queryData, hostname, dnsServer, adaptiveTimeout, bypassProxy)
                             }
                         } catch (e: CancellationException) {
                             null
@@ -538,7 +545,8 @@ class DnsUpstreamClient(
         queryData: ByteArray,
         hostname: String,
         dnsServer: InetAddress,
-        timeoutMs: Long
+        timeoutMs: Long,
+        bypassProxy: Boolean = false
     ): ByteArray? {
         return supervisorScope {
             // Wrap critical DNS query with retry logic
@@ -598,9 +606,14 @@ class DnsUpstreamClient(
             } catch (e: CancellationException) {
                 null
             } catch (e: Exception) {
-                // Try SOCKS5 fallback if available after retries exhausted
-                Log.d(TAG, "⚠️ [DIRECT] Direct UDP failed for ${dnsServer.hostAddress} after retries: ${e.message}, trying SOCKS5 fallback...")
-                trySocks5Fallback(queryData, hostname, dnsServer, timeoutMs)
+                // Try SOCKS5 fallback if available after retries exhausted (unless bypassProxy is true)
+                if (bypassProxy) {
+                    Log.d(TAG, "⚠️ [DIRECT] Direct UDP failed for ${dnsServer.hostAddress} after retries: ${e.message} (bypassProxy=true, skipping SOCKS5 fallback)")
+                    null
+                } else {
+                    Log.d(TAG, "⚠️ [DIRECT] Direct UDP failed for ${dnsServer.hostAddress} after retries: ${e.message}, trying SOCKS5 fallback...")
+                    trySocks5Fallback(queryData, hostname, dnsServer, timeoutMs)
+                }
             }
         }
     }
@@ -680,7 +693,7 @@ class DnsUpstreamClient(
     /**
      * DNS over TLS (DoT) fallback when UDP DNS fails
      */
-    private suspend fun tryDoTFallback(queryData: ByteArray, hostname: String): ByteArray? {
+    private suspend fun tryDoTFallback(queryData: ByteArray, hostname: String, bypassProxy: Boolean = false): ByteArray? {
         return withContext(Dispatchers.IO) {
             val startTime = System.currentTimeMillis()
             val timeoutMs = DEFAULT_TIMEOUT_MS
@@ -782,7 +795,7 @@ class DnsUpstreamClient(
     /**
      * DNS over HTTPS (DoH) fallback when UDP DNS fails
      */
-    private suspend fun tryDoHFallback(hostname: String): ByteArray? {
+    private suspend fun tryDoHFallback(hostname: String, bypassProxy: Boolean = false): ByteArray? {
         return withContext(Dispatchers.IO) {
             val startTime = System.currentTimeMillis()
             val timeoutMs = DEFAULT_TIMEOUT_MS
@@ -867,7 +880,7 @@ class DnsUpstreamClient(
     /**
      * TCP DNS fallback when UDP and DoT fail
      */
-    private suspend fun tryTcpDnsFallback(queryData: ByteArray, hostname: String): ByteArray? {
+    private suspend fun tryTcpDnsFallback(queryData: ByteArray, hostname: String, bypassProxy: Boolean = false): ByteArray? {
         return withContext(Dispatchers.IO) {
             val startTime = System.currentTimeMillis()
             val timeoutMs = DEFAULT_TIMEOUT_MS

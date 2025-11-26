@@ -20,6 +20,7 @@ const val ROUTE_POLICY_AI = "policy_ai"
 const val ROUTE_TELEGRAM_SETTINGS = "telegram_settings"
 
 // Utils Tool Routes
+const val ROUTE_UTILS_WARP = "utils/warp"
 const val ROUTE_UTILS_DNS_CACHE = "utils/dns_cache"
 const val ROUTE_UTILS_OPTIMIZER = "utils/optimizer"
 const val ROUTE_UTILS_IP_INFO = "utils/ip_info"

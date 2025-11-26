@@ -7,10 +7,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.application
 import androidx.lifecycle.viewModelScope
 import com.hyperxray.an.R
-import com.hyperxray.an.common.ConfigUtils
+import com.hyperxray.an.core.config.utils.ConfigParser
 import com.hyperxray.an.common.FilenameValidator
 import com.hyperxray.an.data.source.FileManager
 import com.hyperxray.an.prefs.Preferences
+import com.hyperxray.an.viewmodel.logic.WireGuardHandler
+import com.hyperxray.an.viewmodel.logic.StreamHandler
+import com.hyperxray.an.viewmodel.logic.RealityHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -68,38 +71,35 @@ class ConfigEditViewModel(
     private val _hasConfigChanged = MutableStateFlow(false)
     val hasConfigChanged: StateFlow<Boolean> = _hasConfigChanged.asStateFlow()
 
-    // SNI and security state for UI
-    private val _sni = MutableStateFlow<String>("")
-    val sni: StateFlow<String> = _sni.asStateFlow()
+    // Logic handlers - delegate protocol-specific logic
+    private val wireGuardHandler = WireGuardHandler()
+    private val streamHandler = StreamHandler()
+    private val realityHandler = RealityHandler()
 
-    private val _streamSecurity = MutableStateFlow<String?>(null)
-    val streamSecurity: StateFlow<String?> = _streamSecurity.asStateFlow()
+    // Expose handler state flows as ViewModel state (single source of truth)
+    // Stream settings
+    val sni: StateFlow<String> = streamHandler.sni
+    val streamSecurity: StateFlow<String?> = streamHandler.streamSecurity
+    val fingerprint: StateFlow<String> = streamHandler.fingerprint
+    val alpn: StateFlow<String> = streamHandler.alpn
+    val allowInsecure: StateFlow<Boolean> = streamHandler.allowInsecure
+    val enableFragment: StateFlow<Boolean> = streamHandler.enableFragment
+    val fragmentLength: StateFlow<String> = streamHandler.fragmentLength
+    val fragmentInterval: StateFlow<String> = streamHandler.fragmentInterval
+    val enableMux: StateFlow<Boolean> = streamHandler.enableMux
+    val muxConcurrency: StateFlow<Int> = streamHandler.muxConcurrency
 
-    // Advanced TLS settings state for UI
-    private val _fingerprint = MutableStateFlow<String>("chrome")
-    val fingerprint: StateFlow<String> = _fingerprint.asStateFlow()
-
-    private val _alpn = MutableStateFlow<String>("default")
-    val alpn: StateFlow<String> = _alpn.asStateFlow()
-
-    private val _allowInsecure = MutableStateFlow<Boolean>(false)
-    val allowInsecure: StateFlow<Boolean> = _allowInsecure.asStateFlow()
-
-    // DPI Evasion (God Mode) settings state for UI
-    private val _enableFragment = MutableStateFlow<Boolean>(false)
-    val enableFragment: StateFlow<Boolean> = _enableFragment.asStateFlow()
-
-    private val _fragmentLength = MutableStateFlow<String>("100-200")
-    val fragmentLength: StateFlow<String> = _fragmentLength.asStateFlow()
-
-    private val _fragmentInterval = MutableStateFlow<String>("10-30")
-    val fragmentInterval: StateFlow<String> = _fragmentInterval.asStateFlow()
-
-    private val _enableMux = MutableStateFlow<Boolean>(false)
-    val enableMux: StateFlow<Boolean> = _enableMux.asStateFlow()
-
-    private val _muxConcurrency = MutableStateFlow<Int>(8)
-    val muxConcurrency: StateFlow<Int> = _muxConcurrency.asStateFlow()
+    // WARP (WireGuard) settings
+    val enableWarp: StateFlow<Boolean> = wireGuardHandler.enableWarp
+    val warpPrivateKey: StateFlow<String> = wireGuardHandler.warpPrivateKey
+    val warpPeerPublicKey: StateFlow<String> = wireGuardHandler.warpPeerPublicKey
+    val warpEndpoint: StateFlow<String> = wireGuardHandler.warpEndpoint
+    val warpLocalAddress: StateFlow<String> = wireGuardHandler.warpLocalAddress
+    val warpClientId: StateFlow<String?> = wireGuardHandler.warpClientId
+    val warpLicenseKey: StateFlow<String> = wireGuardHandler.warpLicenseKey
+    val warpAccountType: StateFlow<String?> = wireGuardHandler.warpAccountType
+    val warpQuota: StateFlow<String> = wireGuardHandler.warpQuota
+    val isBindingLicense: StateFlow<Boolean> = wireGuardHandler.isBindingLicense
 
     private val fileManager: FileManager = FileManager(application, prefs)
 
@@ -151,7 +151,7 @@ class ConfigEditViewModel(
 
     /**
      * Parse SNI and stream security from config JSON.
-     * Updates state flows for UI binding.
+     * Delegates to handlers for protocol-specific parsing.
      */
     private fun parseConfigFields(configContent: String) {
         try {
@@ -160,224 +160,55 @@ class ConfigEditViewModel(
             
             if (outbounds != null && outbounds.length() > 0) {
                 val outbound = outbounds.getJSONObject(0)
+                
+                // Delegate stream settings parsing to StreamHandler
+                streamHandler.parseStreamSettings(outbound)
+                
+                // Parse Reality settings if present
                 val streamSettings = outbound.optJSONObject("streamSettings")
-                
-                if (streamSettings != null) {
-                    val security = streamSettings.optString("security", "").takeIf { it.isNotEmpty() }
-                    _streamSecurity.value = security
-                    
-                    // Parse SNI from tlsSettings (for TLS) or realitySettings (for Reality)
-                    when (security) {
-                        "tls" -> {
-                            val tlsSettings = streamSettings.optJSONObject("tlsSettings")
-                            val sniValue = tlsSettings?.optString("serverName", "") ?: ""
-                            _sni.value = sniValue
-                            
-                            // Parse advanced TLS settings
-                            val fingerprintValue = tlsSettings?.optString("fingerprint", "chrome") ?: "chrome"
-                            _fingerprint.value = fingerprintValue
-                            
-                            val allowInsecureValue = tlsSettings?.optBoolean("allowInsecure", false) ?: false
-                            _allowInsecure.value = allowInsecureValue
-                            
-                            // Parse ALPN - can be string or array
-                            val alpnValue = when {
-                                tlsSettings?.has("alpn") == true -> {
-                                    val alpnObj = tlsSettings.opt("alpn")
-                                    when {
-                                        alpnObj is String -> alpnObj
-                                        alpnObj is org.json.JSONArray && alpnObj.length() > 0 -> {
-                                            // Convert array to comma-separated string
-                                            (0 until alpnObj.length())
-                                                .mapNotNull { alpnObj.optString(it, null) }
-                                                .joinToString(",")
-                                        }
-                                        else -> "default"
-                                    }
-                                }
-                                else -> "default"
-                            }
-                            _alpn.value = alpnValue
-                        }
-                        "reality" -> {
-                            val realitySettings = streamSettings.optJSONObject("realitySettings")
-                            val sniValue = realitySettings?.optString("serverName", "") ?: ""
-                            _sni.value = sniValue
-                            // Reset TLS-specific fields for Reality
-                            _fingerprint.value = "chrome"
-                            _alpn.value = "default"
-                            _allowInsecure.value = false
-                        }
-                        else -> {
-                            _sni.value = ""
-                            // Reset TLS-specific fields
-                            _fingerprint.value = "chrome"
-                            _alpn.value = "default"
-                            _allowInsecure.value = false
-                        }
-                    }
-                } else {
-                    _streamSecurity.value = null
-                    _sni.value = ""
-                    _fingerprint.value = "chrome"
-                    _alpn.value = "default"
-                    _allowInsecure.value = false
+                if (streamSettings != null && streamSettings.optString("security") == "reality") {
+                    realityHandler.parseRealitySettings(streamSettings)
                 }
                 
-                // Parse DPI Evasion settings (sockopt and mux at outbound level)
-                parseEvasionSettings(outbound)
+                // Delegate WARP settings parsing to WireGuardHandler
+                wireGuardHandler.parseWarpSettings(jsonObject)
             } else {
-                _streamSecurity.value = null
-                _sni.value = ""
-                _fingerprint.value = "chrome"
-                _alpn.value = "default"
-                _allowInsecure.value = false
-                // Reset evasion settings
-                _enableFragment.value = false
-                _fragmentLength.value = "100-200"
-                _fragmentInterval.value = "10-30"
-                _enableMux.value = false
-                _muxConcurrency.value = 8
+                // Reset all handlers
+                streamHandler.reset()
+                realityHandler.reset()
+                wireGuardHandler.reset()
             }
         } catch (e: Exception) {
-            // Invalid JSON or missing fields - reset state
             Log.d(TAG, "Failed to parse config fields: ${e.message}")
-            _streamSecurity.value = null
-            _sni.value = ""
-            _fingerprint.value = "chrome"
-            _alpn.value = "default"
-            _allowInsecure.value = false
-            // Reset evasion settings
-            _enableFragment.value = false
-            _fragmentLength.value = "100-200"
-            _fragmentInterval.value = "10-30"
-            _enableMux.value = false
-            _muxConcurrency.value = 8
+            streamHandler.reset()
+            realityHandler.reset()
+            wireGuardHandler.reset()
         }
     }
-
-    /**
-     * Parse DPI Evasion settings (fragment and mux) from outbound JSON.
-     * These settings are at the outbound level, not in streamSettings.
-     */
-    private fun parseEvasionSettings(outbound: JSONObject) {
-        try {
-            // Parse sockopt for fragment settings
-            val sockopt = outbound.optJSONObject("sockopt")
-            if (sockopt != null) {
-                val dialerProxy = sockopt.optString("dialerProxy", "")
-                if (dialerProxy == "fragment") {
-                    _enableFragment.value = true
-                    
-                    // Parse fragment settings if available
-                    val fragment = sockopt.optJSONObject("fragment")
-                    if (fragment != null) {
-                        val length = fragment.optString("length", "")
-                        val interval = fragment.optString("interval", "")
-                        if (length.isNotEmpty()) {
-                            _fragmentLength.value = length
-                        }
-                        if (interval.isNotEmpty()) {
-                            _fragmentInterval.value = interval
-                        }
-                    }
-                } else {
-                    _enableFragment.value = false
-                }
-            } else {
-                _enableFragment.value = false
-            }
-            
-            // Parse mux settings
-            val mux = outbound.optJSONObject("mux")
-            if (mux != null) {
-                val enabled = mux.optBoolean("enabled", false)
-                _enableMux.value = enabled
-                
-                val concurrency = mux.optInt("concurrency", 8)
-                _muxConcurrency.value = concurrency
-            } else {
-                _enableMux.value = false
-                _muxConcurrency.value = 8
-            }
-        } catch (e: Exception) {
-            Log.d(TAG, "Failed to parse evasion settings: ${e.message}")
-            // Reset to defaults on error
-            _enableFragment.value = false
-            _fragmentLength.value = "100-200"
-            _fragmentInterval.value = "10-30"
-            _enableMux.value = false
-            _muxConcurrency.value = 8
-        }
-    }
+    
 
     /**
      * Update SNI in config JSON and update text field.
-     * Only updates if security is "tls" (not "reality").
+     * Delegates to StreamHandler.
      */
     fun updateSni(newSni: String) {
         try {
             val currentText = _configTextFieldValue.value.text
             val jsonObject = JSONObject(currentText)
-            val outbounds = jsonObject.optJSONArray("outbounds") ?: jsonObject.optJSONArray("outbound")
             
-            if (outbounds != null && outbounds.length() > 0) {
-                val outbound = outbounds.getJSONObject(0)
-                var streamSettings = outbound.optJSONObject("streamSettings")
-                
-                if (streamSettings != null) {
-                    val security = streamSettings.optString("security", "")
-                    
-                    // Only update SNI for TLS (not Reality)
-                    if (security == "tls") {
-                        var tlsSettings = streamSettings.optJSONObject("tlsSettings")
-                        if (tlsSettings == null) {
-                            tlsSettings = JSONObject()
-                        }
-                        
-                        // Get server address for comparison
-                        val settings = outbound.optJSONObject("settings")
-                        val vnext = settings?.optJSONArray("vnext")
-                        val serverAddress = vnext?.getJSONObject(0)?.optString("address", "") ?: ""
-                        
-                        // Update serverName, fallback to address if empty
-                        val finalSni = if (newSni.isBlank()) {
-                            serverAddress
-                        } else {
-                            newSni
-                        }
-                        tlsSettings.put("serverName", finalSni)
-                        
-                        // If SNI differs from server address, allow insecure connections
-                        // This is needed when SNI is set to target domain (e.g., www.youtube.com)
-                        // but connecting to a different server (e.g., stol.halibiram.online)
-                        if (finalSni.isNotEmpty() && serverAddress.isNotEmpty() && 
-                            finalSni != serverAddress) {
-                            tlsSettings.put("allowInsecure", true)
-                            Log.d(TAG, "SNI ($finalSni) differs from server address ($serverAddress), setting allowInsecure: true")
-                        } else if (!tlsSettings.has("allowInsecure")) {
-                            // Keep existing allowInsecure value or default to false
-                            tlsSettings.put("allowInsecure", false)
-                        }
-                        
-                        streamSettings.put("tlsSettings", tlsSettings)
-                        outbound.put("streamSettings", streamSettings)
-                        
-                        // Update JSON array
-                        if (jsonObject.has("outbounds")) {
-                            jsonObject.put("outbounds", outbounds)
-                        } else {
-                            jsonObject.put("outbound", outbounds)
-                        }
-                        
-                        // Update text field with formatted JSON
-                        val updatedContent = jsonObject.toString(2)
-                        _configTextFieldValue.value = _configTextFieldValue.value.copy(text = updatedContent)
-                        _sni.value = newSni
-                        _hasConfigChanged.value = true
-                    }
+            streamHandler.updateSni(jsonObject, newSni)
+                .onSuccess { updatedContent ->
+                    _configTextFieldValue.value = _configTextFieldValue.value.copy(text = updatedContent)
+                    _hasConfigChanged.value = true
                 }
-            }
+                .onFailure { error ->
+                    Log.e(TAG, "Failed to update SNI: ${error.message}", error)
+                    _uiEvent.trySend(
+                        ConfigEditUiEvent.ShowSnackbar(
+                            "Failed to update SNI: ${error.message}"
+                        )
+                    )
+                }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to update SNI: ${e.message}", e)
             _uiEvent.trySend(
@@ -390,50 +221,103 @@ class ConfigEditViewModel(
 
     /**
      * Update fingerprint in config JSON and update text field.
-     * Only updates if security is "tls".
+     * Delegates to StreamHandler.
      */
     fun updateFingerprint(newFingerprint: String) {
-        updateTlsSetting("fingerprint", newFingerprint) { tlsSettings, value ->
-            tlsSettings.put("fingerprint", value)
+        try {
+            val currentText = _configTextFieldValue.value.text
+            val jsonObject = JSONObject(currentText)
+            
+            streamHandler.updateFingerprint(jsonObject, newFingerprint)
+                .onSuccess { updatedContent ->
+                    _configTextFieldValue.value = _configTextFieldValue.value.copy(text = updatedContent)
+                    _hasConfigChanged.value = true
+                }
+                .onFailure { error ->
+                    Log.e(TAG, "Failed to update fingerprint: ${error.message}", error)
+                    _uiEvent.trySend(
+                        ConfigEditUiEvent.ShowSnackbar(
+                            "Failed to update fingerprint: ${error.message}"
+                        )
+                    )
+                }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update fingerprint: ${e.message}", e)
+            _uiEvent.trySend(
+                ConfigEditUiEvent.ShowSnackbar(
+                    "Failed to update fingerprint: ${e.message}"
+                )
+            )
         }
-        _fingerprint.value = newFingerprint
     }
 
     /**
      * Update ALPN in config JSON and update text field.
-     * Only updates if security is "tls".
+     * Delegates to StreamHandler.
      */
     fun updateAlpn(newAlpn: String) {
-        updateTlsSetting("alpn", newAlpn) { tlsSettings, value ->
-            if (value == "default") {
-                // Remove ALPN if set to default
-                tlsSettings.remove("alpn")
-            } else {
-                // Convert comma-separated string to JSON array
-                val alpnArray = org.json.JSONArray()
-                value.split(",").forEach { item ->
-                    alpnArray.put(item.trim())
+        try {
+            val currentText = _configTextFieldValue.value.text
+            val jsonObject = JSONObject(currentText)
+            
+            streamHandler.updateAlpn(jsonObject, newAlpn)
+                .onSuccess { updatedContent ->
+                    _configTextFieldValue.value = _configTextFieldValue.value.copy(text = updatedContent)
+                    _hasConfigChanged.value = true
                 }
-                tlsSettings.put("alpn", alpnArray)
-            }
+                .onFailure { error ->
+                    Log.e(TAG, "Failed to update ALPN: ${error.message}", error)
+                    _uiEvent.trySend(
+                        ConfigEditUiEvent.ShowSnackbar(
+                            "Failed to update ALPN: ${error.message}"
+                        )
+                    )
+                }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update ALPN: ${e.message}", e)
+            _uiEvent.trySend(
+                ConfigEditUiEvent.ShowSnackbar(
+                    "Failed to update ALPN: ${e.message}"
+                )
+            )
         }
-        _alpn.value = newAlpn
     }
 
     /**
      * Update allowInsecure in config JSON and update text field.
-     * Only updates if security is "tls".
+     * Delegates to StreamHandler.
      */
     fun updateAllowInsecure(newAllowInsecure: Boolean) {
-        updateTlsSetting("allowInsecure", newAllowInsecure) { tlsSettings, value ->
-            tlsSettings.put("allowInsecure", value)
+        try {
+            val currentText = _configTextFieldValue.value.text
+            val jsonObject = JSONObject(currentText)
+            
+            streamHandler.updateAllowInsecure(jsonObject, newAllowInsecure)
+                .onSuccess { updatedContent ->
+                    _configTextFieldValue.value = _configTextFieldValue.value.copy(text = updatedContent)
+                    _hasConfigChanged.value = true
+                }
+                .onFailure { error ->
+                    Log.e(TAG, "Failed to update allowInsecure: ${error.message}", error)
+                    _uiEvent.trySend(
+                        ConfigEditUiEvent.ShowSnackbar(
+                            "Failed to update allowInsecure: ${error.message}"
+                        )
+                    )
+                }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update allowInsecure: ${e.message}", e)
+            _uiEvent.trySend(
+                ConfigEditUiEvent.ShowSnackbar(
+                    "Failed to update allowInsecure: ${e.message}"
+                )
+            )
         }
-        _allowInsecure.value = newAllowInsecure
     }
 
     /**
      * Update fragment (TLS fragmentation) settings in config JSON.
-     * Updates sockopt at outbound level for DPI evasion.
+     * Delegates to StreamHandler.
      */
     fun updateFragmentSettings(
         enabled: Boolean,
@@ -443,68 +327,20 @@ class ConfigEditViewModel(
         try {
             val currentText = _configTextFieldValue.value.text
             val jsonObject = JSONObject(currentText)
-            val outbounds = jsonObject.optJSONArray("outbounds") ?: jsonObject.optJSONArray("outbound")
             
-            if (outbounds != null && outbounds.length() > 0) {
-                val outbound = outbounds.getJSONObject(0)
-                
-                if (enabled) {
-                    // Create or update sockopt with fragment settings
-                    var sockopt = outbound.optJSONObject("sockopt")
-                    if (sockopt == null) {
-                        sockopt = JSONObject()
-                    }
-                    
-                    sockopt.put("dialerProxy", "fragment")
-                    sockopt.put("tcpNoDelay", true)
-                    
-                    // Add fragment object with length and interval if provided
-                    if (length.isNotEmpty() || interval.isNotEmpty()) {
-                        val fragment = JSONObject()
-                        if (length.isNotEmpty()) {
-                            fragment.put("length", length)
-                        }
-                        if (interval.isNotEmpty()) {
-                            fragment.put("interval", interval)
-                        }
-                        sockopt.put("fragment", fragment)
-                    }
-                    
-                    outbound.put("sockopt", sockopt)
-                } else {
-                    // Remove fragment settings from sockopt
-                    val sockopt = outbound.optJSONObject("sockopt")
-                    if (sockopt != null) {
-                        sockopt.remove("dialerProxy")
-                        sockopt.remove("fragment")
-                        // Remove sockopt entirely if empty or only has tcpNoDelay
-                        if (sockopt.length() == 0 || (sockopt.length() == 1 && sockopt.has("tcpNoDelay"))) {
-                            outbound.remove("sockopt")
-                        } else {
-                            outbound.put("sockopt", sockopt)
-                        }
-                    }
+            streamHandler.updateFragmentSettings(jsonObject, enabled, length, interval)
+                .onSuccess { updatedContent ->
+                    _configTextFieldValue.value = _configTextFieldValue.value.copy(text = updatedContent)
+                    _hasConfigChanged.value = true
                 }
-                
-                // Update JSON array
-                if (jsonObject.has("outbounds")) {
-                    jsonObject.put("outbounds", outbounds)
-                } else {
-                    jsonObject.put("outbound", outbounds)
+                .onFailure { error ->
+                    Log.e(TAG, "Failed to update fragment settings: ${error.message}", error)
+                    _uiEvent.trySend(
+                        ConfigEditUiEvent.ShowSnackbar(
+                            "Failed to update fragment settings: ${error.message}"
+                        )
+                    )
                 }
-                
-                // Update text field with formatted JSON
-                val updatedContent = jsonObject.toString(2)
-                _configTextFieldValue.value = _configTextFieldValue.value.copy(text = updatedContent)
-                _enableFragment.value = enabled
-                if (length.isNotEmpty()) {
-                    _fragmentLength.value = length
-                }
-                if (interval.isNotEmpty()) {
-                    _fragmentInterval.value = interval
-                }
-                _hasConfigChanged.value = true
-            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to update fragment settings: ${e.message}", e)
             _uiEvent.trySend(
@@ -517,116 +353,31 @@ class ConfigEditViewModel(
 
     /**
      * Update mux (multiplexing) settings in config JSON.
-     * Updates mux at outbound level for connection multiplexing.
+     * Delegates to StreamHandler.
      */
     fun updateMuxSettings(enabled: Boolean, concurrency: Int = 8) {
         try {
             val currentText = _configTextFieldValue.value.text
             val jsonObject = JSONObject(currentText)
-            val outbounds = jsonObject.optJSONArray("outbounds") ?: jsonObject.optJSONArray("outbound")
             
-            if (outbounds != null && outbounds.length() > 0) {
-                val outbound = outbounds.getJSONObject(0)
-                
-                if (enabled) {
-                    // Create or update mux settings
-                    val mux = JSONObject()
-                    mux.put("enabled", true)
-                    mux.put("concurrency", concurrency.coerceIn(1, 1024))
-                    outbound.put("mux", mux)
-                } else {
-                    // Remove mux settings
-                    outbound.remove("mux")
+            streamHandler.updateMuxSettings(jsonObject, enabled, concurrency)
+                .onSuccess { updatedContent ->
+                    _configTextFieldValue.value = _configTextFieldValue.value.copy(text = updatedContent)
+                    _hasConfigChanged.value = true
                 }
-                
-                // Update JSON array
-                if (jsonObject.has("outbounds")) {
-                    jsonObject.put("outbounds", outbounds)
-                } else {
-                    jsonObject.put("outbound", outbounds)
+                .onFailure { error ->
+                    Log.e(TAG, "Failed to update mux settings: ${error.message}", error)
+                    _uiEvent.trySend(
+                        ConfigEditUiEvent.ShowSnackbar(
+                            "Failed to update mux settings: ${error.message}"
+                        )
+                    )
                 }
-                
-                // Update text field with formatted JSON
-                val updatedContent = jsonObject.toString(2)
-                _configTextFieldValue.value = _configTextFieldValue.value.copy(text = updatedContent)
-                _enableMux.value = enabled
-                _muxConcurrency.value = concurrency.coerceIn(1, 1024)
-                _hasConfigChanged.value = true
-            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to update mux settings: ${e.message}", e)
             _uiEvent.trySend(
                 ConfigEditUiEvent.ShowSnackbar(
                     "Failed to update mux settings: ${e.message}"
-                )
-            )
-        }
-    }
-
-    /**
-     * Helper function to update TLS settings in config JSON.
-     * Only updates if security is "tls".
-     */
-    private fun <T> updateTlsSetting(
-        settingName: String,
-        newValue: T,
-        updateAction: (JSONObject, T) -> Unit
-    ) {
-        try {
-            val currentText = _configTextFieldValue.value.text
-            val jsonObject = JSONObject(currentText)
-            val outbounds = jsonObject.optJSONArray("outbounds") ?: jsonObject.optJSONArray("outbound")
-            
-            if (outbounds != null && outbounds.length() > 0) {
-                val outbound = outbounds.getJSONObject(0)
-                var streamSettings = outbound.optJSONObject("streamSettings")
-                
-                if (streamSettings != null) {
-                    val security = streamSettings.optString("security", "")
-                    
-                    // Only update for TLS (not Reality)
-                    if (security == "tls") {
-                        var tlsSettings = streamSettings.optJSONObject("tlsSettings")
-                        if (tlsSettings == null) {
-                            tlsSettings = JSONObject()
-                        }
-                        
-                        updateAction(tlsSettings, newValue)
-                        
-                        streamSettings.put("tlsSettings", tlsSettings)
-                        outbound.put("streamSettings", streamSettings)
-                        
-                        // Update JSON array
-                        if (jsonObject.has("outbounds")) {
-                            jsonObject.put("outbounds", outbounds)
-                        } else {
-                            jsonObject.put("outbound", outbounds)
-                        }
-                        
-                        // Update text field with formatted JSON
-                        val updatedContent = jsonObject.toString(2)
-                        val oldText = _configTextFieldValue.value.text
-                        _configTextFieldValue.value = _configTextFieldValue.value.copy(text = updatedContent)
-                        _hasConfigChanged.value = true
-                        
-                        // Re-parse config to update state flows (only if content changed)
-                        if (oldText != updatedContent) {
-                            parseConfigFields(updatedContent)
-                        }
-                    } else {
-                        Log.d(TAG, "Security is not 'tls', skipping $settingName update")
-                    }
-                } else {
-                    Log.d(TAG, "No streamSettings found, skipping $settingName update")
-                }
-            } else {
-                Log.d(TAG, "No outbounds found, skipping $settingName update")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to update $settingName: ${e.message}", e)
-            _uiEvent.trySend(
-                ConfigEditUiEvent.ShowSnackbar(
-                    "Failed to update $settingName: ${e.message}"
                 )
             )
         }
@@ -677,7 +428,7 @@ class ConfigEditViewModel(
             val formattedContent: String
             try {
                 formattedContent =
-                    ConfigUtils.formatConfigContent(_configTextFieldValue.value.text)
+                    ConfigParser.formatConfigContent(_configTextFieldValue.value.text)
             } catch (e: JSONException) {
                 Log.e(TAG, "Invalid JSON format", e)
                 _uiEvent.trySend(
@@ -746,6 +497,231 @@ class ConfigEditViewModel(
             val shareableLink = "hyperxray://config/$encodedName/$encodedContent"
             _uiEvent.trySend(ConfigEditUiEvent.ShareContent(shareableLink))
         }
+    }
+
+    /**
+     * Update WARP (WireGuard) settings in config JSON.
+     * Delegates to WireGuardHandler.
+     */
+    fun updateWarpSettings(
+        enabled: Boolean,
+        privateKey: String = "",
+        endpoint: String = "",
+        localAddress: String = ""
+    ) {
+        try {
+            val currentText = _configTextFieldValue.value.text
+            val jsonObject = JSONObject(currentText)
+            
+            // Use handler state flows for defaults if not provided
+            val finalEndpoint = endpoint.ifEmpty { wireGuardHandler.warpEndpoint.value }
+            val finalLocalAddress = localAddress.ifEmpty { wireGuardHandler.warpLocalAddress.value }
+            
+            wireGuardHandler.updateWarpSettings(
+                configJson = jsonObject,
+                enabled = enabled,
+                privateKey = privateKey,
+                endpoint = finalEndpoint,
+                localAddress = finalLocalAddress
+            ).onSuccess { updatedContent ->
+                _configTextFieldValue.value = _configTextFieldValue.value.copy(text = updatedContent)
+                _hasConfigChanged.value = true
+                
+                if (enabled) {
+                    _uiEvent.trySend(
+                        ConfigEditUiEvent.ShowSnackbar(
+                            "WARP configuration updated. If WARP doesn't work, check:\n" +
+                            "1. Xray-core version supports WireGuard (v1.8.0+)\n" +
+                            "2. Config file has 'warp-out' outbound with 'wireguard' protocol\n" +
+                            "3. Main outbound has 'proxySettings' pointing to 'warp-out'"
+                        )
+                    )
+                }
+            }.onFailure { error ->
+                val errorMessage = when {
+                    error is IllegalArgumentException -> "WARP configuration error: ${error.message}"
+                    error is IllegalStateException -> "WARP key generation error: ${error.message}"
+                    else -> "Failed to update WARP settings: ${error.message}"
+                }
+                Log.e(TAG, errorMessage, error)
+                _uiEvent.trySend(
+                    ConfigEditUiEvent.ShowSnackbar(errorMessage)
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update WARP settings: ${e.message}", e)
+            _uiEvent.trySend(
+                ConfigEditUiEvent.ShowSnackbar("Failed to update WARP settings: ${e.message}")
+            )
+        }
+    }
+    
+    /**
+     * Generate new WARP keys and update config.
+     * Delegates to WireGuardHandler.
+     */
+    fun generateWarpKeys() {
+        val (privateKey, publicKey) = wireGuardHandler.generateWarpKeys()
+        if (privateKey.isNotEmpty()) {
+            updateWarpSettings(
+                enabled = true,
+                privateKey = privateKey,
+                endpoint = wireGuardHandler.warpEndpoint.value,
+                localAddress = wireGuardHandler.warpLocalAddress.value
+            )
+            _uiEvent.trySend(
+                ConfigEditUiEvent.ShowSnackbar("WARP keys generated successfully")
+            )
+        } else {
+            _uiEvent.trySend(
+                ConfigEditUiEvent.ShowSnackbar("Failed to generate WARP keys")
+            )
+        }
+    }
+    
+    /**
+     * Generate WARP identity via Cloudflare API registration.
+     * Delegates to WireGuardHandler.
+     */
+    fun generateWarpIdentity() {
+        viewModelScope.launch {
+            wireGuardHandler.generateWarpIdentity()
+                .onSuccess { result ->
+                    val localAddress = result.localAddress.ifEmpty { wireGuardHandler.warpLocalAddress.value }
+                    
+                    updateWarpSettings(
+                        enabled = true,
+                        privateKey = result.privateKey,
+                        endpoint = wireGuardHandler.warpEndpoint.value,
+                        localAddress = localAddress
+                    )
+                    
+                    val message = buildString {
+                        append("WARP identity registered successfully")
+                        if (result.license != null) {
+                            append("\nLicense: ${result.license.take(20)}...")
+                        }
+                        if (result.localAddress.isNotEmpty()) {
+                            append("\nAddress: ${result.localAddress}")
+                        }
+                        if (result.accountType != null) {
+                            append("\nAccount Type: ${result.accountType.uppercase()}")
+                        }
+                    }
+                    
+                    _uiEvent.trySend(
+                        ConfigEditUiEvent.ShowSnackbar(message)
+                    )
+                }
+                .onFailure { error ->
+                    Log.e(TAG, "WARP identity generation failed: ${error.message}", error)
+                    _uiEvent.trySend(
+                        ConfigEditUiEvent.ShowSnackbar("Registration Failed: ${error.message}")
+                    )
+                }
+        }
+    }
+    
+    /**
+     * Create a free WARP account identity (one-click registration).
+     * Generates keys, registers with Cloudflare API, and auto-populates config fields.
+     * Delegates to WireGuardHandler.
+     */
+    fun createFreeIdentity() {
+        viewModelScope.launch {
+            wireGuardHandler.createFreeIdentity()
+                .onSuccess { result ->
+                    val localAddress = result.localAddress.ifEmpty { wireGuardHandler.warpLocalAddress.value }
+                    
+                    // Auto-populate WireGuard config fields
+                    updateWarpSettings(
+                        enabled = true,
+                        privateKey = result.privateKey,
+                        endpoint = wireGuardHandler.warpEndpoint.value,
+                        localAddress = localAddress
+                    )
+                    
+                    val message = buildString {
+                        append("✅ Free WARP account created successfully!")
+                        append("\nAccount Type: ${result.accountType?.uppercase() ?: "FREE"}")
+                        append("\nQuota: ${wireGuardHandler.warpQuota.value}")
+                        if (result.localAddress.isNotEmpty()) {
+                            append("\nAddress: ${result.localAddress}")
+                        }
+                    }
+                    
+                    _uiEvent.trySend(
+                        ConfigEditUiEvent.ShowSnackbar(message)
+                    )
+                }
+                .onFailure { error ->
+                    Log.e(TAG, "Free WARP account creation failed: ${error.message}", error)
+                    _uiEvent.trySend(
+                        ConfigEditUiEvent.ShowSnackbar("Free Account Creation Failed: ${error.message}")
+                    )
+                }
+        }
+    }
+    
+    /**
+     * Update WARP license key input.
+     * Delegates to WireGuardHandler.
+     */
+    fun updateLicenseKeyInput(licenseKey: String) {
+        wireGuardHandler.updateLicenseKeyInput(licenseKey)
+    }
+    
+    /**
+     * Bind WARP+ license key to existing account.
+     * Delegates to WireGuardHandler.
+     */
+    fun bindLicenseKey() {
+        viewModelScope.launch {
+            wireGuardHandler.bindLicenseKey()
+                .onSuccess { result ->
+                    if (result.privateKey != null) {
+                        updateWarpSettings(
+                            enabled = true,
+                            privateKey = result.privateKey,
+                            endpoint = wireGuardHandler.warpEndpoint.value,
+                            localAddress = wireGuardHandler.warpLocalAddress.value
+                        )
+                    }
+                    
+                    val accountTypeDisplay = when {
+                        result.accountType?.equals("plus", ignoreCase = true) == true -> "WARP+"
+                        result.accountType?.equals("unlimited", ignoreCase = true) == true -> "WARP Unlimited"
+                        result.accountType?.equals("premium", ignoreCase = true) == true -> "WARP Premium"
+                        else -> result.accountType?.uppercase() ?: "FREE"
+                    }
+                    
+                    val message = buildString {
+                        append("✅ License key bound successfully!")
+                        append("\nAccount Type: $accountTypeDisplay")
+                        if (result.accountType?.equals("free", ignoreCase = true) == true) {
+                            append("\n⚠️ Account is still FREE. Please check your license key.")
+                        }
+                    }
+                    
+                    _uiEvent.trySend(
+                        ConfigEditUiEvent.ShowSnackbar(message)
+                    )
+                }
+                .onFailure { error ->
+                    Log.e(TAG, "License binding failed: ${error.message}", error)
+                    _uiEvent.trySend(
+                        ConfigEditUiEvent.ShowSnackbar("License Binding Failed: ${error.message}")
+                    )
+                }
+        }
+    }
+    
+    /**
+     * Update WARP private key StateFlow without updating config.
+     * Delegates to WireGuardHandler.
+     */
+    fun setWarpPrivateKey(key: String) {
+        wireGuardHandler.setWarpPrivateKey(key)
     }
 
     fun handleAutoIndent(text: String, newlinePosition: Int): Pair<String, Int> {

@@ -4,8 +4,8 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import com.hyperxray.an.common.AiLogHelper
-import com.hyperxray.an.common.ConfigUtils
-import com.hyperxray.an.common.ConfigUtils.extractPortsFromJson
+import com.hyperxray.an.core.config.utils.ConfigParser
+import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.xray.runtime.LogLineCallback
 import com.hyperxray.an.xray.runtime.MultiXrayCoreManager
@@ -133,9 +133,12 @@ class XrayProcessManager(private val context: Context) {
             }
             AiLogHelper.d(TAG, "✅ XRAY PROCESS START: Config content read (size: ${finalConfigContent.length} bytes, duration: ${readDuration}ms)")
             
+            // Ensure DnsCacheManager is initialized before pre-resolving
+            DnsCacheManager.initialize(context)
+            
             // Pre-resolve server address if needed (using system DNS, not VPN DNS)
             val resolveStartTime = System.currentTimeMillis()
-            preResolveServerAddress(finalConfigContent)
+            val resolvedConfigContent = preResolveServerAddress(finalConfigContent)
             val resolveDuration = System.currentTimeMillis() - resolveStartTime
             AiLogHelper.d(TAG, "✅ XRAY PROCESS START: Server address pre-resolved (duration: ${resolveDuration}ms)")
             
@@ -145,7 +148,7 @@ class XrayProcessManager(private val context: Context) {
                 val multiStartTime = System.currentTimeMillis()
                 val result = startMultiInstance(
                     configPath = configPath,
-                    configContent = finalConfigContent,
+                    configContent = resolvedConfigContent,
                     excludedPorts = excludedPorts,
                     instanceCount = instanceCount,
                     logCallback = logCallback
@@ -218,7 +221,7 @@ class XrayProcessManager(private val context: Context) {
         
         // Extract excluded ports from config
         val extractStartTime = System.currentTimeMillis()
-        val allExcludedPorts = excludedPorts + extractPortsFromJson(configContent)
+        val allExcludedPorts = excludedPorts + ConfigParser.extractPortsFromJson(configContent)
         val extractDuration = System.currentTimeMillis() - extractStartTime
         AiLogHelper.d(TAG, "✅ XRAY MULTI INSTANCE: Excluded ports extracted (count: ${allExcludedPorts.size}, duration: ${extractDuration}ms)")
         
@@ -233,11 +236,7 @@ class XrayProcessManager(private val context: Context) {
             )
             val instancesDuration = System.currentTimeMillis() - instancesStartTime
             val totalDuration = System.currentTimeMillis() - startTime
-            if (result != null) {
-                AiLogHelper.i(TAG, "✅ XRAY MULTI INSTANCE SUCCESS: Started ${result.size} instances (instances duration: ${instancesDuration}ms, total: ${totalDuration}ms, ports: ${result.values.joinToString()})")
-            } else {
-                AiLogHelper.e(TAG, "❌ XRAY MULTI INSTANCE FAILED: Failed to start instances (duration: ${instancesDuration}ms, total: ${totalDuration}ms)")
-            }
+            AiLogHelper.i(TAG, "✅ XRAY MULTI INSTANCE SUCCESS: Started ${result.size} instances (instances duration: ${instancesDuration}ms, total: ${totalDuration}ms, ports: ${result.values.joinToString()})")
             result
         } catch (e: Exception) {
             val instancesDuration = System.currentTimeMillis() - instancesStartTime
@@ -862,47 +861,242 @@ class XrayProcessManager(private val context: Context) {
         }
     }
     
-    private suspend fun preResolveServerAddress(configContent: String) {
-        val serverAddress = extractServerAddressFromConfig(configContent)
-        if (serverAddress != null && !isValidIpAddress(serverAddress)) {
-            // Server address is a domain name, resolve it using system DNS
-            Log.d(TAG, "Pre-resolving server address: $serverAddress (using system DNS)")
-            try {
-                val resolvedAddresses = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                    InetAddress.getAllByName(serverAddress)
-                }
-                if (resolvedAddresses.isNotEmpty()) {
-                    Log.i(TAG, "✅ Server address resolved: $serverAddress -> ${resolvedAddresses.map { it.hostAddress }}")
-                } else {
-                    Log.w(TAG, "⚠️ Server address resolved but no IPs found: $serverAddress")
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to resolve server address: $serverAddress (${e.message})")
-                // Continue anyway - Xray-core can resolve DNS itself
+    /**
+     * Pre-resolve server addresses (VLESS/VMess and WireGuard) using system DNS.
+     * Replaces domain names with IP addresses in the config JSON to prevent DNS bootstrap failures.
+     * 
+     * @param configContent Original config JSON string
+     * @return Modified config JSON string with resolved IP addresses, or original if no changes needed
+     */
+    private suspend fun preResolveServerAddress(configContent: String): String {
+        var modifiedConfig = configContent
+        
+        try {
+            val jsonObject = org.json.JSONObject(configContent)
+            val outbounds = jsonObject.optJSONArray("outbounds") ?: jsonObject.optJSONArray("outbound")
+            if (outbounds == null || outbounds.length() == 0) {
+                return modifiedConfig
             }
-        } else if (serverAddress != null && isValidIpAddress(serverAddress)) {
-            Log.d(TAG, "Server address is already an IP: $serverAddress (no DNS resolution needed)")
+            
+            var configModified = false
+            
+            // Process each outbound
+            for (i in 0 until outbounds.length()) {
+                val outbound = outbounds.getJSONObject(i)
+                val protocol = outbound.optString("protocol", "")
+                val settings = outbound.optJSONObject("settings")
+                
+                    // Handle VLESS/VMess protocols
+                    if (settings != null) {
+                        val vnext = settings.optJSONArray("vnext")
+                        if (vnext != null && vnext.length() > 0) {
+                            val server = vnext.getJSONObject(0)
+                            val address = server.optString("address", "")
+                            if (address.isNotEmpty() && !isValidIpAddress(address)) {
+                                // Domain name found, resolve it
+                                val resolvedResult = resolveDomainToIpAndCache(address)
+                                if (resolvedResult != null) {
+                                    val (resolvedIp, resolvedAddresses) = resolvedResult
+                                    server.put("address", resolvedIp)
+                                    configModified = true
+                                    Log.i(TAG, "✅ Pre-resolved VLESS/VMess address: $address -> $resolvedIp")
+                                    AiLogHelper.i(TAG, "✅ DNS PRE-RESOLVE: VLESS/VMess $address -> $resolvedIp (cached in DnsCacheManager)")
+                                }
+                            }
+                        }
+                    
+                    // Handle WireGuard protocol
+                    if (protocol == "wireguard") {
+                        Log.d(TAG, "🔍 Found WireGuard outbound, checking for endpoint...")
+                        AiLogHelper.d(TAG, "🔍 DNS PRE-RESOLVE: Found WireGuard outbound, checking for endpoint...")
+                        val peers = settings.optJSONArray("peers")
+                        if (peers != null && peers.length() > 0) {
+                            Log.d(TAG, "🔍 WireGuard has ${peers.length()} peer(s)")
+                            for (j in 0 until peers.length()) {
+                                val peer = peers.getJSONObject(j)
+                                val endpoint = peer.optString("endpoint", "")
+                                Log.d(TAG, "🔍 WireGuard peer[$j] endpoint: $endpoint")
+                                if (endpoint.isNotEmpty()) {
+                                    // Extract domain from endpoint (format: "domain.com:port" or "IP:port")
+                                    val endpointParts = endpoint.split(":")
+                                    if (endpointParts.size >= 2) {
+                                        val domain = endpointParts[0]
+                                        val port = endpointParts[1]
+                                        
+                                        Log.d(TAG, "🔍 WireGuard endpoint parsed: domain=$domain, port=$port")
+                                        
+                                        if (!isValidIpAddress(domain)) {
+                                            // Domain name found, resolve it and cache
+                                            Log.i(TAG, "🌐 WireGuard endpoint is domain, resolving: $domain")
+                                            AiLogHelper.i(TAG, "🌐 DNS PRE-RESOLVE: WireGuard endpoint is domain, resolving: $domain")
+                                            val resolvedResult = resolveDomainToIpAndCache(domain)
+                                            if (resolvedResult != null) {
+                                                val (resolvedIp, resolvedAddresses) = resolvedResult
+                                                // Replace domain with IP in endpoint
+                                                val newEndpoint = "$resolvedIp:$port"
+                                                peer.put("endpoint", newEndpoint)
+                                                configModified = true
+                                                Log.i(TAG, "✅ Pre-resolved WireGuard endpoint: $endpoint -> $newEndpoint")
+                                                AiLogHelper.i(TAG, "✅ DNS PRE-RESOLVE: WireGuard $endpoint -> $newEndpoint (cached in DnsCacheManager)")
+                                            } else {
+                                                Log.w(TAG, "⚠️ Failed to resolve WireGuard endpoint domain: $domain")
+                                                AiLogHelper.w(TAG, "⚠️ DNS PRE-RESOLVE: Failed to resolve WireGuard endpoint domain: $domain")
+                                            }
+                                        } else {
+                                            Log.d(TAG, "✅ WireGuard endpoint is already IP: $domain (no DNS resolution needed)")
+                                            AiLogHelper.d(TAG, "✅ DNS PRE-RESOLVE: WireGuard endpoint is already IP: $domain")
+                                        }
+                                    } else {
+                                        Log.w(TAG, "⚠️ WireGuard endpoint format invalid: $endpoint (expected format: host:port)")
+                                        AiLogHelper.w(TAG, "⚠️ DNS PRE-RESOLVE: WireGuard endpoint format invalid: $endpoint")
+                                    }
+                                } else {
+                                    Log.w(TAG, "⚠️ WireGuard peer[$j] has no endpoint configured")
+                                    AiLogHelper.w(TAG, "⚠️ DNS PRE-RESOLVE: WireGuard peer[$j] has no endpoint")
+                                }
+                            }
+                        } else {
+                            Log.w(TAG, "⚠️ WireGuard outbound has no peers configured")
+                            AiLogHelper.w(TAG, "⚠️ DNS PRE-RESOLVE: WireGuard outbound has no peers")
+                        }
+                    }
+                }
+            }
+            
+            // Return modified config if changes were made
+            if (configModified) {
+                modifiedConfig = jsonObject.toString()
+                Log.i(TAG, "✅ Config modified with pre-resolved IP addresses")
+                AiLogHelper.i(TAG, "✅ DNS PRE-RESOLVE: Config modified with resolved IP addresses")
+            } else {
+                Log.d(TAG, "No domain names found to resolve (all addresses are already IPs)")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error during pre-resolve: ${e.message}", e)
+            AiLogHelper.w(TAG, "⚠️ DNS PRE-RESOLVE: Error during pre-resolve: ${e.message}")
+            // Return original config on error
+        }
+        
+        return modifiedConfig
+    }
+    
+    /**
+     * Resolve a domain name to IP address using system DNS.
+     * 
+     * @param domain Domain name to resolve
+     * @return First resolved IP address, or null if resolution fails
+     */
+    private suspend fun resolveDomainToIp(domain: String): String? {
+        return try {
+            val resolvedAddresses = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                InetAddress.getAllByName(domain)
+            }
+            if (resolvedAddresses.isNotEmpty()) {
+                // Return first IPv4 address, or first address if no IPv4
+                val ipv4 = resolvedAddresses.firstOrNull { it.hostAddress?.contains(".") == true }
+                ipv4?.hostAddress ?: resolvedAddresses[0].hostAddress
+            } else {
+                Log.w(TAG, "⚠️ Domain resolved but no IPs found: $domain")
+                null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to resolve domain: $domain (${e.message})")
+            null
         }
     }
     
+    /**
+     * Resolve a domain name to IP address using system DNS and cache it in DnsCacheManager.
+     * This is used for WireGuard and VLESS/VMess bootstrap DNS resolution.
+     * 
+     * @param domain Domain name to resolve
+     * @return Pair of (resolved IP address, list of all resolved addresses), or null if resolution fails
+     */
+    private suspend fun resolveDomainToIpAndCache(domain: String): Pair<String, List<InetAddress>>? {
+        return try {
+            val resolvedAddresses = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                InetAddress.getAllByName(domain)
+            }
+            if (resolvedAddresses.isNotEmpty()) {
+                // Get first IPv4 address, or first address if no IPv4
+                val ipv4 = resolvedAddresses.firstOrNull { it.hostAddress?.contains(".") == true }
+                val resolvedIp = ipv4?.hostAddress ?: resolvedAddresses[0].hostAddress
+                
+                if (resolvedIp != null) {
+                    // CRITICAL: Cache resolved IP in DnsCacheManager
+                    // This ensures SystemDnsCacheServer is aware of the resolved IP
+                    try {
+                        DnsCacheManager.saveToCache(domain, resolvedAddresses.toList())
+                        Log.i(TAG, "✅ Bootstrap DNS: Resolved $domain -> $resolvedIp and cached in DnsCacheManager")
+                        AiLogHelper.i(TAG, "✅ DNS BOOTSTRAP: Resolved $domain -> $resolvedIp and cached")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "⚠️ Failed to cache resolved IP for $domain: ${e.message}", e)
+                        AiLogHelper.w(TAG, "⚠️ DNS BOOTSTRAP: Failed to cache $domain: ${e.message}")
+                    }
+                    
+                    return Pair(resolvedIp, resolvedAddresses.toList())
+                } else {
+                    Log.w(TAG, "⚠️ Domain resolved but no valid IP found: $domain")
+                    null
+                }
+            } else {
+                Log.w(TAG, "⚠️ Domain resolved but no IPs found: $domain")
+                null
+            }
+        } catch (e: java.net.UnknownHostException) {
+            Log.w(TAG, "⚠️ Failed to resolve domain: $domain (UnknownHostException: ${e.message})")
+            AiLogHelper.w(TAG, "⚠️ DNS BOOTSTRAP: Failed to resolve $domain: ${e.message}")
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "⚠️ Failed to resolve domain: $domain (${e.message})", e)
+            AiLogHelper.w(TAG, "⚠️ DNS BOOTSTRAP: Error resolving $domain: ${e.message}")
+            null
+        }
+    }
+    
+    /**
+     * Extract server address from config (for logging/debugging purposes).
+     * Supports both VLESS/VMess (vnext) and WireGuard (peers endpoint) protocols.
+     * 
+     * @param configContent Config JSON string
+     * @return Server address/domain if found, null otherwise
+     */
     private fun extractServerAddressFromConfig(configContent: String): String? {
         return try {
             val jsonObject = org.json.JSONObject(configContent)
             val outbounds = jsonObject.optJSONArray("outbounds") ?: jsonObject.optJSONArray("outbound")
             if (outbounds != null && outbounds.length() > 0) {
                 val outbound = outbounds.getJSONObject(0)
+                val protocol = outbound.optString("protocol", "")
                 val settings = outbound.optJSONObject("settings")
+                
+                // Check VLESS/VMess protocols
                 val vnext = settings?.optJSONArray("vnext")
                 if (vnext != null && vnext.length() > 0) {
                     val server = vnext.getJSONObject(0)
                     val address = server.optString("address", "")
-                    address.takeIf { it.isNotEmpty() }
-                } else {
-                    null
+                    if (address.isNotEmpty()) {
+                        return address
+                    }
                 }
-            } else {
-                null
+                
+                // Check WireGuard protocol
+                if (protocol == "wireguard") {
+                    val peers = settings?.optJSONArray("peers")
+                    if (peers != null && peers.length() > 0) {
+                        val peer = peers.getJSONObject(0)
+                        val endpoint = peer.optString("endpoint", "")
+                        if (endpoint.isNotEmpty()) {
+                            // Extract domain from endpoint (format: "domain.com:port")
+                            val endpointParts = endpoint.split(":")
+                            if (endpointParts.isNotEmpty()) {
+                                return endpointParts[0]
+                            }
+                        }
+                    }
+                }
             }
+            null
         } catch (e: Exception) {
             Log.w(TAG, "Error extracting server address from config: ${e.message}")
             null

@@ -56,6 +56,10 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     private val upstreamClient: DnsUpstreamClient
     private val warmupManager: DnsWarmupManager
     
+    // Server domains that should bypass SOCKS5 proxy for initial DNS resolution
+    @Volatile
+    private var serverDomains: Set<String> = emptySet()
+    
     // Default upstream DNS servers
     private var upstreamDnsServers = listOf(
         // Google DNS (fast and reliable)
@@ -137,22 +141,20 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
         val initDuration = System.currentTimeMillis() - initStartTime
         Log.d(TAG, "✅ DNS SERVER START: DnsCacheManager initialized (duration: ${initDuration}ms)")
         
-        // CRITICAL: Try port 53 first - VpnService may allow this without root
-        Log.i(TAG, "🚀 DNS SERVER START: Attempting to start DNS cache server on port 53 (root not required with VpnService)")
-        val port53StartTime = System.currentTimeMillis()
-        
-        if (tryStartOnPort(DNS_PORT)) {
-            val port53Duration = System.currentTimeMillis() - port53StartTime
+        // Try requested port first
+        val requestedPortStartTime = System.currentTimeMillis()
+        if (tryStartOnPort(port)) {
+            val requestedPortDuration = System.currentTimeMillis() - requestedPortStartTime
             val totalDuration = System.currentTimeMillis() - startTime
-            Log.i(TAG, "✅ DNS SERVER START SUCCESS: DNS cache server started on port 53 (modem compatible, no root required, port53: ${port53Duration}ms, total: ${totalDuration}ms)")
+            Log.i(TAG, "✅ DNS SERVER START SUCCESS: DNS cache server started on port $port (requestedPort: ${requestedPortDuration}ms, total: ${totalDuration}ms)")
             return true
         }
-        val port53Duration = System.currentTimeMillis() - port53StartTime
-        Log.w(TAG, "⚠️ DNS SERVER START: Port 53 not available (duration: ${port53Duration}ms) - trying alternative port $DNS_PORT_ALT")
-        Log.w(TAG, "⚠️ DNS SERVER START: Modem DNS queries will fail unless modem is configured to use port $DNS_PORT_ALT")
+        val requestedPortDuration = System.currentTimeMillis() - requestedPortStartTime
+        Log.w(TAG, "⚠️ DNS SERVER START: Port $port not available (duration: ${requestedPortDuration}ms)")
         
-        // Try alternative port as fallback
+        // If requested port was 53, try alternative port 5353 as fallback
         if (port == DNS_PORT) {
+            Log.w(TAG, "⚠️ DNS SERVER START: Trying alternative port $DNS_PORT_ALT as fallback...")
             val altPortStartTime = System.currentTimeMillis()
             if (tryStartOnPort(DNS_PORT_ALT)) {
                 val altPortDuration = System.currentTimeMillis() - altPortStartTime
@@ -171,8 +173,9 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
     private fun tryStartOnPort(port: Int): Boolean {
         return try {
             _serverStatus.value = ServerStatus.Starting
-            // Bind to 0.0.0.0 to accept connections from all interfaces (including USB tethering)
-            Log.i(TAG, "🚀 Starting system DNS cache server on 0.0.0.0:$port (all interfaces)")
+            // Bind to 0.0.0.0 to accept connections from all interfaces (including VPN interface)
+            // Xray sends to 127.0.0.1:5353 but packets may be routed through VPN interface
+            Log.i(TAG, "🚀 Starting system DNS cache server on 0.0.0.0:$port (all interfaces including VPN)")
             
             socket = DatagramSocket(null).apply {
                 reuseAddress = true
@@ -346,7 +349,7 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
         val socket = socket ?: return
         
         Log.i(TAG, "🔍 DNS server loop started, waiting for queries on port ${socket.localPort}...")
-        Log.i(TAG, "📡 Listening on all interfaces (0.0.0.0) - modem can send queries")
+        Log.i(TAG, "📡 Listening on 0.0.0.0:${socket.localPort} - accepting queries from all interfaces (including VPN)")
         
         while (isRunning.get() && scope.isActive) {
             try {
@@ -432,11 +435,17 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
             }
             
             // Cache miss - forward to upstream DNS server
-            Log.i(TAG, "⚠️ DNS CACHE MISS: $hostname (forwarding to upstream DNS)")
+            // Check if this is a server domain that should bypass SOCKS5 proxy
+            val isServerDomain = serverDomains.contains(hostname.lowercase())
+            if (isServerDomain) {
+                Log.i(TAG, "⚠️ DNS CACHE MISS (SERVER DOMAIN - BYPASS PROXY): $hostname (forwarding to upstream DNS without SOCKS5)")
+            } else {
+                Log.i(TAG, "⚠️ DNS CACHE MISS: $hostname (forwarding to upstream DNS)")
+            }
             
             val upstreamResponse = withContext(Dispatchers.IO) {
                 val queryData = DnsResponseBuilder.buildQuery(hostname) ?: return@withContext null
-                upstreamClient.forwardQuery(queryData, hostname)
+                upstreamClient.forwardQuery(queryData, hostname, bypassProxy = isServerDomain)
             }
             
             if (upstreamResponse != null && upstreamResponse.isNotEmpty()) {
@@ -564,6 +573,16 @@ class SystemDnsCacheServer private constructor(private val context: Context) {
         socks5Client = null
         upstreamClient.setSocks5Client(null)
         Log.d(TAG, "SOCKS5 UDP proxy cleared")
+    }
+    
+    /**
+     * Set server domains that should bypass SOCKS5 proxy for initial DNS resolution
+     * These domains are resolved directly (without proxy) to avoid circular dependency
+     * when VPN is starting and needs to resolve the server domain
+     */
+    fun setServerDomains(domains: Set<String>) {
+        serverDomains = domains.map { it.lowercase() }.toSet()
+        Log.i(TAG, "✅ Server domains set for proxy bypass: ${serverDomains.joinToString(", ")}")
     }
     
     /**

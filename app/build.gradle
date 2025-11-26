@@ -860,6 +860,9 @@ dependencies {
     // TLS SNI Optimizer v5 dependencies
     implementation 'androidx.work:work-runtime-ktx:2.9.0'
     
+    // WireGuard Curve25519 key generation (BouncyCastle)
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
+    
     // Core modules
     implementation project(':core:core-database')
     implementation project(':core:core-di')
@@ -877,6 +880,7 @@ dependencies {
     implementation project(':feature:feature-profiles')
     implementation project(':feature:feature-telegram')
     implementation project(':feature:feature-policy-ai')
+    implementation project(':feature:feature-warp')
     
     // Test dependencies
     testImplementation 'junit:junit:4.13.2'

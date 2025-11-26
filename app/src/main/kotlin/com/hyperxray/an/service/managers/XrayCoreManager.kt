@@ -3,8 +3,7 @@ package com.hyperxray.an.service.managers
 import android.content.Context
 import android.os.Build
 import android.util.Log
-import com.hyperxray.an.common.ConfigUtils
-import com.hyperxray.an.common.ConfigUtils.extractPortsFromJson
+import com.hyperxray.an.core.config.utils.ConfigParser
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.service.managers.HevSocksManager
 import com.hyperxray.an.xray.runtime.LogLineCallback
@@ -198,7 +197,7 @@ class XrayCoreManager(private val context: Context) {
         }
         
         // Extract excluded ports from config
-        val allExcludedPorts = excludedPorts + extractPortsFromJson(configContent)
+        val allExcludedPorts = excludedPorts + ConfigParser.extractPortsFromJson(configContent)
         
         // Start instances
         val result = try {
@@ -295,7 +294,7 @@ class XrayCoreManager(private val context: Context) {
             
             // Use libxray.so directly with Android linker
             val xrayPath = "$libraryDir/libxray.so"
-            val excludedPorts = extractPortsFromJson(configContent)
+            val excludedPorts = ConfigParser.extractPortsFromJson(configContent)
             val apiPort = findAvailablePort(excludedPorts)
             if (apiPort == null) {
                 Log.e(TAG, "Failed to find available port for Xray API")
@@ -984,7 +983,8 @@ class XrayCoreManager(private val context: Context) {
                 val vnext = settings?.optJSONArray("vnext")
                 if (vnext != null && vnext.length() > 0) {
                     val server = vnext.getJSONObject(0)
-                    server.optString("address", null)
+                    val address = server.optString("address", "")
+                    if (address.isNotEmpty()) address else null
                 } else {
                     null
                 }

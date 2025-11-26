@@ -42,6 +42,8 @@ import com.hyperxray.an.viewmodel.ConfigEditViewModel
 import com.hyperxray.an.viewmodel.MainViewModel
 import com.hyperxray.an.feature.telegram.presentation.ui.TelegramSettingsScreen
 import com.hyperxray.an.feature.telegram.presentation.viewmodel.TelegramSettingsViewModel
+import com.hyperxray.an.feature.warp.WarpFeatureProvider
+import com.hyperxray.an.feature.warp.presentation.ui.WarpScreen
 import androidx.compose.ui.platform.LocalContext
 import android.app.Application
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -156,6 +158,20 @@ fun AppNavHost(
         }
 
         // Utils Tool Routes
+        composable(
+            route = ROUTE_UTILS_WARP,
+            enterTransition = { enterTransition() },
+            exitTransition = { exitTransition() },
+            popEnterTransition = { EnterTransition.None },
+            popExitTransition = { popExitTransition() }
+        ) {
+            val context = LocalContext.current
+            val viewModel = remember { WarpFeatureProvider.createViewModel(context) }
+            ToolScreenWrapper(title = "WARP Account", navController = navController) {
+                WarpScreen(viewModel = viewModel)
+            }
+        }
+
         composable(
             route = ROUTE_UTILS_DNS_CACHE,
             enterTransition = { enterTransition() },
