@@ -79,6 +79,83 @@ class VlessLinkConverter: ConfigFormatConverter {
                 // For other security types (none, etc.), only network and security are set
             }
 
+            // Parse enableWarp from query parameter if present
+            val enableWarp = url.getQueryParameter("enableWarp")?.toBoolean() ?: false
+
+            // Build VLESS outbound
+            val vlessOutbound = mutableMapOf<String, Any>(
+                "protocol" to "vless",
+                "settings" to mapOf(
+                    "vnext" to listOf(
+                        mapOf(
+                            "address" to address,
+                            "port" to port,
+                            "users" to listOf(
+                                mutableMapOf<String, Any>().apply {
+                                    put("id", id)
+                                    put("encryption", "none")
+                                    // CRITICAL: If enableWarp is true, force-disable flow (Vision is incompatible with chaining)
+                                    // Only add flow if explicitly provided, security is not TLS, AND enableWarp is false
+                                    if (flow != null && security != "tls" && !enableWarp) {
+                                        put("flow", flow)
+                                    } else if (enableWarp) {
+                                        // Force empty flow when WARP chaining is enabled
+                                        put("flow", "")
+                                    }
+                                }
+                            )
+                        )
+                    )
+                ),
+                "streamSettings" to streamSettingsMap
+            )
+
+            // If WARP chaining is enabled, add proxySettings to VLESS outbound
+            if (enableWarp) {
+                vlessOutbound["proxySettings"] = mapOf("tag" to "warp-out")
+            }
+
+            // Build outbounds list
+            val outboundsList = mutableListOf<Any>(vlessOutbound)
+
+            // If WARP chaining is enabled, add WireGuard outbound
+            if (enableWarp) {
+                // Get WARP defaults
+                val warpPrivateKey = url.getQueryParameter("warpPrivateKey") ?: "" // User can provide via query param
+                val warpEndpoint = url.getQueryParameter("warpEndpoint") ?: "engage.cloudflareclient.com:2408"
+                val warpLocalAddress = url.getQueryParameter("warpLocalAddress") ?: "172.16.0.2/32"
+                
+                // Build WireGuard outbound
+                val warpOutbound = mutableMapOf<String, Any>(
+                    "tag" to "warp-out",
+                    "protocol" to "wireguard",
+                    "settings" to mutableMapOf<String, Any>().apply {
+                        if (warpPrivateKey.isNotEmpty()) {
+                            put("secretKey", warpPrivateKey)
+                        } else {
+                            // Use placeholder - user will need to set it via UI
+                            put("secretKey", "")
+                        }
+                        put("mtu", 1280)
+                        put("workers", 2)
+                        put("address", listOf(warpLocalAddress))
+                        put("peers", listOf(
+                            mapOf(
+                                "publicKey" to "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+                                "endpoint" to warpEndpoint,
+                                "reserved" to listOf(0, 0, 0)
+                            )
+                        ))
+                    },
+                    "streamSettings" to mapOf(
+                        "sockopt" to mapOf(
+                            "domainStrategy" to "UseIP"
+                        )
+                    )
+                )
+                outboundsList.add(warpOutbound)
+            }
+
             // Build config JSON
             val config = JSONObject(
                 mapOf(
@@ -91,35 +168,60 @@ class VlessLinkConverter: ConfigFormatConverter {
                             "settings" to mapOf("udp" to true)
                         )
                     ),
-                    "outbounds" to listOf(
-                        mapOf(
-                            "protocol" to "vless",
-                            "settings" to mapOf(
-                                "vnext" to listOf(
-                                    mapOf(
-                                        "address" to address,
-                                        "port" to port,
-                                        "users" to listOf(
-                                            mutableMapOf<String, Any>().apply {
-                                                put("id", id)
-                                                put("encryption", "none")
-                                                // Only add flow if explicitly provided and security is not TLS
-                                                // Flow is for XTLS only, not for standard TLS
-                                                if (flow != null && security != "tls") {
-                                                    put("flow", flow)
-                                                }
-                                            }
-                                        )
-                                    )
-                                )
-                            ),
-                            "streamSettings" to streamSettingsMap
-                        )
-                    )
+                    "outbounds" to outboundsList
                 )
             )
 
-            Result.success(DetectedConfig(name, config.toString(2)))
+            // If WARP is enabled, add routing rule to route WARP endpoint directly
+            if (enableWarp) {
+                val warpEndpointHost = url.getQueryParameter("warpEndpoint")?.split(":")?.firstOrNull() 
+                    ?: "engage.cloudflareclient.com"
+                
+                // Try to resolve endpoint to IP (basic approach - full resolution happens at runtime)
+                // For now, add routing rule that routes the endpoint domain directly
+                val routing = JSONObject().apply {
+                    put("domainStrategy", "IPIfNonMatch")
+                    put("rules", JSONArray().apply {
+                        // Route WARP endpoint directly (prevents handshake timeout loop)
+                        if (!warpEndpointHost.matches(Regex("^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$"))) {
+                            // Domain name - add domain rule
+                            put(JSONObject().apply {
+                                put("type", "field")
+                                put("domain", JSONArray().apply {
+                                    put(warpEndpointHost)
+                                })
+                                put("outboundTag", "direct")
+                            })
+                        } else {
+                            // IP address - add IP rule
+                            put(JSONObject().apply {
+                                put("type", "field")
+                                put("ip", JSONArray().apply {
+                                    put(warpEndpointHost)
+                                })
+                                put("outboundTag", "direct")
+                            })
+                        }
+                        // Default rule: route all traffic through VLESS
+                        put(JSONObject().apply {
+                            put("type", "field")
+                            put("network", "tcp,udp")
+                            put("outboundTag", "out")
+                        })
+                    })
+                }
+                config.put("routing", routing)
+                
+                // Add direct outbound for WARP endpoint routing
+                val directOutbound = JSONObject().apply {
+                    put("protocol", "freedom")
+                    put("tag", "direct")
+                }
+                val outbounds = config.getJSONArray("outbounds")
+                outbounds.put(directOutbound)
+            }
+            
+            Result.success(DetectedConfig(name, config.toString(2), enableWarp))
         } catch (e: Throwable) {
             Result.failure(e)
         }

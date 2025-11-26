@@ -3,11 +3,19 @@ package com.hyperxray.an.feature.warp.domain.repository
 import com.hyperxray.an.feature.warp.domain.entity.WarpAccount
 import com.hyperxray.an.feature.warp.domain.entity.WarpDevice
 import com.hyperxray.an.feature.warp.domain.entity.WarpConfigType
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * WARP repository interface
  */
 interface WarpRepository {
+    /**
+     * Reactive flow of current WARP account state.
+     * Emits null when no account is registered, or WarpAccount when account exists.
+     * This is the single source of truth for WARP account state.
+     */
+    val accountFlow: StateFlow<WarpAccount?>
+    
     /**
      * Register a new WARP account
      */
@@ -62,6 +70,28 @@ interface WarpRepository {
      * Generate sing-box outbound configuration
      */
     suspend fun generateSingBoxConfig(account: WarpAccount, endpoint: String? = null): Result<String>
+    
+    /**
+     * Create a free WARP account (convenience method for registerAccount with null license).
+     * This is the recommended way to create a new account without a license key.
+     */
+    suspend fun createFreeAccount(): Result<WarpAccount> {
+        return registerAccount(licenseKey = null)
+    }
+    
+    /**
+     * Bind a license key to the current account (convenience method).
+     * If no account exists, creates a new account with the license.
+     * If account exists, updates the license.
+     */
+    suspend fun bindLicense(licenseKey: String): Result<WarpAccount> {
+        val currentAccount = accountFlow.value
+        return if (currentAccount != null) {
+            updateLicense(currentAccount.accountId, licenseKey)
+        } else {
+            registerAccount(licenseKey)
+        }
+    }
 }
 
 

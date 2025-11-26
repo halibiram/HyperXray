@@ -9,7 +9,13 @@ import com.hyperxray.an.feature.warp.data.util.WarpConfigGenerator
 import com.hyperxray.an.feature.warp.domain.entity.WarpAccount
 import com.hyperxray.an.feature.warp.domain.entity.WarpDevice
 import com.hyperxray.an.feature.warp.domain.repository.WarpRepository
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val TAG = "WarpRepositoryImpl"
@@ -23,6 +29,35 @@ class WarpRepositoryImpl(
     private val storage: WarpAccountStorage
 ) : WarpRepository {
     
+    // Reactive account state - single source of truth
+    private val _accountFlow = MutableStateFlow<WarpAccount?>(null)
+    override val accountFlow: StateFlow<WarpAccount?> = _accountFlow.asStateFlow()
+    
+    private val initScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    
+    init {
+        // Load account from storage on initialization
+        initScope.launch {
+            loadAccount().fold(
+                onSuccess = { account ->
+                    _accountFlow.value = account
+                },
+                onFailure = {
+                    // No account found, that's okay
+                    _accountFlow.value = null
+                }
+            )
+        }
+    }
+    
+    /**
+     * Update account flow and save to storage
+     */
+    private suspend fun updateAccount(account: WarpAccount) {
+        _accountFlow.value = account
+        storage.saveAccount(account)
+    }
+    
     override suspend fun registerAccount(licenseKey: String?): Result<WarpAccount> {
         return withContext(Dispatchers.IO) {
             try {
@@ -30,8 +65,8 @@ class WarpRepositoryImpl(
                 result.fold(
                     onSuccess = { apiResponse ->
                         val account = WarpMapper.toWarpAccount(apiResponse)
-                        // Save account after registration
-                        storage.saveAccount(account)
+                        // Update account flow and save to storage
+                        updateAccount(account)
                         Log.d(TAG, "Account registered and saved: ${account.accountId}")
                         Result.success(account)
                     },
@@ -63,8 +98,8 @@ class WarpRepositoryImpl(
                                     privateKey = storedAccount?.privateKey,
                                     publicKey = storedAccount?.publicKey
                                 ))
-                                // Save updated account with license key
-                                storage.saveAccount(account)
+                                // Update account flow and save to storage
+                                updateAccount(account)
                                 Log.d(TAG, "License updated and account saved: ${account.accountId}")
                                 Result.success(account)
                             },
@@ -149,7 +184,7 @@ class WarpRepositoryImpl(
                 result.fold(
                     onSuccess = { apiResponse ->
                         val account = WarpMapper.toWarpAccount(apiResponse)
-                        storage.saveAccount(account)
+                        updateAccount(account)
                         Result.success(account)
                     },
                     onFailure = { error ->
@@ -164,7 +199,8 @@ class WarpRepositoryImpl(
     
     override suspend fun saveAccount(account: WarpAccount): Result<Unit> {
         return withContext(Dispatchers.IO) {
-            storage.saveAccount(account)
+            updateAccount(account)
+            Result.success(Unit)
         }
     }
     
@@ -175,6 +211,8 @@ class WarpRepositoryImpl(
                 onSuccess = { account ->
                     // Initialize API connection when account is loaded
                     apiDataSource.initializeFromAccount(account.accountId, account.token)
+                    // Update account flow
+                    _accountFlow.value = account
                     Log.d(TAG, "Account loaded and API connection initialized: ${account.accountId}")
                 },
                 onFailure = { }

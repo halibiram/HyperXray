@@ -203,7 +203,7 @@ class FileManager(private val application: Application, private val prefs: Prefe
                     Log.e(TAG, "Failed to parse config: ${e.message}", e)
                     AiLogHelper.e(TAG, "❌ CONTENT IMPORT: ConfigFormatConverter failed: ${e.message}", e)
                     return@withContext null
-                }
+                }.toPair()
             }
             
             AiLogHelper.d(TAG, "📋 CONTENT IMPORT: Config name: $name, content length: ${configContent.length}")

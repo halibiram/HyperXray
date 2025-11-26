@@ -60,7 +60,6 @@ fun WireGuardSection(
     onWarpSettingsChange: (enabled: Boolean, privateKey: String, endpoint: String, localAddress: String) -> Unit,
     onLicenseKeyInputChange: (String) -> Unit,
     onBindLicenseKey: () -> Unit,
-    onGenerateWarpIdentity: () -> Unit,
     onCreateFreeIdentity: () -> Unit,
     onSetWarpPrivateKey: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -135,7 +134,6 @@ fun WireGuardSection(
                     isBindingLicense = isBindingLicense,
                     onLicenseKeyInputChange = onLicenseKeyInputChange,
                     onBindLicenseKey = onBindLicenseKey,
-                    onGenerateWarpIdentity = onGenerateWarpIdentity,
                     onCreateFreeIdentity = onCreateFreeIdentity
                 )
                 
@@ -225,11 +223,19 @@ fun WireGuardSection(
                 )
 
                 // Private Key Field (Hidden by default, can be shown for advanced users)
+                // CRITICAL: When WARP account exists (from repository), make it READ-ONLY
+                // The repository is the single source of truth - manual editing breaks API sync
                 var showPrivateKey by remember { mutableStateOf(false) }
+                val hasWarpAccount = warpAccountType != null // Account exists if accountType is not null
+                
                 if (showPrivateKey) {
                     OutlinedTextField(
                         value = warpPrivateKey,
                         onValueChange = { newKey ->
+                            // If account exists, prevent editing (repository is source of truth)
+                            if (hasWarpAccount) {
+                                return@OutlinedTextField
+                            }
                             // Update StateFlow immediately for UI responsiveness
                             onSetWarpPrivateKey(newKey)
                             // Update config when key is complete (44 chars), empty, or when user stops typing
@@ -249,12 +255,23 @@ fun WireGuardSection(
                                 }
                             }
                         },
+                        enabled = !hasWarpAccount, // Disable when account exists
+                        readOnly = hasWarpAccount, // Read-only when account exists
                         label = { 
                             Text(
-                                "Private Key (Advanced)",
+                                if (hasWarpAccount) "Private Key (From WARP Account - Read Only)" else "Private Key (Advanced)",
                                 color = Color(0xFFB0B0B0)
                             ) 
                         },
+                        supportingText = if (hasWarpAccount) {
+                            {
+                                Text(
+                                    "Key is managed by WARP account. Cannot be edited manually.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFFFFA500)
+                                )
+                            }
+                        } else null,
                         placeholder = { 
                             Text(
                                 "Base64-encoded private key",
@@ -311,7 +328,6 @@ private fun WarpAccountCard(
     isBindingLicense: Boolean,
     onLicenseKeyInputChange: (String) -> Unit,
     onBindLicenseKey: () -> Unit,
-    onGenerateWarpIdentity: () -> Unit,
     onCreateFreeIdentity: () -> Unit
 ) {
     var showLicenseKey by remember { mutableStateOf(false) }

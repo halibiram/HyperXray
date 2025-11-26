@@ -42,6 +42,33 @@ class HyperXrayFormatConverter: ConfigFormatConverter {
         inflater.end()
         val decompressed = outputStream.toByteArray().toString(Charsets.UTF_8)
 
-        return Result.success(Pair(decodedName, decompressed))
+        // Parse enableWarp from config JSON if present
+        // This allows HyperXray format to support WARP chaining
+        val enableWarp = try {
+            val configJson = org.json.JSONObject(decompressed)
+            val outbounds = configJson.optJSONArray("outbounds") ?: configJson.optJSONArray("outbound")
+            if (outbounds != null) {
+                // Check if VLESS outbound has proxySettings pointing to warp-out
+                var hasVlessWithWarp = false
+                for (i in 0 until outbounds.length()) {
+                    val outbound = outbounds.getJSONObject(i)
+                    if (outbound.optString("protocol") == "vless") {
+                        val proxySettings = outbound.optJSONObject("proxySettings")
+                        if (proxySettings != null && proxySettings.optString("tag") == "warp-out") {
+                            hasVlessWithWarp = true
+                            break
+                        }
+                    }
+                }
+                hasVlessWithWarp
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            // If parsing fails, assume enableWarp is false
+            false
+        }
+
+        return Result.success(DetectedConfig(decodedName, decompressed, enableWarp))
     }
 }

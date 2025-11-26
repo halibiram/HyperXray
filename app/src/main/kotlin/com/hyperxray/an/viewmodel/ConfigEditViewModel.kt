@@ -11,6 +11,11 @@ import com.hyperxray.an.core.config.utils.ConfigParser
 import com.hyperxray.an.common.FilenameValidator
 import com.hyperxray.an.data.source.FileManager
 import com.hyperxray.an.prefs.Preferences
+import com.hyperxray.an.feature.warp.data.datasource.WarpApiDataSource
+import com.hyperxray.an.feature.warp.data.repository.WarpRepositoryImpl
+import com.hyperxray.an.feature.warp.data.storage.WarpAccountStorage
+import com.hyperxray.an.feature.warp.domain.repository.WarpRepository
+import com.hyperxray.an.utils.WarpDefaults
 import com.hyperxray.an.viewmodel.logic.WireGuardHandler
 import com.hyperxray.an.viewmodel.logic.StreamHandler
 import com.hyperxray.an.viewmodel.logic.RealityHandler
@@ -20,6 +25,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONException
@@ -49,9 +57,25 @@ sealed class ConfigEditUiEvent {
 class ConfigEditViewModel(
     application: Application,
     private val initialFilePath: String,
-    prefs: Preferences
+    prefs: Preferences,
+    warpRepository: WarpRepository? = null
 ) :
     AndroidViewModel(application) {
+    
+    // WARP Repository - single source of truth for WARP account state
+    private val warpRepo: WarpRepository = warpRepository ?: createWarpRepository()
+    
+    // Expose WARP account state from repository
+    val warpState: StateFlow<com.hyperxray.an.feature.warp.domain.entity.WarpAccount?> = warpRepo.accountFlow
+    
+    /**
+     * Create WARP repository instance using feature module dependencies
+     */
+    private fun createWarpRepository(): WarpRepository {
+        val apiDataSource = WarpApiDataSource(useIosHeaders = false)
+        val storage = WarpAccountStorage(application)
+        return WarpRepositoryImpl(application, apiDataSource, storage)
+    }
 
     private var _configFile: File
     private var _originalFilePath: String = initialFilePath
@@ -90,15 +114,35 @@ class ConfigEditViewModel(
     val muxConcurrency: StateFlow<Int> = streamHandler.muxConcurrency
 
     // WARP (WireGuard) settings
+    // Repository is the single source of truth - expose account state directly
     val enableWarp: StateFlow<Boolean> = wireGuardHandler.enableWarp
-    val warpPrivateKey: StateFlow<String> = wireGuardHandler.warpPrivateKey
+    val warpPrivateKey: StateFlow<String> = combine(
+        warpState,
+        wireGuardHandler.warpPrivateKey
+    ) { account, handlerKey ->
+        // Use repository account's private key if available, otherwise use handler key
+        account?.privateKey ?: handlerKey
+    }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Lazily, "")
     val warpPeerPublicKey: StateFlow<String> = wireGuardHandler.warpPeerPublicKey
     val warpEndpoint: StateFlow<String> = wireGuardHandler.warpEndpoint
     val warpLocalAddress: StateFlow<String> = wireGuardHandler.warpLocalAddress
-    val warpClientId: StateFlow<String?> = wireGuardHandler.warpClientId
+    val warpClientId: StateFlow<String?> = combine(
+        warpState,
+        wireGuardHandler.warpClientId
+    ) { account, handlerClientId ->
+        account?.config?.clientId ?: handlerClientId
+    }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Lazily, null)
     val warpLicenseKey: StateFlow<String> = wireGuardHandler.warpLicenseKey
-    val warpAccountType: StateFlow<String?> = wireGuardHandler.warpAccountType
-    val warpQuota: StateFlow<String> = wireGuardHandler.warpQuota
+    val warpAccountType: StateFlow<String?> = warpState.map { account ->
+        account?.account?.accountType
+    }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Lazily, null)
+    val warpQuota: StateFlow<String> = warpState.map { account ->
+        if (account != null) {
+            formatQuota(account.account.quota, account.account.accountType)
+        } else {
+            "Unknown"
+        }
+    }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Lazily, "Unknown")
     val isBindingLicense: StateFlow<Boolean> = wireGuardHandler.isBindingLicense
 
     private val fileManager: FileManager = FileManager(application, prefs)
@@ -113,6 +157,21 @@ class ConfigEditViewModel(
                 _configTextFieldValue.value = _configTextFieldValue.value.copy(text = content)
                 // Parse SNI and security from config
                 parseConfigFields(content)
+            }
+        }
+        
+        // Sync repository account state to handler state (for UI backward compatibility)
+        viewModelScope.launch {
+            warpState.collect { account ->
+                if (account != null) {
+                    // Update handler state from repository (single source of truth)
+                    wireGuardHandler.setWarpPrivateKey(account.privateKey)
+                    // Extract account type and quota
+                    val accountType = account.account.accountType
+                    val quota = formatQuota(account.account.quota, accountType)
+                    // Note: Handler's accountType and quota are updated via direct state access
+                    // We'll expose these from repository state instead
+                }
             }
         }
     }
@@ -557,97 +616,25 @@ class ConfigEditViewModel(
     }
     
     /**
-     * Generate new WARP keys and update config.
-     * Delegates to WireGuardHandler.
-     */
-    fun generateWarpKeys() {
-        val (privateKey, publicKey) = wireGuardHandler.generateWarpKeys()
-        if (privateKey.isNotEmpty()) {
-            updateWarpSettings(
-                enabled = true,
-                privateKey = privateKey,
-                endpoint = wireGuardHandler.warpEndpoint.value,
-                localAddress = wireGuardHandler.warpLocalAddress.value
-            )
-            _uiEvent.trySend(
-                ConfigEditUiEvent.ShowSnackbar("WARP keys generated successfully")
-            )
-        } else {
-            _uiEvent.trySend(
-                ConfigEditUiEvent.ShowSnackbar("Failed to generate WARP keys")
-            )
-        }
-    }
-    
-    /**
-     * Generate WARP identity via Cloudflare API registration.
-     * Delegates to WireGuardHandler.
-     */
-    fun generateWarpIdentity() {
-        viewModelScope.launch {
-            wireGuardHandler.generateWarpIdentity()
-                .onSuccess { result ->
-                    val localAddress = result.localAddress.ifEmpty { wireGuardHandler.warpLocalAddress.value }
-                    
-                    updateWarpSettings(
-                        enabled = true,
-                        privateKey = result.privateKey,
-                        endpoint = wireGuardHandler.warpEndpoint.value,
-                        localAddress = localAddress
-                    )
-                    
-                    val message = buildString {
-                        append("WARP identity registered successfully")
-                        if (result.license != null) {
-                            append("\nLicense: ${result.license.take(20)}...")
-                        }
-                        if (result.localAddress.isNotEmpty()) {
-                            append("\nAddress: ${result.localAddress}")
-                        }
-                        if (result.accountType != null) {
-                            append("\nAccount Type: ${result.accountType.uppercase()}")
-                        }
-                    }
-                    
-                    _uiEvent.trySend(
-                        ConfigEditUiEvent.ShowSnackbar(message)
-                    )
-                }
-                .onFailure { error ->
-                    Log.e(TAG, "WARP identity generation failed: ${error.message}", error)
-                    _uiEvent.trySend(
-                        ConfigEditUiEvent.ShowSnackbar("Registration Failed: ${error.message}")
-                    )
-                }
-        }
-    }
-    
-    /**
      * Create a free WARP account identity (one-click registration).
-     * Generates keys, registers with Cloudflare API, and auto-populates config fields.
-     * Delegates to WireGuardHandler.
+     * Uses WarpRepository as the single source of truth.
+     * The repository's accountFlow will automatically update, and we sync config from it.
      */
     fun createFreeIdentity() {
         viewModelScope.launch {
-            wireGuardHandler.createFreeIdentity()
-                .onSuccess { result ->
-                    val localAddress = result.localAddress.ifEmpty { wireGuardHandler.warpLocalAddress.value }
+            warpRepo.createFreeAccount()
+                .onSuccess { account ->
+                    // Repository accountFlow is automatically updated
+                    // Sync config with account data
+                    syncConfigFromAccount(account)
                     
-                    // Auto-populate WireGuard config fields
-                    updateWarpSettings(
-                        enabled = true,
-                        privateKey = result.privateKey,
-                        endpoint = wireGuardHandler.warpEndpoint.value,
-                        localAddress = localAddress
-                    )
+                    val accountType = account.account.accountType ?: "free"
+                    val quota = formatQuota(account.account.quota, account.account.accountType)
                     
                     val message = buildString {
                         append("✅ Free WARP account created successfully!")
-                        append("\nAccount Type: ${result.accountType?.uppercase() ?: "FREE"}")
-                        append("\nQuota: ${wireGuardHandler.warpQuota.value}")
-                        if (result.localAddress.isNotEmpty()) {
-                            append("\nAddress: ${result.localAddress}")
-                        }
+                        append("\nAccount Type: ${accountType.uppercase()}")
+                        append("\nQuota: $quota")
                     }
                     
                     _uiEvent.trySend(
@@ -664,41 +651,37 @@ class ConfigEditViewModel(
     }
     
     /**
-     * Update WARP license key input.
-     * Delegates to WireGuardHandler.
-     */
-    fun updateLicenseKeyInput(licenseKey: String) {
-        wireGuardHandler.updateLicenseKeyInput(licenseKey)
-    }
-    
-    /**
      * Bind WARP+ license key to existing account.
-     * Delegates to WireGuardHandler.
+     * Uses WarpRepository as the single source of truth.
      */
     fun bindLicenseKey() {
+        val licenseKey = wireGuardHandler.warpLicenseKey.value.trim()
+        if (licenseKey.isEmpty()) {
+            _uiEvent.trySend(
+                ConfigEditUiEvent.ShowSnackbar("Please enter a license key")
+            )
+            return
+        }
+        
         viewModelScope.launch {
-            wireGuardHandler.bindLicenseKey()
-                .onSuccess { result ->
-                    if (result.privateKey != null) {
-                        updateWarpSettings(
-                            enabled = true,
-                            privateKey = result.privateKey,
-                            endpoint = wireGuardHandler.warpEndpoint.value,
-                            localAddress = wireGuardHandler.warpLocalAddress.value
-                        )
-                    }
+            warpRepo.bindLicense(licenseKey)
+                .onSuccess { account ->
+                    // Repository accountFlow is automatically updated
+                    // Sync config with account data
+                    syncConfigFromAccount(account)
                     
+                    val accountType = account.account.accountType ?: "free"
                     val accountTypeDisplay = when {
-                        result.accountType?.equals("plus", ignoreCase = true) == true -> "WARP+"
-                        result.accountType?.equals("unlimited", ignoreCase = true) == true -> "WARP Unlimited"
-                        result.accountType?.equals("premium", ignoreCase = true) == true -> "WARP Premium"
-                        else -> result.accountType?.uppercase() ?: "FREE"
+                        accountType.equals("plus", ignoreCase = true) -> "WARP+"
+                        accountType.equals("unlimited", ignoreCase = true) -> "WARP Unlimited"
+                        accountType.equals("premium", ignoreCase = true) -> "WARP Premium"
+                        else -> accountType.uppercase()
                     }
                     
                     val message = buildString {
                         append("✅ License key bound successfully!")
                         append("\nAccount Type: $accountTypeDisplay")
-                        if (result.accountType?.equals("free", ignoreCase = true) == true) {
+                        if (accountType.equals("free", ignoreCase = true)) {
                             append("\n⚠️ Account is still FREE. Please check your license key.")
                         }
                     }
@@ -713,6 +696,56 @@ class ConfigEditViewModel(
                         ConfigEditUiEvent.ShowSnackbar("License Binding Failed: ${error.message}")
                     )
                 }
+        }
+    }
+    
+    /**
+     * Update WARP license key input.
+     * Delegates to WireGuardHandler for UI state only.
+     */
+    fun updateLicenseKeyInput(licenseKey: String) {
+        wireGuardHandler.updateLicenseKeyInput(licenseKey)
+    }
+    
+    /**
+     * Sync config JSON with WARP account from repository.
+     * This ensures the config always reflects the repository state.
+     */
+    private suspend fun syncConfigFromAccount(account: com.hyperxray.an.feature.warp.domain.entity.WarpAccount) {
+        try {
+            val currentText = _configTextFieldValue.value.text
+            val jsonObject = JSONObject(currentText)
+            
+            // Extract local address from account config if available
+            val localAddress = account.config.interfaceData?.addresses?.v4 
+                ?: wireGuardHandler.warpLocalAddress.value.ifEmpty { WarpDefaults.LOCAL_ADDRESS }
+            
+            // Update config with account's private key
+            updateWarpSettings(
+                enabled = true,
+                privateKey = account.privateKey,
+                endpoint = wireGuardHandler.warpEndpoint.value,
+                localAddress = localAddress
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to sync config from account: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Format quota display string from account quota and type.
+     */
+    private fun formatQuota(quotaBytes: Long, accountType: String?): String {
+        if (quotaBytes > 0) {
+            val gb = quotaBytes / (1024.0 * 1024.0 * 1024.0)
+            return String.format("%.2f GB", gb)
+        }
+        return when {
+            accountType?.equals("plus", ignoreCase = true) == true -> "Unlimited"
+            accountType?.equals("unlimited", ignoreCase = true) == true -> "Unlimited"
+            accountType?.equals("premium", ignoreCase = true) == true -> "Unlimited"
+            accountType?.equals("free", ignoreCase = true) == true -> "Limited"
+            else -> "Unknown"
         }
     }
     

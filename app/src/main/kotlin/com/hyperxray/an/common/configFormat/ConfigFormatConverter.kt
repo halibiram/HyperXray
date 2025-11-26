@@ -40,8 +40,8 @@ interface ConfigFormatConverter {
                     AiLogHelper.d(TAG, "✅ CONVERTER: ${implementation.javaClass.simpleName} detected, calling convert()...")
                     val result = implementation.convert(context, content)
                     result.fold(
-                        onSuccess = { (name, configContent) ->
-                            AiLogHelper.i(TAG, "✅ CONVERTER: ${implementation.javaClass.simpleName} succeeded: name=$name, content length=${configContent.length}")
+                        onSuccess = { config ->
+                            AiLogHelper.i(TAG, "✅ CONVERTER: ${implementation.javaClass.simpleName} succeeded: name=${config.name}, content length=${config.content.length}")
                         },
                         onFailure = { e ->
                             AiLogHelper.e(TAG, "❌ CONVERTER: ${implementation.javaClass.simpleName} failed: ${e.message}", e)
@@ -105,7 +105,7 @@ interface ConfigFormatConverter {
                                 val configContent = pair.second as? String ?: return Result.failure(IllegalStateException("Empty config content"))
                                 Log.d(TAG, "Successfully converted VLESS link to config: $name")
                                 AiLogHelper.i(TAG, "✅ CONVERTER: VlessLinkConverter succeeded (Pair): name=$name, content length=${configContent.length}, preview: ${configContent.take(100)}...")
-                                return Result.success(Pair(name, configContent))
+                                return Result.success(DetectedConfig(name, configContent, false))
                             }
                         } else {
                             // Result is kotlin.Result, extract the value
@@ -119,29 +119,52 @@ interface ConfigFormatConverter {
                                     // Try to get value from Result using getOrNull
                                     try {
                                         val getOrNullMethod = resultClass.getMethod("getOrNull")
-                                        val pair = getOrNullMethod.invoke(resultObj) as? Pair<*, *>
-                                        if (pair != null) {
-                                            val name = pair.first as? String ?: "imported_vless_${System.currentTimeMillis()}"
-                                            val configContent = pair.second as? String ?: return Result.failure(IllegalStateException("Empty config content"))
-                                            Log.d(TAG, "Successfully converted VLESS link to config: $name")
-                                            AiLogHelper.i(TAG, "✅ CONVERTER: VlessLinkConverter succeeded (Result<Pair>): name=$name, content length=${configContent.length}, preview: ${configContent.take(100)}...")
-                                            return Result.success(Pair(name, configContent))
+                                        val resultValue = getOrNullMethod.invoke(resultObj)
+                                        if (resultValue != null) {
+                                            // Handle both Pair and DetectedConfig
+                                            val config = when (resultValue) {
+                                                is Pair<*, *> -> {
+                                                    val name = resultValue.first as? String ?: "imported_vless_${System.currentTimeMillis()}"
+                                                    val configContent = resultValue.second as? String ?: return Result.failure(IllegalStateException("Empty config content"))
+                                                    DetectedConfig(name, configContent, false)
+                                                }
+                                                is DetectedConfig -> resultValue
+                                                else -> {
+                                                    val name = "imported_vless_${System.currentTimeMillis()}"
+                                                    val configContent = resultValue.toString()
+                                                    DetectedConfig(name, configContent, false)
+                                                }
+                                            }
+                                            Log.d(TAG, "Successfully converted VLESS link to config: ${config.name}")
+                                            AiLogHelper.i(TAG, "✅ CONVERTER: VlessLinkConverter succeeded (Result<Pair/Config>): name=${config.name}, content length=${config.content.length}, preview: ${config.content.take(100)}...")
+                                            return Result.success(config)
                                         } else {
-                                            AiLogHelper.e(TAG, "❌ CONVERTER: VlessLinkConverter returned success but pair is null")
+                                            AiLogHelper.e(TAG, "❌ CONVERTER: VlessLinkConverter returned success but value is null")
                                         }
                                     } catch (e: Exception) {
                                         // Try alternative: get() method
                                         try {
                                             val getMethod = resultClass.getMethod("get")
-                                            val pair = getMethod.invoke(resultObj) as? Pair<*, *>
-                                            if (pair != null) {
-                                                val name = pair.first as? String ?: "imported_vless_${System.currentTimeMillis()}"
-                                                val configContent = pair.second as? String ?: return Result.failure(IllegalStateException("Empty config content"))
-                                                AiLogHelper.i(TAG, "✅ CONVERTER: VlessLinkConverter succeeded (Result.get()): name=$name, content length=${configContent.length}")
-                                                return Result.success(Pair(name, configContent))
+                                            val resultValue = getMethod.invoke(resultObj)
+                                            if (resultValue != null) {
+                                                val config = when (resultValue) {
+                                                    is Pair<*, *> -> {
+                                                        val name = resultValue.first as? String ?: "imported_vless_${System.currentTimeMillis()}"
+                                                        val configContent = resultValue.second as? String ?: return Result.failure(IllegalStateException("Empty config content"))
+                                                        DetectedConfig(name, configContent, false)
+                                                    }
+                                                    is DetectedConfig -> resultValue
+                                                    else -> {
+                                                        val name = "imported_vless_${System.currentTimeMillis()}"
+                                                        val configContent = resultValue.toString()
+                                                        DetectedConfig(name, configContent, false)
+                                                    }
+                                                }
+                                                AiLogHelper.i(TAG, "✅ CONVERTER: VlessLinkConverter succeeded (Result.get()): name=${config.name}, content length=${config.content.length}")
+                                                return Result.success(config)
                                             }
                                         } catch (e2: Exception) {
-                                            AiLogHelper.e(TAG, "❌ CONVERTER: Failed to extract Pair from Result: getOrNull()=${e.message}, get()=${e2.message}")
+                                            AiLogHelper.e(TAG, "❌ CONVERTER: Failed to extract value from Result: getOrNull()=${e.message}, get()=${e2.message}")
                                         }
                                     }
                                 } else {
@@ -182,7 +205,7 @@ interface ConfigFormatConverter {
             // Fallback: Assume content is raw JSON or will be handled as-is
             // SimpleXray approach: Return raw content if no converter matches
             AiLogHelper.w(TAG, "⚠️ CONVERTER: No converter matched, using fallback (raw content). This means vless:// link was not converted!")
-            return Result.success(Pair("imported_${System.currentTimeMillis()}", content))
+            return Result.success(DetectedConfig("imported_${System.currentTimeMillis()}", content, false))
         }
     }
 }

@@ -53,6 +53,6 @@ class SimpleXrayFormatConverter: ConfigFormatConverter {
         inflater.end()
         val decompressed = outputStream.toByteArray().toString(Charsets.UTF_8)
 
-        return Result.success(Pair(decodedName, decompressed))
+        return Result.success(DetectedConfig(decodedName, decompressed, false))
     }
 }

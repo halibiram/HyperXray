@@ -274,7 +274,6 @@ fun ConfigEditScreen(
                         },
                         onLicenseKeyInputChange = { viewModel.updateLicenseKeyInput(it) },
                         onBindLicenseKey = { viewModel.bindLicenseKey() },
-                        onGenerateWarpIdentity = { viewModel.generateWarpIdentity() },
                         onCreateFreeIdentity = { viewModel.createFreeIdentity() },
                         onSetWarpPrivateKey = { viewModel.setWarpPrivateKey(it) }
                     )
