@@ -106,10 +106,15 @@ class LegacyXrayRunner(
 
             // CRITICAL: Start reading process output IMMEDIATELY (before config write)
             // This allows us to capture error messages even if process crashes before/during config read
-            runnerContext.xrayLogHandler.startReading(currentProcess!!, runnerContext.logFileManager)
+            val processForLogs = currentProcess
+            if (processForLogs == null) {
+                Log.e(TAG, "❌ Process is null after start(), cannot start reading logs")
+                return
+            }
+            runnerContext.xrayLogHandler.startReading(processForLogs, runnerContext.logFileManager)
             
             // Small delay to allow process to potentially output startup errors
-            Thread.sleep(100)
+            delay(100)
             
             // Validate process startup with periodic checks to catch early exits
             // Check process status multiple times instead of fixed sleep to detect failures quickly
@@ -126,10 +131,15 @@ class LegacyXrayRunner(
                 checksPerformed++
                 
                 // Check if process exited during startup
-                if (!currentProcess!!.isAlive) {
-                    val exitValue = try {
-                        currentProcess!!.exitValue()
-                    } catch (e: IllegalThreadStateException) {
+                val process = currentProcess
+                if (process == null || !process.isAlive) {
+                    val exitValue = if (process != null) {
+                        try {
+                            process.exitValue()
+                        } catch (e: IllegalThreadStateException) {
+                            -1
+                        }
+                    } else {
                         -1
                     }
                     val errorMessage = "Xray process exited during startup after ${checksPerformed * checkInterval}ms (exit code: $exitValue)"
@@ -163,10 +173,15 @@ class LegacyXrayRunner(
             // Final validation check
             if (!processValidated) {
                 // We hit the maximum check limit - verify process is still alive
-                if (!currentProcess!!.isAlive) {
-                    val exitValue = try {
-                        currentProcess!!.exitValue()
-                    } catch (e: IllegalThreadStateException) {
+                val process = currentProcess
+                if (process == null || !process.isAlive) {
+                    val exitValue = if (process != null) {
+                        try {
+                            process.exitValue()
+                        } catch (e: IllegalThreadStateException) {
+                            -1
+                        }
+                    } else {
                         -1
                     }
                     val errorMessage = "Xray process exited during startup validation (exit code: $exitValue)"
@@ -233,20 +248,26 @@ class LegacyXrayRunner(
                 Log.e(TAG, "Error verifying config before writing to Xray: ${e.message}", e)
             }
             
+            val processForConfig = currentProcess
+            if (processForConfig == null) {
+                Log.e(TAG, "❌ Process is null, cannot write config")
+                throw IOException("Process is null, cannot write config")
+            }
+            
             try {
-                currentProcess!!.outputStream.use { os ->
+                processForConfig.outputStream.use { os ->
                     os.write(injectedConfigContent.toByteArray())
                     os.flush()
                 }
                 Log.d(TAG, "Config written to Xray stdin successfully")
             } catch (e: IOException) {
-                if (!currentProcess!!.isAlive) {
-                    val exitValue = try { currentProcess!!.exitValue() } catch (ex: IllegalThreadStateException) { -1 }
+                if (!processForConfig.isAlive) {
+                    val exitValue = try { processForConfig.exitValue() } catch (ex: IllegalThreadStateException) { -1 }
                     Log.e(TAG, "Xray process exited while writing config, exit code: $exitValue")
                     
                     // Try to read any error output before it's lost
                     try {
-                        val errorReader = BufferedReader(InputStreamReader(currentProcess!!.inputStream))
+                        val errorReader = BufferedReader(InputStreamReader(processForConfig.inputStream))
                         val errorOutput = StringBuilder()
                         var lineCount = 0
                         var line = errorReader.readLine()
@@ -276,9 +297,14 @@ class LegacyXrayRunner(
             // Read stderr output in parallel to capture errors immediately
             val stderrOutput = StringBuilder()
             val stderrJob = runnerContext.serviceScope.launch(Dispatchers.IO) {
+                val process = currentProcess
+                if (process == null) {
+                    Log.e(TAG, "❌ Process is null, cannot read stderr")
+                    return@launch
+                }
                 try {
-                    val errorReader = BufferedReader(InputStreamReader(currentProcess!!.errorStream))
-                    while (isActive && currentProcess!!.isAlive) {
+                    val errorReader = BufferedReader(InputStreamReader(process.errorStream))
+                    while (isActive && process.isAlive) {
                         try {
                             val line = errorReader.readLine()
                             if (line == null) {
@@ -292,7 +318,7 @@ class LegacyXrayRunner(
                                 stderrOutput.delete(0, stderrOutput.length - 2500) // Keep last half
                             }
                         } catch (e: IOException) {
-                            if (currentProcess!!.isAlive) {
+                            if (process.isAlive) {
                                 delay(100)
                                 continue
                             } else {
@@ -308,10 +334,15 @@ class LegacyXrayRunner(
             // Increased delay to allow process to fully start and output any errors
             delay(3000) // Wait 3 seconds for process to process config and potentially output errors
             
-            if (!currentProcess!!.isAlive) {
-                val exitValue = try {
-                    currentProcess!!.exitValue()
-                } catch (e: IllegalThreadStateException) {
+            val processAfterDelay = currentProcess
+            if (processAfterDelay == null || !processAfterDelay.isAlive) {
+                val exitValue = if (processAfterDelay != null) {
+                    try {
+                        processAfterDelay.exitValue()
+                    } catch (e: IllegalThreadStateException) {
+                        -1
+                    }
+                } else {
                     -1
                 }
                 
@@ -320,18 +351,20 @@ class LegacyXrayRunner(
                 
                 // Try to read stdout error output before process cleanup
                 val stdoutOutput = StringBuilder()
-                try {
-                    val reader = BufferedReader(InputStreamReader(currentProcess!!.inputStream))
-                    var lineCount = 0
-                    var line = reader.readLine()
-                    while (lineCount < 50 && line != null) {
-                        stdoutOutput.append(line).append("\n")
-                        Log.e(TAG, "Xray stdout: $line")
-                        line = reader.readLine()
-                        lineCount++
+                if (processAfterDelay != null) {
+                    try {
+                        val reader = BufferedReader(InputStreamReader(processAfterDelay.inputStream))
+                        var lineCount = 0
+                        var line = reader.readLine()
+                        while (lineCount < 50 && line != null) {
+                            stdoutOutput.append(line).append("\n")
+                            Log.e(TAG, "Xray stdout: $line")
+                            line = reader.readLine()
+                            lineCount++
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Could not read process stdout: ${e.message}")
                     }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Could not read process stdout: ${e.message}")
                 }
                 
                 // Combine stderr and stdout output
@@ -393,12 +426,13 @@ class LegacyXrayRunner(
             
             // CRITICAL: Broadcast instance status for legacy mode (MainViewModel needs this for connection state)
             // In legacy mode, we have a single instance running
-            if (currentProcess != null && currentProcess!!.isAlive) {
+            val processForBroadcast = currentProcess
+            if (processForBroadcast != null && processForBroadcast.isAlive) {
                 try {
                     val processId = try {
-                        val pidField = currentProcess!!.javaClass.getDeclaredField("pid")
+                        val pidField = processForBroadcast.javaClass.getDeclaredField("pid")
                         pidField.isAccessible = true
-                        pidField.getLong(currentProcess!!)
+                        pidField.getLong(processForBroadcast)
                     } catch (e: Exception) {
                         Log.w(TAG, "Could not get process ID: ${e.message}")
                         0L
@@ -536,7 +570,8 @@ class LegacyXrayRunner(
     }
     
     override fun isRunning(): Boolean {
-        return currentProcess != null && currentProcess!!.isAlive
+        val process = currentProcess
+        return process != null && process.isAlive
     }
 }
 

@@ -316,7 +316,7 @@ class XrayCoreManager(private val context: Context) {
             }
             
             // Small delay to allow process to potentially output startup errors
-            Thread.sleep(100)
+            delay(100)
             
             // Validate process startup
             if (!validateProcessStartup(currentProcess)) {
@@ -411,7 +411,7 @@ class XrayCoreManager(private val context: Context) {
                 try {
                     // Try graceful termination first
                     processToDestroy.destroy()
-                    Thread.sleep(2000) // Wait for graceful shutdown
+                    delay(2000) // Wait for graceful shutdown
                     // Force kill if still alive
                     if (processToDestroy.isAlive) {
                         Log.d(TAG, "Process still alive after graceful shutdown, forcing destroy.")

@@ -302,7 +302,7 @@ class XrayProcessManager(private val context: Context) {
                     AiLogHelper.d(TAG, "🔧 XRAY PROCESS STOP: Stopping single process (graceful shutdown)...")
                     // Try graceful termination first
                     processToDestroy.destroy()
-                    Thread.sleep(2000) // Wait for graceful shutdown
+                    delay(2000) // Wait for graceful shutdown
                     // Force kill if still alive
                     if (processToDestroy.isAlive) {
                         Log.d(TAG, "Process still alive after graceful shutdown, forcing destroy.")
@@ -417,11 +417,26 @@ class XrayProcessManager(private val context: Context) {
     
     /**
      * Get ProcessBuilder for single process mode (legacy).
+     * 
+     * Executes libxray.so from nativeLibraryDir to avoid W^X violations on Android 10+.
+     * The native library directory is system-managed and has execution permissions.
+     * 
+     * Note: The xrayPath parameter is ignored. The executable path is always resolved
+     * from nativeLibraryDir to ensure compatibility with Android 10+ security restrictions.
+     * 
+     * @param xrayPath Legacy parameter (ignored, kept for backward compatibility)
+     * @return ProcessBuilder configured to execute libxray.so from nativeLibraryDir
      */
     fun getProcessBuilder(xrayPath: String): ProcessBuilder {
         val filesDir = context.filesDir
         
-        // Ensure filesDir exists
+        // Log if provided path differs from nativeLibraryDir (for debugging)
+        // This helps identify if callers are still passing filesDir paths
+        if (xrayPath.isNotEmpty() && !xrayPath.contains("lib/")) {
+            Log.d(TAG, "Note: xrayPath parameter provided ($xrayPath) but will use nativeLibraryDir instead")
+        }
+        
+        // Ensure filesDir exists (still needed for asset files like geoip.dat)
         if (!filesDir.exists()) {
             val created = filesDir.mkdirs()
             if (!created) {
@@ -431,28 +446,72 @@ class XrayProcessManager(private val context: Context) {
             }
         }
         
-        // Check if libxray.so exists
-        val libxrayFile = File(xrayPath)
-        if (!libxrayFile.exists()) {
-            throw IOException("libxray.so not found at: $xrayPath")
+        // CRITICAL: Get native library directory where Android extracts .so files
+        // This directory has execution permissions and avoids W^X violations
+        val nativeDir = try {
+            val nativeLibraryDir = context.applicationInfo.nativeLibraryDir
+            if (nativeLibraryDir == null || nativeLibraryDir.isEmpty()) {
+                throw IOException("nativeLibraryDir is null or empty")
+            }
+            nativeLibraryDir
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get nativeLibraryDir: ${e.message}", e)
+            throw IOException("Failed to get native library directory: ${e.message}", e)
         }
         
-        // Use Android linker to execute libxray.so
-        val linkerPath = if (Build.SUPPORTED_64_BIT_ABIS.isNotEmpty()) {
-            "/system/bin/linker64"
-        } else {
-            "/system/bin/linker"
+        // Construct path to libxray.so in native library directory
+        val executableFile = File(nativeDir, "libxray.so")
+        
+        // Validate executable exists before attempting execution
+        if (!executableFile.exists()) {
+            val errorMsg = "Native library not found at ${executableFile.absolutePath}. " +
+                    "Expected location: $nativeDir/libxray.so"
+            Log.e(TAG, errorMsg)
+            AiLogHelper.e(TAG, "❌ PROCESS BUILDER: $errorMsg")
+            throw IOException(errorMsg)
         }
         
-        Log.d(TAG, "Using linker: $linkerPath to execute: $xrayPath")
+        // Check if file is readable
+        if (!executableFile.canRead()) {
+            val errorMsg = "Native library is not readable at ${executableFile.absolutePath}"
+            Log.e(TAG, errorMsg)
+            AiLogHelper.e(TAG, "❌ PROCESS BUILDER: $errorMsg")
+            throw IOException(errorMsg)
+        }
         
-        val command: MutableList<String> = mutableListOf(linkerPath, xrayPath, "run")
+        val executablePath = executableFile.absolutePath
+        Log.i(TAG, "✅ Executable found at: $executablePath")
+        Log.d(TAG, "Executable size: ${executableFile.length()} bytes")
+        Log.d(TAG, "Executable permissions: ${executableFile.canRead()}, ${executableFile.canExecute()}")
+        AiLogHelper.d(TAG, "✅ PROCESS BUILDER: Executable validated - path: $executablePath, size: ${executableFile.length()} bytes")
+        
+        // Try direct execution first (preferred method for nativeLibraryDir on Android 10+)
+        // Direct execution works because nativeLibraryDir has execution permissions
+        // If direct execution fails at runtime, the error will be caught by startProcessWithDefensiveMechanisms
+        // Fallback to linker can be added if needed, but direct execution should work for nativeLibraryDir
+        val command: MutableList<String> = mutableListOf(executablePath, "run")
+        Log.d(TAG, "Attempting direct execution: ${command.joinToString(" ")}")
+        AiLogHelper.d(TAG, "🔧 PROCESS BUILDER: Attempting direct execution from nativeLibraryDir")
+        
+        Log.i(TAG, "Command: ${command.joinToString(" ")}")
+        AiLogHelper.i(TAG, "🚀 PROCESS BUILDER: Command prepared - ${command.joinToString(" ")}")
         
         val processBuilder = ProcessBuilder(command)
         val environment = processBuilder.environment()
-        environment["XRAY_LOCATION_ASSET"] = filesDir.path
+        
+        // CRITICAL: XRAY_LOCATION_ASSET must point to filesDir where geoip.dat, geosite.dat are located
+        // The binary runs from nativeLibraryDir, but assets are in filesDir
+        environment["XRAY_LOCATION_ASSET"] = filesDir.absolutePath
+        Log.d(TAG, "XRAY_LOCATION_ASSET set to: ${filesDir.absolutePath}")
+        AiLogHelper.d(TAG, "✅ PROCESS BUILDER: XRAY_LOCATION_ASSET=${filesDir.absolutePath}")
+        
+        // Set working directory to filesDir (where config and assets are)
         processBuilder.directory(filesDir)
         processBuilder.redirectErrorStream(true)
+        
+        Log.d(TAG, "ProcessBuilder configured - executable: $executablePath, workingDir: ${filesDir.absolutePath}")
+        AiLogHelper.d(TAG, "✅ PROCESS BUILDER: ProcessBuilder configured successfully")
+        
         return processBuilder
     }
     

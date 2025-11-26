@@ -860,8 +860,11 @@ class TProxyService : VpnService() {
             val step1StartTime = System.currentTimeMillis()
             AiLogHelper.i(TAG, "🔧 VPN STOP STEP 1: Stopping native TProxy service...")
             try {
-                Thread.sleep(500) // Allow in-flight UDP packets to finish
-                hevSocksManager.stopNativeTProxy(waitForUdpCleanup = true, udpCleanupDelayMs = 1000L)
+                // Use runBlocking with delay instead of Thread.sleep to avoid blocking
+                runBlocking {
+                    delay(500) // Allow in-flight UDP packets to finish
+                    hevSocksManager.stopNativeTProxy(waitForUdpCleanup = true, udpCleanupDelayMs = 1000L)
+                }
                 val step1Duration = System.currentTimeMillis() - step1StartTime
                 AiLogHelper.i(TAG, "✅ VPN STOP STEP 1 COMPLETED: Native TProxy service stopped (duration: ${step1Duration}ms)")
             } catch (e: Exception) {
@@ -936,14 +939,19 @@ class TProxyService : VpnService() {
 
         if (session.tunInterfaceManager.isEstablished()) {
             try {
-                hevSocksManager.stopNativeTProxy(waitForUdpCleanup = true, udpCleanupDelayMs = 200L)
+                runBlocking {
+                    hevSocksManager.stopNativeTProxy(waitForUdpCleanup = true, udpCleanupDelayMs = 200L)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error stopping native TProxy service", e)
             }
         }
 
         try {
-            Thread.sleep(100) // Small delay before closing TUN fd
+            // Use runBlocking with delay instead of Thread.sleep to avoid blocking
+            runBlocking {
+                delay(100) // Small delay before closing TUN fd
+            }
             session.tunInterfaceManager.closeTunFd(session)
         } catch (e: Exception) {
             Log.e(TAG, "Error closing TUN file descriptor", e)

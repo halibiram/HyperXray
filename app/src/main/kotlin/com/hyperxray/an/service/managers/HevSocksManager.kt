@@ -13,6 +13,7 @@ import com.hyperxray.an.telemetry.TProxyAiOptimizer
 import com.hyperxray.an.viewmodel.CoreStatsState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -153,7 +154,7 @@ class HevSocksManager(private val context: Context) {
     /**
      * Stop HevSocks service.
      */
-    fun stop() {
+    suspend fun stop() {
         stopTProxy()
     }
     
@@ -304,7 +305,7 @@ class HevSocksManager(private val context: Context) {
                                     synchronized(tunFdLock) {
                                         com.hyperxray.an.service.TProxyService.TProxyStopService()
                                     }
-                                    Thread.sleep(100) // Brief delay to ensure clean shutdown
+                                    delay(100) // Brief delay to ensure clean shutdown
                                     
                                     // Check if we're stopping before restarting TProxy
                                     if (isStoppingCallback()) {
@@ -363,7 +364,7 @@ class HevSocksManager(private val context: Context) {
      * @param waitForUdpCleanup Whether to wait for UDP cleanup (default: true)
      * @param udpCleanupDelayMs Delay in milliseconds for UDP cleanup (default: 1000ms)
      */
-    fun stopNativeTProxy(
+    suspend fun stopNativeTProxy(
         waitForUdpCleanup: Boolean = true,
         udpCleanupDelayMs: Long = 1000L
     ) {
@@ -385,11 +386,13 @@ class HevSocksManager(private val context: Context) {
                 // UDP cleanup can take time, especially with active connections
                 AiLogHelper.d(TAG, "⏳ TPROXY STOP: Waiting for UDP cleanup (${udpCleanupDelayMs}ms)...")
                 try {
-                    Thread.sleep(udpCleanupDelayMs)
+                    delay(udpCleanupDelayMs)
                     AiLogHelper.d(TAG, "✅ TPROXY STOP: UDP cleanup wait completed")
-                } catch (e: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    AiLogHelper.w(TAG, "⚠️ TPROXY STOP: UDP cleanup wait interrupted")
+                } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                    AiLogHelper.w(TAG, "⚠️ TPROXY STOP: UDP cleanup wait cancelled")
+                    throw e // Re-throw cancellation to respect coroutine cancellation
+                } catch (e: Exception) {
+                    AiLogHelper.w(TAG, "⚠️ TPROXY STOP: UDP cleanup wait error: ${e.message}")
                 }
             }
             
@@ -540,7 +543,7 @@ class HevSocksManager(private val context: Context) {
     /**
      * Stop TProxy service (legacy method, kept for backward compatibility).
      */
-    fun stopTProxy() {
+    suspend fun stopTProxy() {
         stopNativeTProxy(waitForUdpCleanup = false, udpCleanupDelayMs = 0L)
     }
     

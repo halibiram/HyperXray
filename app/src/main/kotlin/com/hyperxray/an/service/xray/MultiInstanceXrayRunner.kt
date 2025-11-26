@@ -292,7 +292,13 @@ class MultiInstanceXrayRunner(
                 
                 Log.i(TAG, "▶️ Calling startInstances() with count=$instanceCount, configPath=$selectedConfigPath")
                 val startedInstances = try {
-                    val result = runnerContext.multiXrayCoreManager!!.startInstances(
+                    val manager = runnerContext.multiXrayCoreManager
+                    if (manager == null) {
+                        Log.e(TAG, "❌ MultiXrayCoreManager is null, cannot start instances")
+                        AiLogHelper.e(TAG, "❌ XRAY START FAILED: MultiXrayCoreManager is null")
+                        return
+                    }
+                    val result = manager.startInstances(
                         count = instanceCount,
                         configPath = selectedConfigPath,
                         configContent = configContent,
@@ -342,7 +348,12 @@ class MultiInstanceXrayRunner(
                 }
                 
                 // Immediately broadcast initial status after instances start
-                val initialStatus = runnerContext.multiXrayCoreManager!!.instancesStatus.value
+                val manager = runnerContext.multiXrayCoreManager
+                if (manager == null) {
+                    Log.e(TAG, "❌ MultiXrayCoreManager is null, cannot get instance status")
+                    return
+                }
+                val initialStatus = manager.instancesStatus.value
                 Log.d(TAG, "Initial instance status: ${initialStatus.size} instances registered")
                 initialStatus.forEach { (index, status) ->
                     Log.d(TAG, "Instance $index status: $status")
