@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONException
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
@@ -67,6 +68,13 @@ class ConfigEditViewModel(
     private val _hasConfigChanged = MutableStateFlow(false)
     val hasConfigChanged: StateFlow<Boolean> = _hasConfigChanged.asStateFlow()
 
+    // SNI and security state for UI
+    private val _sni = MutableStateFlow<String>("")
+    val sni: StateFlow<String> = _sni.asStateFlow()
+
+    private val _streamSecurity = MutableStateFlow<String?>(null)
+    val streamSecurity: StateFlow<String?> = _streamSecurity.asStateFlow()
+
     private val fileManager: FileManager = FileManager(application, prefs)
 
     init {
@@ -77,6 +85,8 @@ class ConfigEditViewModel(
             val content = readConfigFileContent()
             withContext(Dispatchers.Main) {
                 _configTextFieldValue.value = _configTextFieldValue.value.copy(text = content)
+                // Parse SNI and security from config
+                parseConfigFields(content)
             }
         }
     }
@@ -106,6 +116,134 @@ class ConfigEditViewModel(
     fun onConfigContentChange(newValue: TextFieldValue) {
         _configTextFieldValue.value = newValue
         _hasConfigChanged.value = true
+        // Parse SNI and security from updated config
+        parseConfigFields(newValue.text)
+    }
+
+    /**
+     * Parse SNI and stream security from config JSON.
+     * Updates state flows for UI binding.
+     */
+    private fun parseConfigFields(configContent: String) {
+        try {
+            val jsonObject = JSONObject(configContent)
+            val outbounds = jsonObject.optJSONArray("outbounds") ?: jsonObject.optJSONArray("outbound")
+            
+            if (outbounds != null && outbounds.length() > 0) {
+                val outbound = outbounds.getJSONObject(0)
+                val streamSettings = outbound.optJSONObject("streamSettings")
+                
+                if (streamSettings != null) {
+                    val security = streamSettings.optString("security", "").takeIf { it.isNotEmpty() }
+                    _streamSecurity.value = security
+                    
+                    // Parse SNI from tlsSettings (for TLS) or realitySettings (for Reality)
+                    when (security) {
+                        "tls" -> {
+                            val tlsSettings = streamSettings.optJSONObject("tlsSettings")
+                            val sniValue = tlsSettings?.optString("serverName", "") ?: ""
+                            _sni.value = sniValue
+                        }
+                        "reality" -> {
+                            val realitySettings = streamSettings.optJSONObject("realitySettings")
+                            val sniValue = realitySettings?.optString("serverName", "") ?: ""
+                            _sni.value = sniValue
+                        }
+                        else -> {
+                            _sni.value = ""
+                        }
+                    }
+                } else {
+                    _streamSecurity.value = null
+                    _sni.value = ""
+                }
+            } else {
+                _streamSecurity.value = null
+                _sni.value = ""
+            }
+        } catch (e: Exception) {
+            // Invalid JSON or missing fields - reset state
+            Log.d(TAG, "Failed to parse config fields: ${e.message}")
+            _streamSecurity.value = null
+            _sni.value = ""
+        }
+    }
+
+    /**
+     * Update SNI in config JSON and update text field.
+     * Only updates if security is "tls" (not "reality").
+     */
+    fun updateSni(newSni: String) {
+        try {
+            val currentText = _configTextFieldValue.value.text
+            val jsonObject = JSONObject(currentText)
+            val outbounds = jsonObject.optJSONArray("outbounds") ?: jsonObject.optJSONArray("outbound")
+            
+            if (outbounds != null && outbounds.length() > 0) {
+                val outbound = outbounds.getJSONObject(0)
+                var streamSettings = outbound.optJSONObject("streamSettings")
+                
+                if (streamSettings != null) {
+                    val security = streamSettings.optString("security", "")
+                    
+                    // Only update SNI for TLS (not Reality)
+                    if (security == "tls") {
+                        var tlsSettings = streamSettings.optJSONObject("tlsSettings")
+                        if (tlsSettings == null) {
+                            tlsSettings = JSONObject()
+                        }
+                        
+                        // Get server address for comparison
+                        val settings = outbound.optJSONObject("settings")
+                        val vnext = settings?.optJSONArray("vnext")
+                        val serverAddress = vnext?.getJSONObject(0)?.optString("address", "") ?: ""
+                        
+                        // Update serverName, fallback to address if empty
+                        val finalSni = if (newSni.isBlank()) {
+                            serverAddress
+                        } else {
+                            newSni
+                        }
+                        tlsSettings.put("serverName", finalSni)
+                        
+                        // If SNI differs from server address, allow insecure connections
+                        // This is needed when SNI is set to target domain (e.g., www.youtube.com)
+                        // but connecting to a different server (e.g., stol.halibiram.online)
+                        if (finalSni.isNotEmpty() && serverAddress.isNotEmpty() && 
+                            finalSni != serverAddress) {
+                            tlsSettings.put("allowInsecure", true)
+                            Log.d(TAG, "SNI ($finalSni) differs from server address ($serverAddress), setting allowInsecure: true")
+                        } else if (!tlsSettings.has("allowInsecure")) {
+                            // Keep existing allowInsecure value or default to false
+                            tlsSettings.put("allowInsecure", false)
+                        }
+                        
+                        streamSettings.put("tlsSettings", tlsSettings)
+                        outbound.put("streamSettings", streamSettings)
+                        
+                        // Update JSON array
+                        if (jsonObject.has("outbounds")) {
+                            jsonObject.put("outbounds", outbounds)
+                        } else {
+                            jsonObject.put("outbound", outbounds)
+                        }
+                        
+                        // Update text field with formatted JSON
+                        val updatedContent = jsonObject.toString(2)
+                        _configTextFieldValue.value = _configTextFieldValue.value.copy(text = updatedContent)
+                        _sni.value = newSni
+                        _hasConfigChanged.value = true
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update SNI: ${e.message}", e)
+            _uiEvent.trySend(
+                ConfigEditUiEvent.ShowSnackbar(
+                    "Failed to update SNI: ${e.message}"
+                )
+            )
+        }
     }
 
     fun onFilenameChange(newFilename: String) {

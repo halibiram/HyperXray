@@ -212,10 +212,12 @@ class XrayStatsManager(
                 }
                 
                 // Calculate exponential backoff based on consecutive failures
+                // FIXED: Reduced backoff to prevent stats from stopping for too long
+                // Max backoff is now 10 seconds instead of 30 seconds
                 if (consecutiveFailures > 0) {
                     val backoffMs = minOf(
-                        MIN_RECREATE_INTERVAL_MS * (1L shl minOf(consecutiveFailures - 1, 4)),
-                        MAX_BACKOFF_MS
+                        MIN_RECREATE_INTERVAL_MS * (1L shl minOf(consecutiveFailures - 1, 2)), // Max 2^2 = 4x = 20s, but capped at 10s
+                        10000L // Cap at 10 seconds instead of 30 seconds
                     )
                     if (timeSinceClose < backoffMs) {
                         val remainingBackoff = backoffMs - timeSinceClose
@@ -290,6 +292,7 @@ class XrayStatsManager(
             return
         }
         
+        // FIXED: Reset consecutiveFailures on successful stats query (not just client creation)
         consecutiveFailures = 0
         synchronized(coreStatsClientLock) {
             if (clientState != ClientState.READY) {
@@ -320,17 +323,21 @@ class XrayStatsManager(
                 consecutiveFailures = 0
             } else {
                 consecutiveFailures++
-                if (consecutiveFailures >= 5) {
-                    Log.w(TAG, "Multiple consecutive failures ($consecutiveFailures), closing client")
+                // FIXED: Increased threshold from 5 to 10 to prevent premature client closure
+                // Also, don't close client immediately - let it retry with backoff
+                if (consecutiveFailures >= 10) {
+                    Log.w(TAG, "Multiple consecutive failures ($consecutiveFailures), closing client for retry")
                     synchronized(coreStatsClientLock) {
                         clientState = ClientState.FAILED
                     }
                     closeCoreStatsClient()
+                    consecutiveFailures = 0 // Reset to allow immediate retry after backoff
                 }
             }
             return
         }
         
+        // FIXED: Reset consecutiveFailures on successful traffic query
         consecutiveFailures = 0
         synchronized(coreStatsClientLock) {
             if (clientState != ClientState.READY) {

@@ -30,6 +30,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
@@ -74,6 +76,8 @@ fun ConfigEditScreen(
     val configTextFieldValue by viewModel.configTextFieldValue.collectAsStateWithLifecycle()
     val filenameErrorMessage by viewModel.filenameErrorMessage.collectAsStateWithLifecycle()
     val hasConfigChanged by viewModel.hasConfigChanged.collectAsStateWithLifecycle()
+    val sni by viewModel.sni.collectAsStateWithLifecycle()
+    val streamSecurity by viewModel.streamSecurity.collectAsStateWithLifecycle()
 
     val scrollState = rememberScrollState()
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
@@ -218,6 +222,43 @@ fun ConfigEditScreen(
                             filenameErrorMessage?.let { Text(it) }
                         }
                     )
+
+                    // SNI input field - only visible when security is "tls"
+                    if (streamSecurity == "tls") {
+                        OutlinedTextField(
+                            value = sni,
+                            onValueChange = { newSni ->
+                                viewModel.updateSni(newSni)
+                            },
+                            label = { 
+                                Text(
+                                    "TLS SNI (Server Name Indication)",
+                                    color = Color(0xFFB0B0B0)
+                                ) 
+                            },
+                            placeholder = { 
+                                Text(
+                                    "Leave empty to use server address",
+                                    color = Color(0xFF808080)
+                                ) 
+                            },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color(0xFFE0E0E0),
+                                unfocusedTextColor = Color(0xFFE0E0E0),
+                                focusedBorderColor = Color(0xFF4A9EFF),
+                                unfocusedBorderColor = Color(0xFF404040),
+                                focusedLabelColor = Color(0xFFB0B0B0),
+                                unfocusedLabelColor = Color(0xFF808080)
+                            ),
+                            keyboardOptions = KeyboardOptions.Default.copy(
+                                keyboardType = KeyboardType.Text
+                            )
+                        )
+                    }
 
                     TextField(
                         value = configTextFieldValue,

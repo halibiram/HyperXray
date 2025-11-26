@@ -33,7 +33,7 @@ class VlessLinkConverter: ConfigFormatConverter {
             val security = url.getQueryParameter("security") ?: "reality"
             val sni = url.getQueryParameter("sni") ?: url.getQueryParameter("peer")
             val fingerprint = url.getQueryParameter("fp") ?: "chrome"
-            val flow = url.getQueryParameter("flow") ?: "xtls-rprx-vision"
+            val flow = url.getQueryParameter("flow") // Don't set default - flow is only for XTLS, not TLS
 
             val realityPbk = url.getQueryParameter("pbk") ?: ""
             val realityShortId = url.getQueryParameter("sid") ?: ""
@@ -41,6 +41,49 @@ class VlessLinkConverter: ConfigFormatConverter {
 
             // Use default SOCKS port (10808) to avoid circular dependency with app module
             val socksPort = 10808
+
+            // Build streamSettings based on security type
+            val streamSettingsMap = mutableMapOf<String, Any>(
+                "network" to type,
+                "security" to security
+            )
+
+            when (security) {
+                "tls" -> {
+                    // TLS settings - use SNI in tlsSettings.serverName
+                    val finalSni = sni ?: address // Fallback to address if SNI is empty
+                    val tlsSettings = mutableMapOf<String, Any>(
+                        "serverName" to finalSni
+                    )
+                    
+                    // If SNI differs from server address, allow insecure connections
+                    // This is needed when SNI is set to target domain (e.g., www.youtube.com)
+                    // but connecting to a different server (e.g., stol.halibiram.online)
+                    if (finalSni != address) {
+                        tlsSettings["allowInsecure"] = true
+                    } else {
+                        tlsSettings["allowInsecure"] = false
+                    }
+                    
+                    // Add fingerprint if present (for uTLS) - include "chrome" as it's a valid fingerprint
+                    if (fingerprint.isNotEmpty()) {
+                        tlsSettings["fingerprint"] = fingerprint
+                    }
+                    streamSettingsMap["tlsSettings"] = tlsSettings
+                }
+                "reality" -> {
+                    // Reality settings - use SNI in realitySettings.serverName
+                    streamSettingsMap["realitySettings"] = mapOf(
+                        "show" to false,
+                        "fingerprint" to fingerprint,
+                        "serverName" to (sni ?: address),
+                        "publicKey" to realityPbk,
+                        "shortId" to realityShortId,
+                        "spiderX" to spiderX
+                    )
+                }
+                // For other security types (none, etc.), only network and security are set
+            }
 
             // Build config JSON
             val config = JSONObject(
@@ -63,27 +106,20 @@ class VlessLinkConverter: ConfigFormatConverter {
                                         "address" to address,
                                         "port" to port,
                                         "users" to listOf(
-                                            mapOf(
-                                                "id" to id,
-                                                "encryption" to "none",
-                                                "flow" to flow
-                                            )
+                                            mutableMapOf<String, Any>().apply {
+                                                put("id", id)
+                                                put("encryption", "none")
+                                                // Only add flow if explicitly provided and security is not TLS
+                                                // Flow is for XTLS only, not for standard TLS
+                                                if (flow != null && security != "tls") {
+                                                    put("flow", flow)
+                                                }
+                                            }
                                         )
                                     )
                                 )
                             ),
-                            "streamSettings" to mapOf(
-                                "network" to type,
-                                "security" to security,
-                                "realitySettings" to mapOf(
-                                    "show" to false,
-                                    "fingerprint" to fingerprint,
-                                    "serverName" to (sni ?: address),
-                                    "publicKey" to realityPbk,
-                                    "shortId" to realityShortId,
-                                    "spiderX" to spiderX
-                                )
-                            )
+                            "streamSettings" to streamSettingsMap
                         )
                     )
                 )

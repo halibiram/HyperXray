@@ -21,6 +21,52 @@ object ConfigUtils {
                 Log.d(TAG, "Removed log.error")
             }
         }
+        
+        // Remove flow parameter from VLESS users when security is TLS (flow is only for XTLS, not TLS)
+        val outbounds = jsonObject.optJSONArray("outbounds") ?: jsonObject.optJSONArray("outbound")
+        if (outbounds != null) {
+            for (i in 0 until outbounds.length()) {
+                val outbound = outbounds.getJSONObject(i)
+                val streamSettings = outbound.optJSONObject("streamSettings")
+                if (streamSettings != null) {
+                    val security = streamSettings.optString("security", "")
+                    if (security == "tls") {
+                        val settings = outbound.optJSONObject("settings")
+                        if (settings != null && settings.has("vnext")) {
+                            val vnext = settings.optJSONArray("vnext")
+                            if (vnext != null && vnext.length() > 0) {
+                                val server = vnext.getJSONObject(0)
+                                if (server.has("users")) {
+                                    val users = server.getJSONArray("users")
+                                    var flowRemoved = false
+                                    for (j in 0 until users.length()) {
+                                        val user = users.getJSONObject(j)
+                                        if (user.has("flow")) {
+                                            user.remove("flow")
+                                            flowRemoved = true
+                                            Log.d(TAG, "Removed flow parameter from VLESS user (flow is only for XTLS, not TLS)")
+                                        }
+                                    }
+                                    if (flowRemoved) {
+                                        server.put("users", users)
+                                        vnext.put(0, server)
+                                        settings.put("vnext", vnext)
+                                        outbound.put("settings", settings)
+                                        outbounds.put(i, outbound)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (jsonObject.has("outbounds")) {
+                jsonObject.put("outbounds", outbounds)
+            } else {
+                jsonObject.put("outbound", outbounds)
+            }
+        }
+        
         var formattedContent = jsonObject.toString(2)
         formattedContent = formattedContent.replace("\\/", "/")
         return formattedContent
@@ -187,6 +233,32 @@ object ConfigUtils {
             val dnsCache = dns?.optJSONObject("cache")
             Log.d(TAG, "  - DNS cache: ${dnsCache?.toString()}")
             AiLogHelper.d(TAG, "🔍 CONFIG INJECT: Verification - DNS cache: ${dnsCache?.toString()}")
+            
+            // Log TLS settings for debugging SNI issues
+            val outbounds = finalJson.optJSONArray("outbounds") ?: finalJson.optJSONArray("outbound")
+            if (outbounds != null && outbounds.length() > 0) {
+                val outbound = outbounds.getJSONObject(0)
+                val streamSettings = outbound.optJSONObject("streamSettings")
+                if (streamSettings != null) {
+                    val security = streamSettings.optString("security", "")
+                    Log.d(TAG, "  - Stream security: $security")
+                    AiLogHelper.d(TAG, "🔍 CONFIG INJECT: Stream security: $security")
+                    
+                    if (security == "tls") {
+                        val tlsSettings = streamSettings.optJSONObject("tlsSettings")
+                        if (tlsSettings != null) {
+                            val serverName = tlsSettings.optString("serverName", "")
+                            val fingerprint = tlsSettings.optString("fingerprint", "")
+                            Log.d(TAG, "  - TLS serverName (SNI): $serverName")
+                            Log.d(TAG, "  - TLS fingerprint: $fingerprint")
+                            AiLogHelper.d(TAG, "🔍 CONFIG INJECT: TLS serverName (SNI): $serverName, fingerprint: $fingerprint")
+                        } else {
+                            Log.w(TAG, "  - ⚠️ TLS security but no tlsSettings found!")
+                            AiLogHelper.w(TAG, "⚠️ CONFIG INJECT: TLS security but no tlsSettings found!")
+                        }
+                    }
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error verifying config", e)
             AiLogHelper.e(TAG, "❌ CONFIG INJECT: Error verifying config: ${e.message}", e)
@@ -572,6 +644,62 @@ object ConfigUtils {
                             val newHostArray = org.json.JSONArray()
                             newHostArray.put("")
                             httpSettings.put("host", newHostArray)
+                        }
+                    }
+
+                    // TLS settings auto-fix: If SNI differs from server address, set allowInsecure: true
+                    // Also remove flow parameter for TLS (flow is only for XTLS, not standard TLS)
+                    val security = streamSettings.optString("security", "")
+                    if (security == "tls") {
+                        // Remove flow from VLESS users if present (flow is only for XTLS, not TLS)
+                        val settings = outbound.optJSONObject("settings")
+                        if (settings != null && settings.has("vnext")) {
+                            val vnext = settings.optJSONArray("vnext")
+                            if (vnext != null && vnext.length() > 0) {
+                                val server = vnext.getJSONObject(0)
+                                if (server.has("users")) {
+                                    val users = server.getJSONArray("users")
+                                    for (i in 0 until users.length()) {
+                                        val user = users.getJSONObject(i)
+                                        if (user.has("flow")) {
+                                            user.remove("flow")
+                                            Log.d(TAG, "🔧 TLS Auto-fix: Removed flow parameter (flow is only for XTLS, not TLS)")
+                                            AiLogHelper.d(TAG, "🔧 CONFIG INJECT: TLS Auto-fix - Removed flow parameter")
+                                        }
+                                    }
+                                    server.put("users", users)
+                                    vnext.put(0, server)
+                                    settings.put("vnext", vnext)
+                                    outbound.put("settings", settings)
+                                }
+                            }
+                        }
+                        
+                        val tlsSettings = streamSettings.optJSONObject("tlsSettings")
+                        if (tlsSettings != null) {
+                            val serverName = tlsSettings.optString("serverName", "")
+                            if (serverName.isNotEmpty()) {
+                                // Get server address from outbound settings
+                                val serverAddress = when {
+                                    settings?.has("vnext") == true -> {
+                                        val vnext = settings.optJSONArray("vnext")
+                                        vnext?.getJSONObject(0)?.optString("address", "") ?: ""
+                                    }
+                                    settings?.has("servers") == true -> {
+                                        val servers = settings.optJSONArray("servers")
+                                        servers?.getJSONObject(0)?.optString("address", "") ?: ""
+                                    }
+                                    else -> ""
+                                }
+                                
+                                // If SNI differs from server address, allow insecure connections
+                                if (serverAddress.isNotEmpty() && serverName != serverAddress) {
+                                    tlsSettings.put("allowInsecure", true)
+                                    streamSettings.put("tlsSettings", tlsSettings)
+                                    Log.d(TAG, "🔧 TLS Auto-fix: SNI ($serverName) differs from server address ($serverAddress), set allowInsecure: true")
+                                    AiLogHelper.d(TAG, "🔧 CONFIG INJECT: TLS Auto-fix - SNI ($serverName) differs from server ($serverAddress), allowInsecure: true")
+                                }
+                            }
                         }
                     }
 

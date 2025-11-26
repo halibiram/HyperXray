@@ -418,14 +418,16 @@ class XrayProcessManager(private val context: Context) {
     /**
      * Get ProcessBuilder for single process mode (legacy).
      * 
-     * Executes libxray.so from nativeLibraryDir to avoid W^X violations on Android 10+.
-     * The native library directory is system-managed and has execution permissions.
+     * Executes libxray.so directly from nativeLibraryDir to avoid W^X violations on Android 10+.
+     * The native library directory is system-managed and has execution permissions, unlike filesDir
+     * which is mounted as noexec on modern Android devices (Samsung, Xiaomi, Android 10+).
      * 
      * Note: The xrayPath parameter is ignored. The executable path is always resolved
      * from nativeLibraryDir to ensure compatibility with Android 10+ security restrictions.
      * 
      * @param xrayPath Legacy parameter (ignored, kept for backward compatibility)
      * @return ProcessBuilder configured to execute libxray.so from nativeLibraryDir
+     * @throws IOException if native library is missing or cannot be accessed
      */
     fun getProcessBuilder(xrayPath: String): ProcessBuilder {
         val filesDir = context.filesDir
@@ -434,67 +436,96 @@ class XrayProcessManager(private val context: Context) {
         // This helps identify if callers are still passing filesDir paths
         if (xrayPath.isNotEmpty() && !xrayPath.contains("lib/")) {
             Log.d(TAG, "Note: xrayPath parameter provided ($xrayPath) but will use nativeLibraryDir instead")
+            AiLogHelper.d(TAG, "ℹ️ PROCESS BUILDER: Legacy xrayPath parameter ignored, using nativeLibraryDir")
         }
         
-        // Ensure filesDir exists (still needed for asset files like geoip.dat)
+        // Ensure filesDir exists (still needed for asset files like geoip.dat, geosite.dat)
         if (!filesDir.exists()) {
             val created = filesDir.mkdirs()
             if (!created) {
                 Log.w(TAG, "Failed to create filesDir: ${filesDir.absolutePath}")
+                AiLogHelper.w(TAG, "⚠️ PROCESS BUILDER: Failed to create filesDir: ${filesDir.absolutePath}")
             } else {
                 Log.d(TAG, "Created filesDir: ${filesDir.absolutePath}")
+                AiLogHelper.d(TAG, "✅ PROCESS BUILDER: Created filesDir: ${filesDir.absolutePath}")
             }
         }
         
         // CRITICAL: Get native library directory where Android extracts .so files
         // This directory has execution permissions and avoids W^X violations
+        // On Android 10+, filesDir is mounted as noexec, so we MUST use nativeLibraryDir
         val nativeDir = try {
             val nativeLibraryDir = context.applicationInfo.nativeLibraryDir
             if (nativeLibraryDir == null || nativeLibraryDir.isEmpty()) {
                 throw IOException("nativeLibraryDir is null or empty")
             }
+            Log.i(TAG, "✅ Native library directory: $nativeLibraryDir")
+            AiLogHelper.i(TAG, "✅ PROCESS BUILDER: Native library directory resolved: $nativeLibraryDir")
             nativeLibraryDir
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to get nativeLibraryDir: ${e.message}", e)
-            throw IOException("Failed to get native library directory: ${e.message}", e)
+            val errorMsg = "Failed to get native library directory: ${e.message}"
+            Log.e(TAG, errorMsg, e)
+            AiLogHelper.e(TAG, "❌ PROCESS BUILDER: $errorMsg", e)
+            throw IOException(errorMsg, e)
         }
         
         // Construct path to libxray.so in native library directory
         val executableFile = File(nativeDir, "libxray.so")
+        val executablePath = executableFile.absolutePath
         
         // Validate executable exists before attempting execution
         if (!executableFile.exists()) {
-            val errorMsg = "Native library not found at ${executableFile.absolutePath}. " +
-                    "Expected location: $nativeDir/libxray.so"
+            val errorMsg = "Native library not found at $executablePath. " +
+                    "Expected location: $nativeDir/libxray.so. " +
+                    "This may indicate a split APK issue or missing native library."
             Log.e(TAG, errorMsg)
             AiLogHelper.e(TAG, "❌ PROCESS BUILDER: $errorMsg")
+            
+            // Optional fallback: Try legacy filesDir copy (rare case for split APKs)
+            val legacyPath = File(filesDir, "libxray.so")
+            if (legacyPath.exists() && legacyPath.canRead()) {
+                Log.w(TAG, "⚠️ Fallback: Found libxray.so in filesDir, but execution will likely fail on Android 10+ due to noexec mount")
+                AiLogHelper.w(TAG, "⚠️ PROCESS BUILDER: Fallback to filesDir detected (may fail on Android 10+)")
+                // Note: This will likely fail on Android 10+, but we try anyway for compatibility
+                return createProcessBuilderWithPath(legacyPath.absolutePath, filesDir)
+            }
+            
             throw IOException(errorMsg)
         }
         
         // Check if file is readable
         if (!executableFile.canRead()) {
-            val errorMsg = "Native library is not readable at ${executableFile.absolutePath}"
+            val errorMsg = "Native library is not readable at $executablePath"
             Log.e(TAG, errorMsg)
             AiLogHelper.e(TAG, "❌ PROCESS BUILDER: $errorMsg")
             throw IOException(errorMsg)
         }
         
-        val executablePath = executableFile.absolutePath
+        // Log executable details for debugging
         Log.i(TAG, "✅ Executable found at: $executablePath")
         Log.d(TAG, "Executable size: ${executableFile.length()} bytes")
-        Log.d(TAG, "Executable permissions: ${executableFile.canRead()}, ${executableFile.canExecute()}")
-        AiLogHelper.d(TAG, "✅ PROCESS BUILDER: Executable validated - path: $executablePath, size: ${executableFile.length()} bytes")
+        Log.d(TAG, "Executable permissions: readable=${executableFile.canRead()}, executable=${executableFile.canExecute()}")
+        AiLogHelper.i(TAG, "✅ PROCESS BUILDER: Executable validated - path: $executablePath, size: ${executableFile.length()} bytes")
         
-        // Try direct execution first (preferred method for nativeLibraryDir on Android 10+)
+        return createProcessBuilderWithPath(executablePath, filesDir)
+    }
+    
+    /**
+     * Create ProcessBuilder with the specified executable path.
+     * 
+     * @param executablePath Path to libxray.so executable
+     * @param filesDir Application files directory (for assets and config)
+     * @return Configured ProcessBuilder
+     */
+    private fun createProcessBuilderWithPath(executablePath: String, filesDir: File): ProcessBuilder {
+        // CRITICAL: Execute libxray.so directly from nativeLibraryDir
         // Direct execution works because nativeLibraryDir has execution permissions
-        // If direct execution fails at runtime, the error will be caught by startProcessWithDefensiveMechanisms
-        // Fallback to linker can be added if needed, but direct execution should work for nativeLibraryDir
+        // We do NOT use the linker (/system/bin/linker) as it's not needed for nativeLibraryDir
         val command: MutableList<String> = mutableListOf(executablePath, "run")
-        Log.d(TAG, "Attempting direct execution: ${command.joinToString(" ")}")
-        AiLogHelper.d(TAG, "🔧 PROCESS BUILDER: Attempting direct execution from nativeLibraryDir")
         
-        Log.i(TAG, "Command: ${command.joinToString(" ")}")
+        Log.i(TAG, "🚀 Command: ${command.joinToString(" ")}")
         AiLogHelper.i(TAG, "🚀 PROCESS BUILDER: Command prepared - ${command.joinToString(" ")}")
+        AiLogHelper.d(TAG, "🔧 PROCESS BUILDER: Executing directly from nativeLibraryDir (no linker needed)")
         
         val processBuilder = ProcessBuilder(command)
         val environment = processBuilder.environment()
