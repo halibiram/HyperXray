@@ -40,3 +40,4 @@ analyze_v2ray_connection.sh
 decompile_libsocks2tun.py
 decompile_libsocks2tun_python.py
 libsocks2tun_decompiled/
+.env
