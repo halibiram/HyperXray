@@ -1,6 +1,7 @@
 package wireguard
 
 import (
+    "fmt"
     "net"
     "net/netip"
     "sync"
@@ -10,6 +11,12 @@ import (
     
     "github.com/hyperxray/native/xray"
 )
+
+// Simple logging function for packet inspector
+func logPacketInspector(format string, args ...interface{}) {
+    // Use fmt.Printf for now - can be enhanced to use Android log later
+    fmt.Printf("[PacketInspector-XrayBind] "+format+"\n", args...)
+}
 
 // XrayBind implements conn.Bind interface
 // Routes WireGuard UDP packets through Xray-core
@@ -131,15 +138,38 @@ func (b *XrayBind) processOutgoing() {
 
 func (b *XrayBind) processIncoming() {
     recvChan := b.xrayInstance.ReceiveUDP()
+    packetCount := 0
     for data := range recvChan {
         if atomic.LoadInt32(&b.closed) == 1 {
             return
+        }
+        
+        packetCount++
+        
+        // ===== PACKET INSPECTOR =====
+        // Log first 4 bytes in HEX format to identify packet type
+        // WireGuard Handshake Response: 0x02
+        // WireGuard Data packet: 0x04
+        // If we see random garbage or ASCII (like "HTTP"), routing is wrong
+        var headerHex string
+        if len(data) >= 4 {
+            headerHex = fmt.Sprintf("[0x%02x, 0x%02x, 0x%02x, 0x%02x]", data[0], data[1], data[2], data[3])
+        } else {
+            headerHex = fmt.Sprintf("[%d bytes only]", len(data))
+        }
+        
+        // Log packet inspector info for every packet (especially important for 1532 byte packets)
+        if len(data) >= 1532 || packetCount <= 10 || packetCount%50 == 0 {
+            logPacketInspector("RX Len: %d, Header: %s (packetCount: %d)", len(data), headerHex, packetCount)
+        } else {
+            // Silent for smaller packets to avoid log spam
         }
         
         select {
         case b.recvQueue <- data:
         default:
             // Queue full, drop packet
+            logPacketInspector("⚠️ Queue full, dropping %d bytes packet", len(data))
         }
     }
 }

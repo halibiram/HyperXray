@@ -698,7 +698,9 @@ class HyperVpnService : VpnService() {
                 builder.setSession("HyperXray VPN")
                 builder.addAddress("10.0.0.2", 30)
                 builder.addRoute("0.0.0.0", 0)
-                builder.setMtu(1500)
+                // Force lower MTU for WireGuard over Xray (adds overhead)
+                // 1280 is conservative and prevents fragmentation issues
+                builder.setMtu(1280)
                 
                 // Establish VPN interface with timeout protection
                 AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Calling builder.establish() with 10s timeout protection...")

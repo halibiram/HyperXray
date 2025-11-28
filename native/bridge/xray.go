@@ -601,6 +601,25 @@ func (c *XrayUDPConn) readLoop() {
 		
 		readCount++
 		
+		// ===== PACKET INSPECTOR =====
+		// Log first 4 bytes in HEX format to identify packet type
+		// WireGuard Handshake Response: 0x02
+		// WireGuard Data packet: 0x04
+		// If we see random garbage or ASCII (like "HTTP"), routing is wrong
+		var headerHex string
+		if n >= 4 {
+			headerHex = fmt.Sprintf("[0x%02x, 0x%02x, 0x%02x, 0x%02x]", buf[0], buf[1], buf[2], buf[3])
+		} else {
+			headerHex = fmt.Sprintf("[%d bytes only]", n)
+		}
+		
+		// Log packet inspector info for every packet (especially important for 1532 byte packets)
+		if n >= 1532 || readCount <= 10 || readCount%50 == 0 {
+			logInfo("[PacketInspector] RX Len: %d, Header: %s (readCount: %d)", n, headerHex, readCount)
+		} else {
+			logDebug("[PacketInspector] RX Len: %d, Header: %s", n, headerHex)
+		}
+		
 		// Copy data to channel
 		data := make([]byte, n)
 		copy(data, buf[:n])

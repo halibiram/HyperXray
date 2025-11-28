@@ -1,0 +1,1 @@
+11-28 14:56:17.277 25894 25958 D HyperXray-Bridge: [Stats] TX: 367316 bytes, RX: 878629 bytes, Handshake: 0
