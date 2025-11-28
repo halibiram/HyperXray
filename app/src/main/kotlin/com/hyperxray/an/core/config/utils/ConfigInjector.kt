@@ -170,6 +170,10 @@ object ConfigInjector {
         // This ensures UDP connections stay alive longer and are closed gracefully
         ConfigEnhancer.configureUdpTimeoutSettings(jsonObject)
         
+        // CRITICAL: Ensure UDP support in outbounds and disable Mux for WireGuard
+        // Mux causes issues with heavy UDP traffic like WireGuard handshake
+        ConfigEnhancer.ensureUdpSupportInOutbounds(jsonObject)
+        
         // NOTE: Port 53 routing rule removal disabled - causes startup issues
         // ConfigEnhancer.removePort53DnsRoutingRule(jsonObject)
         

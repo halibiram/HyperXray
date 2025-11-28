@@ -102,6 +102,18 @@ func NewXrayWrapper(configJSON string) (*XrayWrapper, error) {
 		return nil, fmt.Errorf("no outbounds in config")
 	}
 	
+	// CRITICAL: Register protected dialer BEFORE building config
+	// This ensures ALL Xray sockets are protected from VPN routing loop
+	logInfo("[Xray] Registering protected dialer for socket protection...")
+	if err := initXrayProtectedDialer(); err != nil {
+		logError("[Xray] ❌ Failed to register protected dialer: %v", err)
+		logError("[Xray] ❌ Socket protection loop will occur - sockets will be routed back to VPN!")
+		// Don't fail - try to continue, but socket protection won't work
+		logWarn("[Xray] ⚠️ Continuing without socket protection (this may cause issues)")
+	} else {
+		logInfo("[Xray] ✅ Protected dialer registered successfully")
+	}
+	
 	// Build protobuf config
 	pbConfig, err := jsonConfig.Build()
 	if err != nil {

@@ -347,6 +347,45 @@ func (t *HyperTunnel) Start() error {
 		logInfo("[Tunnel] ℹ️  Will verify connectivity after Xray-core starts")
 	}
 	
+	// ===== STEP 0: TEST PROTECTED DIALER CONNECTIVITY =====
+	logInfo("[Tunnel] ")
+	logInfo("[Tunnel] ▶▶▶ STEP 0: Testing Protected Dialer connectivity...")
+	logInfo("[Tunnel] ")
+	logInfo("[Tunnel] This test runs BEFORE Xray starts to verify:")
+	logInfo("[Tunnel]   1. Socket protection is working correctly")
+	logInfo("[Tunnel]   2. Protected Dialer can reach the internet")
+	logInfo("[Tunnel]   3. No VPN routing loop")
+	logInfo("[Tunnel] ")
+	
+	// Test Protected Dialer BEFORE starting Xray
+	// This verifies that socket protection is working correctly
+	// and can reach the internet without VPN routing loop
+	connectivityErr := TestConnectivity()
+	if connectivityErr != nil {
+		logError("[Tunnel] ")
+		logError("[Tunnel] ❌ Protected Dialer connectivity test FAILED!")
+		logError("[Tunnel]    Error: %v", connectivityErr)
+		logError("[Tunnel] ")
+		logError("[Tunnel] This indicates:")
+		logError("[Tunnel]    1. Protected Dialer may be reporting SUCCESS but blocking traffic")
+		logError("[Tunnel]    2. Socket protection is not binding to correct network interface")
+		logError("[Tunnel]    3. Firewall is blocking outbound connections")
+		logError("[Tunnel]    4. Network connectivity issue")
+		logError("[Tunnel] ")
+		logError("[Tunnel] ⚠️ Cannot proceed - Protected Dialer is not working!")
+		logError("[Tunnel] ⚠️ Xray will not be able to connect to server.")
+		logError("[Tunnel] ")
+		// Don't fail - continue anyway, but log the issue
+		logWarn("[Tunnel] ⚠️ Continuing despite Protected Dialer test failure (may cause issues)")
+	} else {
+		logInfo("[Tunnel] ")
+		logInfo("[Tunnel] ✅ Protected Dialer connectivity test PASSED!")
+		logInfo("[Tunnel]    Protected Dialer is working correctly")
+		logInfo("[Tunnel]    Socket protection is functioning properly")
+		logInfo("[Tunnel]    Ready to start Xray-core")
+		logInfo("[Tunnel] ")
+	}
+	
 	// ===== STEP 1: START XRAY WITH VERIFICATION =====
 	logInfo("[Tunnel] ")
 	logInfo("[Tunnel] ▶▶▶ STEP 1: Starting Xray-core...")

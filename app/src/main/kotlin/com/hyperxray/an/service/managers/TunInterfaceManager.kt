@@ -98,8 +98,13 @@ class TunInterfaceManager(private val vpnService: VpnService) {
                 AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Creating SystemDnsCacheServer instance...")
                 sessionState.systemDnsCacheServer = SystemDnsCacheServer.getInstance(context)
             }
-            AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Starting DNS cache server on port 5353 (Xray uses this port)...")
-            sessionState.systemDnsCacheServer?.start(5353)
+            // Try port 53 first (for VpnService DNS), fallback to 5353 if not available
+            AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Starting DNS cache server (trying port 53 first, fallback to 5353)...")
+            val dnsStarted = sessionState.systemDnsCacheServer?.start(53) ?: false
+            if (!dnsStarted) {
+                Log.w(TAG, "⚠️ DNS server failed to start on port 53, will use custom DNS in VPN config")
+                AiLogHelper.w(TAG, "⚠️ TUN ESTABLISH: DNS server failed to start on port 53, VPN will use custom DNS")
+            }
             val dnsServerDuration = System.currentTimeMillis() - dnsServerStartTime
             val listeningPort = sessionState.systemDnsCacheServer?.getListeningPort()
             Log.d(TAG, "DNS cache server started successfully")

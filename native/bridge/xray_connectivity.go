@@ -399,6 +399,218 @@ func CheckServerDirect(address string, port int) error {
 	return nil
 }
 
+// TestConnectivity tests basic TCP connectivity using Protected Dialer
+// This function should be called BEFORE Xray starts to verify the Protected Dialer
+// is working correctly and can reach the internet without VPN routing loop
+// 
+// Tests multiple targets to ensure connectivity:
+// - 1.1.1.1:80 (Cloudflare HTTP - TCP)
+// - 8.8.8.8:53 (Google DNS - TCP)
+// 
+// Interface Binding:
+// - On Android, VpnService.protect() automatically binds sockets to the active
+//   network interface (WiFi/LTE) and prevents routing through VPN TUN interface
+// - No explicit binding is needed - protect() handles this automatically
+// - On Android 11+, protect() ensures correct interface binding
+//
+// If this test fails, it indicates:
+// 1. Protected Dialer is not protecting sockets correctly (reporting SUCCESS but blocking traffic)
+// 2. Network interface binding issue (protect() may not be working correctly)
+// 3. Firewall blocking outbound connections
+// 4. Network connectivity issue (no internet access)
+//
+// If this test succeeds, Protected Dialer is working and the issue is specific to Xray server
+func TestConnectivity() error {
+	logInfo("[Connectivity] ========================================")
+	logInfo("[Connectivity] Testing Protected Dialer connectivity...")
+	logInfo("[Connectivity] This test runs BEFORE Xray starts to verify socket protection")
+	logInfo("[Connectivity] ========================================")
+
+	// Check if socket protector is set
+	protectorMutex.RLock()
+	protector := globalProtector
+	protectorMutex.RUnlock()
+
+	if protector == nil {
+		logError("[Connectivity] ❌ Socket protector is NOT SET!")
+		logError("[Connectivity] ❌ Cannot test Protected Dialer - call SetSocketProtector first!")
+		return fmt.Errorf("socket protector not set - call SetSocketProtector first")
+	}
+	logInfo("[Connectivity] ✅ Socket protector is available")
+
+	// Create Protected Dialer
+	dialer := &ProtectedDialer{Timeout: 10}
+
+	// Test targets: multiple endpoints to ensure connectivity
+	testTargets := []struct {
+		address string
+		network string
+		name    string
+	}{
+		{"1.1.1.1:80", "tcp", "Cloudflare HTTP"},
+		{"8.8.8.8:53", "tcp", "Google DNS (TCP)"},
+	}
+
+	var lastErr error
+	var successCount int
+
+	for _, target := range testTargets {
+		logInfo("[Connectivity] ")
+		logInfo("[Connectivity] Testing %s (%s)...", target.name, target.address)
+		
+		startTime := time.Now()
+		conn, err := dialer.DialTCP(target.network, target.address)
+		dialDuration := time.Since(startTime)
+
+		if err != nil {
+			logError("[Connectivity] ❌ Connection to %s FAILED after %v", target.address, dialDuration)
+			logError("[Connectivity]    Error: %v", err)
+			lastErr = err
+			continue
+		}
+
+		// Verify connection is actually usable by checking local/remote addresses
+		localAddr := conn.LocalAddr()
+		remoteAddr := conn.RemoteAddr()
+		logInfo("[Connectivity] ✅ Connection established in %v", dialDuration)
+		logInfo("[Connectivity]    Local address: %v", localAddr)
+		logInfo("[Connectivity]    Remote address: %v", remoteAddr)
+
+		// Validate addresses are not 0.0.0.0:0
+		if localAddr != nil {
+			localStr := localAddr.String()
+			if localStr == "0.0.0.0:0" || localStr == "[::]:0" {
+				logError("[Connectivity] ❌ Local address is invalid: %v", localAddr)
+				logError("[Connectivity]    This indicates connection binding issue")
+				conn.Close()
+				lastErr = fmt.Errorf("invalid local address: %v", localAddr)
+				continue
+			}
+			logInfo("[Connectivity]    ✅ Local address is valid")
+			
+			// Verify local address matches physical IP (not VPN virtual IP)
+			physicalIP, err := GetLocalPhysicalIP()
+			if err == nil {
+				localTCPAddr, ok := localAddr.(*net.TCPAddr)
+				if ok && localTCPAddr.IP != nil {
+					if localTCPAddr.IP.Equal(physicalIP) {
+						logInfo("[Connectivity]    ✅ Local IP matches physical IP: %s", physicalIP.String())
+					} else {
+						logWarn("[Connectivity]    ⚠️ Local IP (%s) differs from physical IP (%s)", 
+							localTCPAddr.IP.String(), physicalIP.String())
+						logWarn("[Connectivity]    ⚠️ This may indicate VPN virtual IP is being used")
+					}
+				}
+			}
+		} else {
+			logError("[Connectivity] ❌ Local address is nil!")
+			conn.Close()
+			lastErr = fmt.Errorf("local address is nil")
+			continue
+		}
+
+		if remoteAddr != nil {
+			remoteStr := remoteAddr.String()
+			if remoteStr == "0.0.0.0:0" || remoteStr == "[::]:0" {
+				logError("[Connectivity] ❌ Remote address is invalid: %v", remoteAddr)
+				conn.Close()
+				lastErr = fmt.Errorf("invalid remote address: %v", remoteAddr)
+				continue
+			}
+			logInfo("[Connectivity]    ✅ Remote address is valid")
+		} else {
+			logError("[Connectivity] ❌ Remote address is nil!")
+			conn.Close()
+			lastErr = fmt.Errorf("remote address is nil")
+			continue
+		}
+
+		// Try to send a simple request to verify bidirectional communication
+		logInfo("[Connectivity]    Testing bidirectional communication...")
+		conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+		// Send HTTP GET request (works for both HTTP endpoints)
+		httpRequest := fmt.Sprintf("GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", target.address)
+		_, err = conn.Write([]byte(httpRequest))
+		if err != nil {
+			logError("[Connectivity] ❌ Write failed: %v", err)
+			conn.Close()
+			lastErr = fmt.Errorf("write test failed: %w", err)
+			continue
+		}
+		logInfo("[Connectivity]    ✅ Sent request (%d bytes)", len(httpRequest))
+
+		// Try to read response (with timeout)
+		responseBuffer := make([]byte, 1024)
+		conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+		n, err := conn.Read(responseBuffer)
+		if err != nil {
+			// Read timeout is acceptable - we just want to verify connection works
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				logInfo("[Connectivity]    ⚠️ Read timeout (acceptable - connection is working)")
+			} else {
+				logError("[Connectivity] ❌ Read failed: %v", err)
+				conn.Close()
+				lastErr = fmt.Errorf("read test failed: %w", err)
+				continue
+			}
+		} else {
+			logInfo("[Connectivity]    ✅ Received %d bytes response", n)
+			if n > 0 && target.network == "tcp" {
+				responsePreview := string(responseBuffer[:min(n, 100)])
+				logInfo("[Connectivity]    Response preview: %s...", responsePreview)
+			}
+		}
+
+		conn.Close()
+		conn.SetDeadline(time.Time{}) // Clear deadline
+
+		successCount++
+		logInfo("[Connectivity] ✅ Test to %s PASSED!", target.name)
+	}
+
+	// Evaluate results
+	if successCount == 0 {
+		logError("[Connectivity] ========================================")
+		logError("[Connectivity] ❌ ALL CONNECTIVITY TESTS FAILED!")
+		logError("[Connectivity] ========================================")
+		logError("[Connectivity] ")
+		logError("[Connectivity] This indicates:")
+		logError("[Connectivity]    1. Protected Dialer may be reporting SUCCESS but blocking traffic")
+		logError("[Connectivity]    2. Socket protection is not binding to correct network interface")
+		logError("[Connectivity]    3. Firewall is blocking outbound connections")
+		logError("[Connectivity]    4. Network connectivity issue")
+		logError("[Connectivity] ")
+		if lastErr != nil {
+			return fmt.Errorf("protected dialer test failed: %w", lastErr)
+		}
+		return fmt.Errorf("all connectivity tests failed")
+	}
+
+	logInfo("[Connectivity] ========================================")
+	logInfo("[Connectivity] ✅ CONNECTIVITY TEST PASSED!")
+	logInfo("[Connectivity]    Success: %d/%d targets", successCount, len(testTargets))
+	logInfo("[Connectivity]    Protected Dialer is working correctly")
+	logInfo("[Connectivity]    Socket protection is functioning properly")
+	logInfo("[Connectivity] ========================================")
+
+	return nil
+}
+
+// TestInternetConnection is kept for backward compatibility
+// Deprecated: Use TestConnectivity() instead
+func TestInternetConnection() error {
+	return TestConnectivity()
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // analyzeConnectivityErrors analyzes connectivity check errors and provides detailed diagnosis
 func (x *XrayWrapper) analyzeConnectivityErrors(errors []string, results []*ConnectivityCheckResult) *XrayLogAnalysis {
 	logInfo("[XrayLogAnalysis] ========================================")

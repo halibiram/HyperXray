@@ -803,6 +803,149 @@ object ConfigEnhancer {
             Log.d(TAG, "All outbounds already have tags")
         }
     }
+
+    /**
+     * Ensures UDP support in VLESS/Trojan outbounds and disables Mux if present.
+     * 
+     * CRITICAL: For WireGuard over Xray-core, UDP traffic must be properly forwarded.
+     * 
+     * VLESS/Trojan outbounds support UDP by default when network is "tcp" (UDP over TCP),
+     * but Mux (multiplexing) can cause issues with heavy UDP traffic like WireGuard.
+     * 
+     * This function:
+     * - Verifies outbound streamSettings.network supports TCP (required for UDP over TCP)
+     * - Disables Mux if present (Mux causes issues with UDP traffic)
+     * - Logs outbound configuration for debugging
+     */
+    @Throws(JSONException::class)
+    fun ensureUdpSupportInOutbounds(jsonObject: JSONObject) {
+        Log.d(TAG, "Ensuring UDP support in outbounds for WireGuard...")
+        
+        val outboundArray = jsonObject.optJSONArray("outbounds") ?: jsonObject.optJSONArray("outbound")
+        if (outboundArray == null || outboundArray.length() == 0) {
+            Log.w(TAG, "⚠️ No outbounds found - cannot ensure UDP support")
+            return
+        }
+
+        var muxDisabledCount = 0
+        var udpVerifiedCount = 0
+        
+        for (i in 0 until outboundArray.length()) {
+            val outbound = outboundArray.getJSONObject(i)
+            val protocol = outbound.optString("protocol", "").lowercase()
+            
+            // Only process VLESS, VMESS, and Trojan outbounds
+            if (protocol != "vless" && protocol != "vmess" && protocol != "trojan") {
+                continue
+            }
+            
+            Log.d(TAG, "Checking outbound[$i] (protocol: $protocol) for UDP support...")
+            
+            // Check streamSettings
+            val streamSettings = outbound.optJSONObject("streamSettings")
+            if (streamSettings != null) {
+                val network = streamSettings.optString("network", "tcp").lowercase()
+                
+                // VLESS/Trojan support UDP over TCP, so "tcp" network is correct
+                // But we should log it for verification
+                if (network == "tcp" || network == "ws" || network == "grpc" || network == "http") {
+                    Log.d(TAG, "  ✅ Network '$network' supports UDP over TCP (protocol: $protocol)")
+                    udpVerifiedCount++
+                } else {
+                    Log.w(TAG, "  ⚠️ Network '$network' may not support UDP properly (protocol: $protocol)")
+                }
+                
+                // CRITICAL: Disable Mux if present - Mux causes issues with UDP traffic
+                if (streamSettings.has("muxSettings")) {
+                    val muxSettings = streamSettings.optJSONObject("muxSettings")
+                    val muxEnabled = muxSettings?.optBoolean("enabled", false) ?: false
+                    
+                    if (muxEnabled) {
+                        Log.w(TAG, "  ⚠️ Mux is ENABLED in outbound[$i] - disabling for UDP stability")
+                        Log.w(TAG, "     Mux causes issues with heavy UDP traffic like WireGuard")
+                        muxSettings.put("enabled", false)
+                        streamSettings.put("muxSettings", muxSettings)
+                        muxDisabledCount++
+                        AiLogHelper.w(TAG, "⚠️ CONFIG INJECT: Disabled Mux in outbound[$i] for UDP stability")
+                    } else {
+                        Log.d(TAG, "  ✅ Mux is already disabled")
+                    }
+                } else {
+                    Log.d(TAG, "  ✅ No Mux settings found (Mux disabled by default)")
+                }
+                
+                // Log security settings for debugging
+                val security = streamSettings.optString("security", "")
+                if (security.isNotEmpty()) {
+                    Log.d(TAG, "  Security: $security")
+                    
+                    // Log TLS/REALITY settings for debugging SNI issues
+                    if (security == "tls") {
+                        val tlsSettings = streamSettings.optJSONObject("tlsSettings")
+                        if (tlsSettings != null) {
+                            val serverName = tlsSettings.optString("serverName", "")
+                            val fingerprint = tlsSettings.optString("fingerprint", "")
+                            Log.d(TAG, "    TLS serverName (SNI): $serverName")
+                            Log.d(TAG, "    TLS fingerprint: $fingerprint")
+                        }
+                    } else if (security == "reality") {
+                        val realitySettings = streamSettings.optJSONObject("realitySettings")
+                        if (realitySettings != null) {
+                            val serverName = realitySettings.optString("serverName", "")
+                            val fingerprint = realitySettings.optString("fingerprint", "")
+                            Log.d(TAG, "    REALITY serverName: $serverName")
+                            Log.d(TAG, "    REALITY fingerprint: $fingerprint")
+                        }
+                    }
+                }
+            } else {
+                // No streamSettings - default is TCP which supports UDP over TCP
+                Log.d(TAG, "  ✅ No streamSettings (default TCP - supports UDP over TCP)")
+                udpVerifiedCount++
+            }
+            
+            // Log server address for debugging
+            val settings = outbound.optJSONObject("settings")
+            if (settings != null) {
+                if (protocol == "vless" || protocol == "vmess") {
+                    val vnext = settings.optJSONArray("vnext")
+                    if (vnext != null && vnext.length() > 0) {
+                        val server = vnext.getJSONObject(0)
+                        val address = server.optString("address", "")
+                        val port = server.optInt("port", 0)
+                        Log.d(TAG, "  Server: $address:$port")
+                    }
+                } else if (protocol == "trojan") {
+                    val servers = settings.optJSONArray("servers")
+                    if (servers != null && servers.length() > 0) {
+                        val server = servers.getJSONObject(0)
+                        val address = server.optString("address", "")
+                        val port = server.optInt("port", 0)
+                        Log.d(TAG, "  Server: $address:$port")
+                    }
+                }
+            }
+        }
+        
+        // Update outbounds array if modified
+        if (muxDisabledCount > 0) {
+            if (jsonObject.has("outbounds")) {
+                jsonObject.put("outbounds", outboundArray)
+            } else {
+                jsonObject.put("outbound", outboundArray)
+            }
+        }
+        
+        if (udpVerifiedCount > 0 || muxDisabledCount > 0) {
+            Log.i(TAG, "✅ UDP support verified in $udpVerifiedCount outbound(s)")
+            if (muxDisabledCount > 0) {
+                Log.i(TAG, "✅ Disabled Mux in $muxDisabledCount outbound(s) for UDP stability")
+                AiLogHelper.i(TAG, "✅ CONFIG INJECT: Disabled Mux in $muxDisabledCount outbound(s) for WireGuard UDP support")
+            }
+        } else {
+            Log.w(TAG, "⚠️ No VLESS/VMESS/Trojan outbounds found to verify UDP support")
+        }
+    }
 }
 
 
