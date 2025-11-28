@@ -30,8 +30,126 @@ import java.io.IOException
 import java.net.URLEncoder
 import java.util.Base64
 import java.util.zip.Deflater
+import kotlin.random.Random
 
 private const val TAG = "ConfigEditViewModel"
+
+/**
+ * Country IP ranges for location spoofing.
+ * Maps country codes to their major CIDR blocks.
+ */
+object CountryIpRanges {
+    val ranges = mapOf(
+        "TR" to listOf(
+            "176.240.0.0/12",
+            "195.175.0.0/16",
+            "88.255.0.0/16",
+            "185.180.0.0/15",
+            "212.58.0.0/16"
+        ),
+        "US" to listOf(
+            "104.16.0.0/12",
+            "172.64.0.0/13",
+            "23.200.0.0/14",
+            "104.0.0.0/8",
+            "172.0.0.0/8"
+        ),
+        "DE" to listOf(
+            "46.16.0.0/12",
+            "85.214.0.0/15",
+            "178.63.0.0/16",
+            "5.9.0.0/16",
+            "188.40.0.0/16"
+        ),
+        "NL" to listOf(
+            "188.166.0.0/16",
+            "5.255.0.0/16",
+            "178.62.0.0/16",
+            "46.21.0.0/16",
+            "94.130.0.0/15"
+        ),
+        "GB" to listOf(
+            "51.0.0.0/8",
+            "81.0.0.0/8",
+            "217.0.0.0/8",
+            "5.0.0.0/8"
+        ),
+        "FR" to listOf(
+            "51.15.0.0/16",
+            "163.172.0.0/15",
+            "51.158.0.0/15",
+            "5.196.0.0/16"
+        ),
+        "JP" to listOf(
+            "45.32.0.0/16",
+            "103.208.0.0/16",
+            "45.76.0.0/16",
+            "104.238.0.0/16"
+        ),
+        "SG" to listOf(
+            "103.208.0.0/16",
+            "45.32.0.0/16",
+            "128.199.0.0/16"
+        )
+    )
+    
+    val countryNames = mapOf(
+        "TR" to "Turkey",
+        "US" to "USA",
+        "DE" to "Germany",
+        "NL" to "Netherlands",
+        "GB" to "United Kingdom",
+        "FR" to "France",
+        "JP" to "Japan",
+        "SG" to "Singapore"
+    )
+}
+
+/**
+ * Generate a random IP address from a CIDR block.
+ * @param cidr CIDR notation (e.g., "192.168.1.0/24")
+ * @return Random IP address within the CIDR range
+ */
+fun generateRandomIpFromCidr(cidr: String): String {
+    val parts = cidr.split("/")
+    if (parts.size != 2) {
+        throw IllegalArgumentException("Invalid CIDR format: $cidr")
+    }
+    
+    val ipParts = parts[0].split(".").map { it.toInt() }
+    if (ipParts.size != 4) {
+        throw IllegalArgumentException("Invalid IP format: ${parts[0]}")
+    }
+    
+    val prefixLength = parts[1].toInt()
+    if (prefixLength < 0 || prefixLength > 32) {
+        throw IllegalArgumentException("Invalid prefix length: $prefixLength")
+    }
+    
+    // Calculate network address as 32-bit integer
+    val networkAddress = (ipParts[0] shl 24) or (ipParts[1] shl 16) or (ipParts[2] shl 8) or ipParts[3]
+    
+    // Calculate network mask
+    val mask = (0xFFFFFFFF.toULong() shl (32 - prefixLength)).toLong()
+    val network = networkAddress.toLong() and mask
+    
+    // Calculate broadcast address
+    val hostBits = 32 - prefixLength
+    val hostCount = (1L shl hostBits) - 1
+    val broadcast = network or hostCount
+    
+    // Generate random IP between network and broadcast (excluding network and broadcast)
+    val randomHost = Random.nextLong(1, hostCount)
+    val randomIp = network or randomHost
+    
+    // Convert back to IP string
+    val octet1 = ((randomIp shr 24) and 0xFF).toInt()
+    val octet2 = ((randomIp shr 16) and 0xFF).toInt()
+    val octet3 = ((randomIp shr 8) and 0xFF).toInt()
+    val octet4 = (randomIp and 0xFF).toInt()
+    
+    return "$octet1.$octet2.$octet3.$octet4"
+}
 
 /**
  * UI events for ConfigEditViewModel communication.
@@ -722,6 +840,78 @@ class ConfigEditViewModel(
      */
     fun setWarpPrivateKey(key: String) {
         wireGuardHandler.setWarpPrivateKey(key)
+    }
+
+    /**
+     * Inject a random client IP from the specified country into the DNS configuration.
+     * @param countryCode Two-letter country code (e.g., "TR", "US", "DE")
+     */
+    fun injectClientIp(countryCode: String) {
+        try {
+            val countryRanges = CountryIpRanges.ranges[countryCode]
+            if (countryRanges == null || countryRanges.isEmpty()) {
+                _uiEvent.trySend(
+                    ConfigEditUiEvent.ShowSnackbar(
+                        "Country code '$countryCode' not supported"
+                    )
+                )
+                return
+            }
+            
+            // Pick a random CIDR from the country's ranges
+            val randomCidr = countryRanges.random()
+            
+            // Generate random IP from the CIDR
+            val generatedIp = generateRandomIpFromCidr(randomCidr)
+            
+            // Parse current JSON content
+            val currentText = _configTextFieldValue.value.text
+            val jsonObject = JSONObject(currentText)
+            
+            // Get or create DNS object
+            var dnsObject = jsonObject.optJSONObject("dns")
+            if (dnsObject == null) {
+                dnsObject = JSONObject()
+                jsonObject.put("dns", dnsObject)
+            }
+            
+            // Update clientIp field
+            dnsObject.put("clientIp", generatedIp)
+            
+            // Format and update config content
+            val formattedContent = ConfigParser.formatConfigContent(jsonObject.toString())
+            _configTextFieldValue.value = _configTextFieldValue.value.copy(text = formattedContent)
+            _hasConfigChanged.value = true
+            
+            // Show success message
+            val countryName = CountryIpRanges.countryNames[countryCode] ?: countryCode
+            _uiEvent.trySend(
+                ConfigEditUiEvent.ShowSnackbar(
+                    "Added fake client IP: $generatedIp for $countryName"
+                )
+            )
+        } catch (e: JSONException) {
+            Log.e(TAG, "Invalid JSON format", e)
+            _uiEvent.trySend(
+                ConfigEditUiEvent.ShowSnackbar(
+                    "Failed to inject client IP: Invalid JSON format"
+                )
+            )
+        } catch (e: IllegalArgumentException) {
+            Log.e(TAG, "Invalid CIDR or IP format", e)
+            _uiEvent.trySend(
+                ConfigEditUiEvent.ShowSnackbar(
+                    "Failed to generate IP: ${e.message}"
+                )
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to inject client IP", e)
+            _uiEvent.trySend(
+                ConfigEditUiEvent.ShowSnackbar(
+                    "Failed to inject client IP: ${e.message}"
+                )
+            )
+        }
     }
 
     fun handleAutoIndent(text: String, newlinePosition: Int): Pair<String, Int> {
