@@ -69,3 +69,7 @@ warp-account.json
 warp-profile.conf
 __pycache__/
 *.pyc
+
+# Temporary installer files
+%TEMP%go-installer.msi
+*.msi
