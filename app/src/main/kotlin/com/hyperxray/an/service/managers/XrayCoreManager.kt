@@ -5,7 +5,6 @@ import android.os.Build
 import android.util.Log
 import com.hyperxray.an.core.config.utils.ConfigParser
 import com.hyperxray.an.prefs.Preferences
-import com.hyperxray.an.service.managers.HevSocksManager
 import com.hyperxray.an.xray.runtime.LogLineCallback
 import com.hyperxray.an.xray.runtime.MultiXrayCoreManager
 import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
@@ -39,7 +38,6 @@ import kotlin.concurrent.Volatile
 class XrayCoreManager(private val context: Context) {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val prefs = Preferences(context)
-    private val hevSocksManager = HevSocksManager(context)
     
     @Volatile
     private var xrayProcess: Process? = null
@@ -212,47 +210,14 @@ class XrayCoreManager(private val context: Context) {
             null
         }
         
-        // Start HevSocks after Xray is ready
-        if (result != null && result.isNotEmpty()) {
-            startHevSocksAfterXrayReady()
-        }
         
         return result
     }
     
-    /**
-     * Start HevSocks service after Xray is ready.
-     * This is called automatically after Xray instances start successfully.
-     * 
-     * Note: TUN FD and preferences must be set on HevSocksManager before this is called.
-     * TProxyService should call setTunFd() and setPreferences() before starting Xray.
-     */
-    private suspend fun startHevSocksAfterXrayReady() {
-        try {
-            // Wait a bit for Xray to be fully ready and SOCKS5 port to be available
-            delay(1000)
-            
-            // Get SOCKS5 port from preferences
-            val socksPort = prefs.socksPort
-            if (socksPort > 0) {
-                Log.d(TAG, "Xray is ready, starting HevSocks on port $socksPort")
-                val started = hevSocksManager.start(socksPort)
-                if (started) {
-                    Log.i(TAG, "✅ HevSocks started successfully on port $socksPort")
-                } else {
-                    Log.w(TAG, "⚠️ Failed to start HevSocks on port $socksPort (TUN FD or prefs may not be set)")
-                }
-            } else {
-                Log.w(TAG, "SOCKS5 port not configured, skipping HevSocks start")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error starting HevSocks after Xray ready: ${e.message}", e)
-        }
-    }
     
     /**
      * Start Xray process in legacy single-instance mode.
-     * This method handles ProcessBuilder creation, process startup, and validation.
+     * DEPRECATED: This method is no longer used. Xray-core is embedded in libhyperxray.so.
      * 
      * @param configFile Configuration file
      * @param configContent Configuration content
@@ -264,109 +229,8 @@ class XrayCoreManager(private val context: Context) {
         configContent: String,
         logCallback: ((String) -> Unit)?
     ): Process? {
-        val shouldProceed = mutex.withLock {
-            if (isStarting) {
-                Log.d(TAG, "startProcessLegacy() already in progress, ignoring duplicate call")
-                return null
-            }
-            
-            if (isStopping) {
-                Log.w(TAG, "startProcessLegacy() called while stopping, ignoring")
-                return null
-            }
-            
-            isStarting = true
-            true
-        }
-        
-        if (!shouldProceed) {
-            return null
-        }
-        
-        var currentProcess: Process? = null
-        
-        try {
-            val libraryDir = getNativeLibraryDir(context)
-            if (libraryDir == null) {
-                Log.e(TAG, "Failed to get native library directory")
-                return null
-            }
-            
-            // Use libxray.so directly with Android linker
-            val xrayPath = "$libraryDir/libxray.so"
-            val excludedPorts = ConfigParser.extractPortsFromJson(configContent)
-            val apiPort = findAvailablePort(excludedPorts)
-            if (apiPort == null) {
-                Log.e(TAG, "Failed to find available port for Xray API")
-                return null
-            }
-            
-            prefs.apiPort = apiPort
-            Log.d(TAG, "Found and set API port: $apiPort")
-            
-            val processBuilder = getProcessBuilder(xrayPath)
-            currentProcess = processBuilder.start()
-            xrayProcess = currentProcess
-            
-            // CRITICAL: Start reading process output IMMEDIATELY (before config write)
-            // This allows us to capture error messages even if process crashes before/during config read
-            val processOutputJob = serviceScope.launch {
-                readProcessStream(currentProcess, logCallback)
-            }
-            
-            // Small delay to allow process to potentially output startup errors
-            delay(100)
-            
-            // Validate process startup
-            if (!validateProcessStartup(currentProcess)) {
-                processOutputJob.cancel()
-                return null
-            }
-            
-            // Write config to stdin
-            Log.d(TAG, "Writing config to xray stdin from: ${configFile.canonicalPath}")
-            try {
-                currentProcess.outputStream.use { os ->
-                    os.write(configContent.toByteArray())
-                    os.flush()
-                }
-                Log.d(TAG, "Config written to Xray stdin successfully")
-            } catch (e: IOException) {
-                if (!currentProcess.isAlive) {
-                    val exitValue = try { currentProcess.exitValue() } catch (ex: IllegalThreadStateException) { -1 }
-                    Log.e(TAG, "Xray process exited while writing config, exit code: $exitValue")
-                }
-                processOutputJob.cancel()
-                throw e
-            }
-            
-            // Wait for process to process config
-            delay(3000)
-            
-            if (!currentProcess.isAlive) {
-                val exitValue = try {
-                    currentProcess.exitValue()
-                } catch (e: IllegalThreadStateException) {
-                    -1
-                }
-                val errorMessage = "Xray process exited immediately after config write (exit code: $exitValue)"
-                Log.e(TAG, errorMessage)
-                processOutputJob.cancel()
-                return null
-            }
-            
-            Log.d(TAG, "Xray process started successfully, monitoring output stream.")
-            return currentProcess
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Error starting Xray process (legacy mode): ${e.message}", e)
-            currentProcess?.destroyForcibly()
-            return null
-        } finally {
-            mutex.withLock {
-                isStarting = false
-            }
-        }
+        Log.w(TAG, "startProcessLegacy() is deprecated - Xray-core is embedded in libhyperxray.so")
+        return null
     }
     
     /**
@@ -487,46 +351,14 @@ class XrayCoreManager(private val context: Context) {
     
     /**
      * Get ProcessBuilder for libxray.so execution.
+     * DEPRECATED: This method is no longer used. Xray-core is embedded in libhyperxray.so.
      * 
-     * @param xrayPath Path to libxray.so
+     * @param xrayPath Path to libxray.so (ignored)
      * @return ProcessBuilder configured for Xray execution
      */
     fun getProcessBuilder(xrayPath: String): ProcessBuilder {
-        val filesDir = context.filesDir
-        
-        // Ensure filesDir exists
-        if (!filesDir.exists()) {
-            val created = filesDir.mkdirs()
-            if (!created) {
-                Log.w(TAG, "Failed to create filesDir: ${filesDir.absolutePath}")
-            } else {
-                Log.d(TAG, "Created filesDir: ${filesDir.absolutePath}")
-            }
-        }
-        
-        // Check if libxray.so exists
-        val libxrayFile = File(xrayPath)
-        if (!libxrayFile.exists()) {
-            throw IOException("libxray.so not found at: $xrayPath")
-        }
-        
-        // Use Android linker to execute libxray.so
-        val linkerPath = if (Build.SUPPORTED_64_BIT_ABIS.isNotEmpty()) {
-            "/system/bin/linker64"
-        } else {
-            "/system/bin/linker"
-        }
-        
-        Log.d(TAG, "Using linker: $linkerPath to execute: $xrayPath")
-        
-        val command: MutableList<String> = mutableListOf(linkerPath, xrayPath, "run")
-        
-        val processBuilder = ProcessBuilder(command)
-        val environment = processBuilder.environment()
-        environment["XRAY_LOCATION_ASSET"] = filesDir.path
-        processBuilder.directory(filesDir)
-        processBuilder.redirectErrorStream(true)
-        return processBuilder
+        Log.w(TAG, "getProcessBuilder() is deprecated - Xray-core is embedded in libhyperxray.so")
+        throw UnsupportedOperationException("libxray.so is no longer used - Xray-core is embedded in libhyperxray.so")
     }
     
     /**
@@ -874,14 +706,6 @@ class XrayCoreManager(private val context: Context) {
         return multiXrayCoreManager
     }
     
-    /**
-     * Get HevSocksManager instance.
-     * 
-     * @return HevSocksManager instance
-     */
-    fun getHevSocksManager(): HevSocksManager {
-        return hevSocksManager
-    }
     
     /**
      * Cleanup all resources.

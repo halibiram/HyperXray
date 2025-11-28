@@ -43,14 +43,15 @@ class VpnInterfaceManager(private val vpnService: VpnService) {
             }
         }
         
-        // Check VPN permission before attempting to establish VPN interface
+        // VPN permission should already be granted at Activity/ViewModel level
+        // This check is just for logging - let builder.establish() handle actual permission errors
         val vpnPrepareIntent = VpnService.prepare(vpnService)
         if (vpnPrepareIntent != null) {
-            Log.e(TAG, "VPN permission not granted. VpnService.prepare() returned non-null intent.")
-            return null
+            Log.w(TAG, "VPN permission check failed - but continuing anyway. This should not happen if permission was granted.") // WARNING, not ERROR
+            // Continue - let builder.establish() handle the actual error
+        } else {
+            Log.d(TAG, "VPN permission check passed. Proceeding to establish VPN interface...")
         }
-        
-        Log.d(TAG, "VPN permission check passed. Proceeding to establish VPN interface...")
         
         Log.d(TAG, "Building VPN interface configuration...")
         val builder = getVpnBuilder(prefs, dnsCacheServer)

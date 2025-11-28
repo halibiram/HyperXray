@@ -253,7 +253,7 @@ fun ConfigEditScreen(
                         }
                     )
 
-                    // WireGuard/WARP Section
+                    // WireGuard over Xray Section
                     WireGuardSection(
                         enableWarp = enableWarp,
                         warpPrivateKey = warpPrivateKey,

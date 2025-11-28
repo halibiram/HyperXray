@@ -174,8 +174,9 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
     override val connectionState: StateFlow<com.hyperxray.an.feature.dashboard.ConnectionState> =
         mainViewModel.connectionState
     
+    // instancesStatus is not available in MainViewModel, return empty map
     override val instancesStatus: StateFlow<Map<Int, XrayRuntimeStatus>> =
-        mainViewModel.instancesStatus
+        MutableStateFlow<Map<Int, XrayRuntimeStatus>>(emptyMap()).asStateFlow()
     
     override fun updateCoreStats() {
         mainViewModel.viewModelScope.launch {
@@ -228,6 +229,29 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
                 mainViewModel.emitUiEvent(MainViewUiEvent.ShowSnackbar("Failed to clear DNS cache"))
             }
         }
+    }
+    
+    // HyperVpnService state flows
+    // Expose StateFlows from MainViewModel directly
+    override val hyperVpnState: StateFlow<com.hyperxray.an.core.network.vpn.HyperVpnStateManager.VpnState>? =
+        mainViewModel.hyperVpnState
+    
+    override val hyperVpnStats: StateFlow<com.hyperxray.an.core.network.vpn.HyperVpnStateManager.TunnelStats>? =
+        mainViewModel.hyperVpnStats
+    
+    override val hyperVpnError: StateFlow<String?>? =
+        mainViewModel.hyperVpnError
+    
+    override fun startHyperVpn() {
+        mainViewModel.startHyperVpn()
+    }
+    
+    override fun stopHyperVpn() {
+        mainViewModel.stopHyperVpn()
+    }
+    
+    override fun clearHyperVpnError() {
+        mainViewModel.clearHyperVpnError()
     }
 }
 

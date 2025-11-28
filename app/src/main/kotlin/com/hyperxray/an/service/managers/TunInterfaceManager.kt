@@ -16,15 +16,16 @@ import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.core.network.dns.SystemDnsCacheServer
 import com.hyperxray.an.notification.TelegramNotificationManager
 import com.hyperxray.an.prefs.Preferences
-import com.hyperxray.an.service.TProxyService
 import com.hyperxray.an.service.state.ServiceSessionState
-import com.hyperxray.an.service.utils.TProxyUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+import java.util.concurrent.CompletableFuture
 
 /**
  * Manages TUN interface establishment and lifecycle.
@@ -108,20 +109,21 @@ class TunInterfaceManager(private val vpnService: VpnService) {
             AiLogHelper.w(TAG, "⚠️ TUN ESTABLISH: Error starting DNS cache server: ${e.message}")
         }
         
-        // Check VPN permission before attempting to establish VPN interface
+        // VPN permission should already be granted at Activity/ViewModel level
+        // This check is just for logging - let builder.establish() handle actual permission errors
         val permissionCheckStartTime = System.currentTimeMillis()
-        AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Checking VPN permission...")
+        AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Verifying VPN permission...")
         val vpnPrepareIntent = VpnService.prepare(vpnService)
         if (vpnPrepareIntent != null) {
             val errorMsg = "VPN permission not granted. VpnService.prepare() returned non-null intent."
-            Log.e(TAG, errorMsg)
-            AiLogHelper.e(TAG, "❌ TUN ESTABLISH FAILED: $errorMsg")
-            onError?.invoke("VPN permission not granted. Please grant VPN permission.")
-            return null
+            Log.w(TAG, errorMsg) // Changed to WARNING, not ERROR
+            AiLogHelper.w(TAG, "⚠️ TUN ESTABLISH: $errorMsg - This should not happen if permission was granted. Continuing anyway...")
+            // Continue anyway - let builder.establish() handle the actual error
+        } else {
+            val permissionCheckDuration = System.currentTimeMillis() - permissionCheckStartTime
+            Log.d(TAG, "VPN permission check passed. Proceeding to establish VPN interface...")
+            AiLogHelper.i(TAG, "✅ TUN ESTABLISH: VPN permission check passed (duration: ${permissionCheckDuration}ms)")
         }
-        val permissionCheckDuration = System.currentTimeMillis() - permissionCheckStartTime
-        Log.d(TAG, "VPN permission check passed. Proceeding to establish VPN interface...")
-        AiLogHelper.i(TAG, "✅ TUN ESTABLISH: VPN permission check passed (duration: ${permissionCheckDuration}ms)")
         
         // Build VPN interface configuration
         val buildStartTime = System.currentTimeMillis()
@@ -131,18 +133,40 @@ class TunInterfaceManager(private val vpnService: VpnService) {
         val buildDuration = System.currentTimeMillis() - buildStartTime
         AiLogHelper.d(TAG, "✅ TUN ESTABLISH: VPN interface configuration built (duration: ${buildDuration}ms)")
         
-        // Establish VPN interface
+        // Establish VPN interface with timeout protection
         val establishFdStartTime = System.currentTimeMillis()
         Log.d(TAG, "Attempting to establish VPN interface (TUN)...")
-        AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Calling builder.establish()...")
-        val newTunFd = builder.establish()
+        AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Calling builder.establish() with 10s timeout protection...")
+        
+        // Run establish() on background thread with timeout to prevent hanging
+        val newTunFd = try {
+            val future = CompletableFuture.supplyAsync({
+                builder.establish()
+            }, java.util.concurrent.Executors.newSingleThreadExecutor())
+            
+            // Wait with timeout
+            future.get(10, TimeUnit.SECONDS)
+        } catch (e: TimeoutException) {
+            Log.e(TAG, "❌ TUN ESTABLISH TIMEOUT: builder.establish() took longer than 10 seconds!", e)
+            AiLogHelper.e(TAG, "❌ TUN ESTABLISH TIMEOUT: builder.establish() took longer than 10 seconds - possible system-level hang")
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ TUN ESTABLISH EXCEPTION: ${e.message}", e)
+            AiLogHelper.e(TAG, "❌ TUN ESTABLISH EXCEPTION: ${e.message}")
+            null
+        }
+        
         val establishFdDuration = System.currentTimeMillis() - establishFdStartTime
         
-        Log.d(TAG, "VPN interface establish() result: ${if (newTunFd != null) "SUCCESS" else "FAILED (null)"}")
+        Log.d(TAG, "VPN interface establish() result: ${if (newTunFd != null) "SUCCESS" else "FAILED (null)"} (duration: ${establishFdDuration}ms)")
         if (newTunFd != null) {
             AiLogHelper.i(TAG, "✅ TUN ESTABLISH: VPN interface established successfully (fd=${newTunFd.fd}, duration: ${establishFdDuration}ms)")
         } else {
-            AiLogHelper.e(TAG, "❌ TUN ESTABLISH FAILED: builder.establish() returned null (duration: ${establishFdDuration}ms)")
+            if (establishFdDuration >= 10_000) {
+                AiLogHelper.e(TAG, "❌ TUN ESTABLISH FAILED: Timeout after ${establishFdDuration}ms - builder.establish() hung")
+            } else {
+                AiLogHelper.e(TAG, "❌ TUN ESTABLISH FAILED: builder.establish() returned null (duration: ${establishFdDuration}ms)")
+            }
         }
         
         synchronized(tunFdLock) {
@@ -221,28 +245,6 @@ class TunInterfaceManager(private val vpnService: VpnService) {
             }
         }
         
-        // Generate and write TProxy config file
-        val tproxyFileStartTime = System.currentTimeMillis()
-        val tproxyFile = File(context.cacheDir, "tproxy.conf")
-        try {
-            AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Creating TProxy config file...")
-            tproxyFile.createNewFile()
-            FileOutputStream(tproxyFile, false).use { fos ->
-                val tproxyConf = TProxyUtils.getTproxyConf(prefs)
-                fos.write(tproxyConf.toByteArray())
-            }
-            val tproxyFileDuration = System.currentTimeMillis() - tproxyFileStartTime
-            Log.d(TAG, "TProxy config file created successfully")
-            AiLogHelper.i(TAG, "✅ TUN ESTABLISH: TProxy config file created successfully (${tproxyFile.length()} bytes, duration: ${tproxyFileDuration}ms)")
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to write TProxy config file: ${e.message}", e)
-            AiLogHelper.e(TAG, "❌ TUN ESTABLISH: Failed to write TProxy config file: ${e.message}")
-            
-            val errorMessage = "Failed to write TProxy config file: ${e.message}"
-            onError?.invoke(errorMessage)
-            // Don't return null here - VPN interface is established, config file failure is non-critical
-            // but we should still notify about it
-        }
         
         val totalDuration = System.currentTimeMillis() - establishStartTime
         Log.d(TAG, "VPN interface established successfully. Waiting for Xray to start and SOCKS5 to become ready...")

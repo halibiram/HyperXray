@@ -416,146 +416,24 @@ class XrayProcessManager(private val context: Context) {
     
     /**
      * Get ProcessBuilder for single process mode (legacy).
+     * DEPRECATED: This method is no longer used. Xray-core is embedded in libhyperxray.so.
      * 
-     * Executes libxray.so directly from nativeLibraryDir to avoid W^X violations on Android 10+.
-     * The native library directory is system-managed and has execution permissions, unlike filesDir
-     * which is mounted as noexec on modern Android devices (Samsung, Xiaomi, Android 10+).
-     * 
-     * Note: The xrayPath parameter is ignored. The executable path is always resolved
-     * from nativeLibraryDir to ensure compatibility with Android 10+ security restrictions.
-     * 
-     * @param xrayPath Legacy parameter (ignored, kept for backward compatibility)
+     * @param xrayPath Legacy parameter (ignored)
      * @return ProcessBuilder configured to execute libxray.so from nativeLibraryDir
      * @throws IOException if native library is missing or cannot be accessed
      */
     fun getProcessBuilder(xrayPath: String): ProcessBuilder {
-        val filesDir = context.filesDir
-        
-        // Log if provided path differs from nativeLibraryDir (for debugging)
-        // This helps identify if callers are still passing filesDir paths
-        if (xrayPath.isNotEmpty() && !xrayPath.contains("lib/")) {
-            Log.d(TAG, "Note: xrayPath parameter provided ($xrayPath) but will use nativeLibraryDir instead")
-            AiLogHelper.d(TAG, "ℹ️ PROCESS BUILDER: Legacy xrayPath parameter ignored, using nativeLibraryDir")
-        }
-        
-        // Ensure filesDir exists (still needed for asset files like geoip.dat, geosite.dat)
-        if (!filesDir.exists()) {
-            val created = filesDir.mkdirs()
-            if (!created) {
-                Log.w(TAG, "Failed to create filesDir: ${filesDir.absolutePath}")
-                AiLogHelper.w(TAG, "⚠️ PROCESS BUILDER: Failed to create filesDir: ${filesDir.absolutePath}")
-            } else {
-                Log.d(TAG, "Created filesDir: ${filesDir.absolutePath}")
-                AiLogHelper.d(TAG, "✅ PROCESS BUILDER: Created filesDir: ${filesDir.absolutePath}")
-            }
-        }
-        
-        // CRITICAL: Get native library directory where Android extracts .so files
-        // This directory has execution permissions and avoids W^X violations
-        // On Android 10+, filesDir is mounted as noexec, so we MUST use nativeLibraryDir
-        val nativeDir = try {
-            val nativeLibraryDir = context.applicationInfo.nativeLibraryDir
-            if (nativeLibraryDir == null || nativeLibraryDir.isEmpty()) {
-                throw IOException("nativeLibraryDir is null or empty")
-            }
-            Log.i(TAG, "✅ Native library directory: $nativeLibraryDir")
-            AiLogHelper.i(TAG, "✅ PROCESS BUILDER: Native library directory resolved: $nativeLibraryDir")
-            nativeLibraryDir
-        } catch (e: Exception) {
-            val errorMsg = "Failed to get native library directory: ${e.message}"
-            Log.e(TAG, errorMsg, e)
-            AiLogHelper.e(TAG, "❌ PROCESS BUILDER: $errorMsg", e)
-            throw IOException(errorMsg, e)
-        }
-        
-        // Construct path to libxray.so in native library directory
-        val executableFile = File(nativeDir, "libxray.so")
-        val executablePath = executableFile.absolutePath
-        
-        // Validate executable exists before attempting execution
-        if (!executableFile.exists()) {
-            val errorMsg = "Native library not found at $executablePath. " +
-                    "Expected location: $nativeDir/libxray.so. " +
-                    "This may indicate a split APK issue or missing native library."
-            Log.e(TAG, errorMsg)
-            AiLogHelper.e(TAG, "❌ PROCESS BUILDER: $errorMsg")
-            
-            // Optional fallback: Try legacy filesDir copy (rare case for split APKs)
-            val legacyPath = File(filesDir, "libxray.so")
-            if (legacyPath.exists() && legacyPath.canRead()) {
-                Log.w(TAG, "⚠️ Fallback: Found libxray.so in filesDir, but execution will likely fail on Android 10+ due to noexec mount")
-                AiLogHelper.w(TAG, "⚠️ PROCESS BUILDER: Fallback to filesDir detected (may fail on Android 10+)")
-                // Note: This will likely fail on Android 10+, but we try anyway for compatibility
-                return createProcessBuilderWithPath(legacyPath.absolutePath, filesDir)
-            }
-            
-            throw IOException(errorMsg)
-        }
-        
-        // Check if file is readable
-        if (!executableFile.canRead()) {
-            val errorMsg = "Native library is not readable at $executablePath"
-            Log.e(TAG, errorMsg)
-            AiLogHelper.e(TAG, "❌ PROCESS BUILDER: $errorMsg")
-            throw IOException(errorMsg)
-        }
-        
-        // Log executable details for debugging
-        Log.i(TAG, "✅ Executable found at: $executablePath")
-        Log.d(TAG, "Executable size: ${executableFile.length()} bytes")
-        Log.d(TAG, "Executable permissions: readable=${executableFile.canRead()}, executable=${executableFile.canExecute()}")
-        AiLogHelper.i(TAG, "✅ PROCESS BUILDER: Executable validated - path: $executablePath, size: ${executableFile.length()} bytes")
-        
-        return createProcessBuilderWithPath(executablePath, filesDir)
-    }
-    
-    /**
-     * Create ProcessBuilder with the specified executable path.
-     * 
-     * @param executablePath Path to libxray.so executable
-     * @param filesDir Application files directory (for assets and config)
-     * @return Configured ProcessBuilder
-     */
-    private fun createProcessBuilderWithPath(executablePath: String, filesDir: File): ProcessBuilder {
-        // CRITICAL: Execute libxray.so directly from nativeLibraryDir
-        // Direct execution works because nativeLibraryDir has execution permissions
-        // We do NOT use the linker (/system/bin/linker) as it's not needed for nativeLibraryDir
-        val command: MutableList<String> = mutableListOf(executablePath, "run")
-        
-        Log.i(TAG, "🚀 Command: ${command.joinToString(" ")}")
-        AiLogHelper.i(TAG, "🚀 PROCESS BUILDER: Command prepared - ${command.joinToString(" ")}")
-        AiLogHelper.d(TAG, "🔧 PROCESS BUILDER: Executing directly from nativeLibraryDir (no linker needed)")
-        
-        val processBuilder = ProcessBuilder(command)
-        val environment = processBuilder.environment()
-        
-        // CRITICAL: XRAY_LOCATION_ASSET must point to filesDir where geoip.dat, geosite.dat are located
-        // The binary runs from nativeLibraryDir, but assets are in filesDir
-        environment["XRAY_LOCATION_ASSET"] = filesDir.absolutePath
-        Log.d(TAG, "XRAY_LOCATION_ASSET set to: ${filesDir.absolutePath}")
-        AiLogHelper.d(TAG, "✅ PROCESS BUILDER: XRAY_LOCATION_ASSET=${filesDir.absolutePath}")
-        
-        // Set working directory to filesDir (where config and assets are)
-        processBuilder.directory(filesDir)
-        processBuilder.redirectErrorStream(true)
-        
-        Log.d(TAG, "ProcessBuilder configured - executable: $executablePath, workingDir: ${filesDir.absolutePath}")
-        AiLogHelper.d(TAG, "✅ PROCESS BUILDER: ProcessBuilder configured successfully")
-        
-        return processBuilder
+        Log.w(TAG, "getProcessBuilder() is deprecated - Xray-core is embedded in libhyperxray.so")
+        throw UnsupportedOperationException("libxray.so is no longer used - Xray-core is embedded in libhyperxray.so")
     }
     
     /**
      * Start Xray process with defensive mechanisms to capture silent failures.
+     * DEPRECATED: This method is no longer used. Xray-core is embedded in libhyperxray.so.
      * 
-     * This method implements:
-     * - Stream gobblers for STDOUT and STDERR (separate threads)
-     * - Exit code capture
-     * - Watchdog mechanism to detect process death
-     * 
-     * @param processBuilder The ProcessBuilder configured for Xray
-     * @param configContent The JSON configuration to write to STDIN
-     * @param logCallback Optional callback for log lines
+     * @param processBuilder The ProcessBuilder configured for Xray (ignored)
+     * @param configContent The JSON configuration to write to STDIN (ignored)
+     * @param logCallback Optional callback for log lines (ignored)
      * @return ProcessResult containing the process and startup status
      */
     suspend fun startProcessWithDefensiveMechanisms(
@@ -563,6 +441,13 @@ class XrayProcessManager(private val context: Context) {
         configContent: String,
         logCallback: LogLineCallback? = null
     ): ProcessResult {
+        Log.w(TAG, "startProcessWithDefensiveMechanisms() is deprecated - Xray-core is embedded in libhyperxray.so")
+        return ProcessResult(
+            process = null,
+            isAlive = false,
+            exitCode = null,
+            errorMessage = "Xray-core is embedded in libhyperxray.so, not started as separate process"
+        )
         val startTime = System.currentTimeMillis()
         AiLogHelper.i(TAG, "🚀 PROCESS START: Starting Xray process with defensive mechanisms")
         

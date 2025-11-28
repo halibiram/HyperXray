@@ -6,8 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.util.Log
-import com.hyperxray.an.service.TProxyService
-import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
+import com.hyperxray.an.vpn.HyperVpnService
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
@@ -20,7 +19,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlin.concurrent.Volatile
 
 /**
- * Sealed class representing service events from TProxyService.
+ * Sealed class representing service events from HyperVpnService.
  */
 sealed class ServiceEvent {
     /**
@@ -38,28 +37,16 @@ sealed class ServiceEvent {
      * @param errorMessage The error message from the service
      */
     data class Error(val errorMessage: String) : ServiceEvent()
-
+    
     /**
-     * SOCKS5 proxy readiness status update.
-     * @param isReady Whether SOCKS5 is ready
+     * Log update received from service.
+     * @param logData The log data from the service
      */
-    data class Socks5Ready(val isReady: Boolean) : ServiceEvent()
-
-    /**
-     * Xray instance status update.
-     * @param instanceCount Total number of instances
-     * @param hasRunning Whether any instance is running
-     * @param instancesStatus Map of instance index to status
-     */
-    data class InstanceStatusUpdate(
-        val instanceCount: Int,
-        val hasRunning: Boolean,
-        val instancesStatus: Map<Int, XrayRuntimeStatus>
-    ) : ServiceEvent()
+    data class LogUpdate(val logData: String) : ServiceEvent()
 }
 
 /**
- * Observes TProxyService events via BroadcastReceivers and exposes them as a Flow.
+ * Observes HyperVpnService events via BroadcastReceivers and exposes them as a Flow.
  * 
  * This class handles all BroadcastReceiver registration/unregistration logic and converts
  * broadcast intents into typed ServiceEvent objects.
@@ -80,6 +67,9 @@ sealed class ServiceEvent {
  * 
  * The observer must be started before events will be emitted, and should be stopped
  * when no longer needed to prevent memory leaks.
+ * 
+ * Note: SOCKS5 and multi-instance Xray events have been removed as they are not
+ * applicable to the native Go-based HyperVpnService architecture.
  */
 class ServiceEventObserver {
     private val TAG = "ServiceEventObserver"
@@ -106,94 +96,18 @@ class ServiceEventObserver {
 
     private val errorReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            val errorMessage = intent.getStringExtra(TProxyService.EXTRA_ERROR_MESSAGE)
+            val errorMessage = intent.getStringExtra(HyperVpnService.EXTRA_ERROR_MESSAGE)
                 ?: "An error occurred while starting the VPN service."
             Log.e(TAG, "Service error event received: $errorMessage")
             _eventChannel.trySend(ServiceEvent.Error(errorMessage))
         }
     }
-
-    private val socks5ReadyReceiver = object : BroadcastReceiver() {
+    
+    private val logUpdateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            val isReady = intent.getBooleanExtra("is_ready", false)
-            Log.d(TAG, "SOCKS5 readiness event received: $isReady")
-            _eventChannel.trySend(ServiceEvent.Socks5Ready(isReady))
-        }
-    }
-
-    private val instanceStatusReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            val instanceCount = intent.getIntExtra("instance_count", 0)
-            val hasRunning = intent.getBooleanExtra("has_running", false)
-            Log.d(TAG, "Instance status event received: count=$instanceCount, hasRunning=$hasRunning")
-
-            // Build status map from intent extras with proper status type parsing
-            val statusMap = mutableMapOf<Int, XrayRuntimeStatus>()
-
-            // Parse all instance statuses from intent extras
-            // Try to get status by index first (new format with status_type)
-            // If not found, try legacy format (just PID/port)
-            for (i in 0 until instanceCount) {
-                val statusType = intent.getStringExtra("instance_${i}_status_type")
-
-                val status = when (statusType) {
-                    "Running" -> {
-                        val pid = intent.getLongExtra("instance_${i}_pid", -1L)
-                        val port = intent.getIntExtra("instance_${i}_port", -1)
-                        if (pid > 0 && port > 0) {
-                            XrayRuntimeStatus.Running(pid, port)
-                        } else {
-                            // Invalid Running status, fallback to Stopped
-                            Log.w(TAG, "Instance $i: Running status but invalid PID/port (pid=$pid, port=$port), using Stopped")
-                            XrayRuntimeStatus.Stopped
-                        }
-                    }
-                    "Starting" -> {
-                        XrayRuntimeStatus.Starting
-                    }
-                    "Stopping" -> {
-                        XrayRuntimeStatus.Stopping
-                    }
-                    "Error" -> {
-                        val errorMessage = intent.getStringExtra("instance_${i}_error_message") ?: "Unknown error"
-                        XrayRuntimeStatus.Error(errorMessage)
-                    }
-                    "ProcessExited" -> {
-                        val exitCode = intent.getIntExtra("instance_${i}_exit_code", -1)
-                        val exitMessage = intent.getStringExtra("instance_${i}_exit_message")
-                        XrayRuntimeStatus.ProcessExited(exitCode, exitMessage)
-                    }
-                    "Stopped" -> {
-                        XrayRuntimeStatus.Stopped
-                    }
-                    null, "" -> {
-                        // Legacy format: check PID and port
-                        val pid = intent.getLongExtra("instance_${i}_pid", -1L)
-                        val port = intent.getIntExtra("instance_${i}_port", -1)
-                        if (pid > 0 && port > 0) {
-                            Log.d(TAG, "Instance $i: Legacy format detected, using Running status")
-                            XrayRuntimeStatus.Running(pid, port)
-                        } else {
-                            XrayRuntimeStatus.Stopped
-                        }
-                    }
-                    else -> {
-                        Log.w(TAG, "Instance $i: Unknown status type '$statusType', using Stopped")
-                        XrayRuntimeStatus.Stopped
-                    }
-                }
-
-                statusMap[i] = status
-                Log.d(TAG, "Instance $i status parsed: $status")
-            }
-
-            _eventChannel.trySend(
-                ServiceEvent.InstanceStatusUpdate(
-                    instanceCount = instanceCount,
-                    hasRunning = hasRunning,
-                    instancesStatus = statusMap
-                )
-            )
+            val logData = intent.getStringExtra(HyperVpnService.EXTRA_LOG_DATA) ?: ""
+            Log.d(TAG, "Log update event received")
+            _eventChannel.trySend(ServiceEvent.LogUpdate(logData))
         }
     }
 
@@ -242,7 +156,7 @@ class ServiceEventObserver {
             }
 
             try {
-                val startSuccessFilter = IntentFilter(TProxyService.ACTION_START)
+                val startSuccessFilter = IntentFilter(HyperVpnService.ACTION_START)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     context.registerReceiver(
                         startReceiver,
@@ -254,7 +168,7 @@ class ServiceEventObserver {
                     context.registerReceiver(startReceiver, startSuccessFilter)
                 }
 
-                val stopSuccessFilter = IntentFilter(TProxyService.ACTION_STOP)
+                val stopSuccessFilter = IntentFilter(HyperVpnService.ACTION_STOP)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     context.registerReceiver(
                         stopReceiver,
@@ -266,7 +180,7 @@ class ServiceEventObserver {
                     context.registerReceiver(stopReceiver, stopSuccessFilter)
                 }
 
-                val errorFilter = IntentFilter(TProxyService.ACTION_ERROR)
+                val errorFilter = IntentFilter(HyperVpnService.ACTION_ERROR)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     context.registerReceiver(
                         errorReceiver,
@@ -277,33 +191,21 @@ class ServiceEventObserver {
                     @Suppress("UnspecifiedRegisterReceiverFlag")
                     context.registerReceiver(errorReceiver, errorFilter)
                 }
-
-                val socks5ReadyFilter = IntentFilter(TProxyService.ACTION_SOCKS5_READY)
+                
+                val logUpdateFilter = IntentFilter(HyperVpnService.ACTION_LOG_UPDATE)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     context.registerReceiver(
-                        socks5ReadyReceiver,
-                        socks5ReadyFilter,
+                        logUpdateReceiver,
+                        logUpdateFilter,
                         Context.RECEIVER_NOT_EXPORTED
                     )
                 } else {
                     @Suppress("UnspecifiedRegisterReceiverFlag")
-                    context.registerReceiver(socks5ReadyReceiver, socks5ReadyFilter)
-                }
-
-                val instanceStatusFilter = IntentFilter(TProxyService.ACTION_INSTANCE_STATUS_UPDATE)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    context.registerReceiver(
-                        instanceStatusReceiver,
-                        instanceStatusFilter,
-                        Context.RECEIVER_NOT_EXPORTED
-                    )
-                } else {
-                    @Suppress("UnspecifiedRegisterReceiverFlag")
-                    context.registerReceiver(instanceStatusReceiver, instanceStatusFilter)
+                    context.registerReceiver(logUpdateReceiver, logUpdateFilter)
                 }
 
                 receiversRegistered = true
-                Log.d(TAG, "TProxyService receivers registered.")
+                Log.d(TAG, "HyperVpnService receivers registered.")
             } catch (e: Exception) {
                 Log.e(TAG, "Error registering receivers: ${e.message}", e)
                 // Don't set receiversRegistered = true on error
@@ -353,21 +255,15 @@ class ServiceEventObserver {
                 } catch (e: IllegalArgumentException) {
                     Log.w(TAG, "errorReceiver not registered: ${e.message}")
                 }
-
+                
                 try {
-                    context.unregisterReceiver(socks5ReadyReceiver)
+                    context.unregisterReceiver(logUpdateReceiver)
                 } catch (e: IllegalArgumentException) {
-                    Log.w(TAG, "socks5ReadyReceiver not registered: ${e.message}")
-                }
-
-                try {
-                    context.unregisterReceiver(instanceStatusReceiver)
-                } catch (e: IllegalArgumentException) {
-                    Log.w(TAG, "instanceStatusReceiver not registered: ${e.message}")
+                    Log.w(TAG, "logUpdateReceiver not registered: ${e.message}")
                 }
 
                 receiversRegistered = false
-                Log.d(TAG, "TProxyService receivers unregistered.")
+                Log.d(TAG, "HyperVpnService receivers unregistered.")
             } catch (e: Exception) {
                 Log.e(TAG, "Error unregistering receivers: ${e.message}", e)
                 // Set receiversRegistered = false even on error to allow retry
@@ -376,4 +272,3 @@ class ServiceEventObserver {
         }
     }
 }
-

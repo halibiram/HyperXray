@@ -1,0 +1,300 @@
+11-27 23:22:55.722 W/MiuiPerfServiceClient(11071): interceptAndQueuing:21363|com.hyperxray.an|74|39|47786059178852|Slow handle animation|2
+11-27 23:22:56.076 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:22:56.076 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:22:56.077 D/HyperXray-Bridge( 7518): [XrayUDP] Sent 148 bytes
+11-27 23:22:56.077 D/HyperXray-Bridge( 7518): [XrayBind] → Sent 148 bytes
+11-27 23:22:56.283 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:22:56.284 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:22:56.284 D/XrayStatsManager(21363): Exponential backoff active, 3994ms remaining (failures: 3)
+11-27 23:22:56.284 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:22:58.283 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:22:58.284 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:22:58.284 D/XrayStatsManager(21363): Exponential backoff active, 1994ms remaining (failures: 3)
+11-27 23:22:58.284 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:00.101 D/HyperXray-Bridge( 7518): [Stats] TX: 2072 bytes, RX: 0 bytes, Handshake: 0
+11-27 23:23:00.232 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:00.234 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:00.235 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:00.236 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:00.237 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:00.237 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:00.238 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:00.238 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:00.285 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:00.285 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:00.287 D/XrayStatsManager(21363): Created new CoreStatsClient
+11-27 23:23:00.290 W/CoreStatsClient(21363): GetSysStats RPC unavailable - Xray-core may not be ready
+11-27 23:23:00.291 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:01.084 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:01.085 D/HyperXray-Bridge( 7518): [XrayUDP] Sent 148 bytes
+11-27 23:23:01.085 D/HyperXray-Bridge( 7518): [XrayBind] → Sent 148 bytes
+11-27 23:23:02.291 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:02.292 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:02.294 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:04.295 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:04.296 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:04.298 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:04.298 W/XrayStatsManager(21363): Multiple consecutive failures (3), closing client
+11-27 23:23:05.241 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:05.245 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:05.246 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:05.247 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:05.248 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:05.249 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:05.249 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:05.250 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:06.246 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:23:06.246 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:06.247 D/HyperXray-Bridge( 7518): [XrayUDP] Sent 148 bytes
+11-27 23:23:06.247 D/HyperXray-Bridge( 7518): [XrayBind] → Sent 148 bytes
+11-27 23:23:06.301 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:06.303 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:06.303 D/XrayStatsManager(21363): Client recreation cooldown active, 2995ms remaining
+11-27 23:23:06.303 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:08.303 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:08.304 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:08.305 D/XrayStatsManager(21363): Client recreation cooldown active, 993ms remaining
+11-27 23:23:08.305 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:10.102 D/HyperXray-Bridge( 7518): [Stats] TX: 2368 bytes, RX: 0 bytes, Handshake: 0
+11-27 23:23:10.253 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:10.257 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:10.259 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:10.259 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:10.260 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:10.261 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:10.261 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:10.262 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:10.333 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:10.333 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:10.333 D/XrayStatsManager(21363): Exponential backoff active, 3965ms remaining (failures: 3)
+11-27 23:23:10.333 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:11.268 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:11.273 D/HyperXray-Bridge( 7518): [XrayUDP] Sent 148 bytes
+11-27 23:23:11.273 D/HyperXray-Bridge( 7518): [XrayBind] → Sent 148 bytes
+11-27 23:23:12.110 E/HyperXray-Bridge( 7518): [XrayUDP] Read error: io: read/write on closed pipe
+11-27 23:23:12.334 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:12.335 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:12.335 D/XrayStatsManager(21363): Exponential backoff active, 1963ms remaining (failures: 3)
+11-27 23:23:12.335 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:14.336 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:14.337 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:14.340 D/XrayStatsManager(21363): Created new CoreStatsClient
+11-27 23:23:14.349 W/CoreStatsClient(21363): GetSysStats RPC unavailable - Xray-core may not be ready
+11-27 23:23:14.350 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:15.264 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:15.268 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:15.268 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:15.268 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:15.269 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:15.269 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:15.269 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:15.270 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:16.349 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:16.350 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:16.352 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:16.380 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:16.381 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:16.381 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:16.381 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:18.353 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:18.354 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:18.356 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:18.356 W/XrayStatsManager(21363): Multiple consecutive failures (3), closing client
+11-27 23:23:18.901 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:18.902 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:18.903 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:20.101 D/HyperXray-Bridge( 7518): [Stats] TX: 2516 bytes, RX: 0 bytes, Handshake: 0
+11-27 23:23:20.280 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:20.283 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:20.283 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:20.284 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:20.285 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:20.316 D/PerfShielderService( 3688): com.hyperxray.an|com.hyperxray.an/com.hyperxray.an.activity.MainActivity|76|47810257637280|27|5|4
+11-27 23:23:20.316 W/MiuiPerfServiceClient(11071): interceptAndQueuing:21363|com.hyperxray.an|76|27|47810257637280|Slow issue draw commands|4
+11-27 23:23:20.359 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:20.360 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:20.360 D/XrayStatsManager(21363): Client recreation cooldown active, 2996ms remaining
+11-27 23:23:20.360 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:20.741 W/RenderInspector(21363): DequeueBuffer time out on com.hyperxray.an/com.hyperxray.an.activity.MainActivity, count=5, avg=14 ms, max=18 ms.
+11-27 23:23:20.773 D/HyperXray-Bridge( 7518): [WireGuard] Failed to receive makeReceiveFunc packet: read timeout
+11-27 23:23:21.682 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:23:21.682 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:21.684 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:21.684 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:21.684 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:22.361 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:22.362 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:22.362 D/XrayStatsManager(21363): Client recreation cooldown active, 994ms remaining
+11-27 23:23:22.362 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:24.363 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:24.364 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:24.364 D/XrayStatsManager(21363): Exponential backoff active, 3992ms remaining (failures: 3)
+11-27 23:23:24.364 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:25.288 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:25.292 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:25.293 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:25.293 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:25.294 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:25.295 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:25.296 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:25.298 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:26.364 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:26.365 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:26.365 D/XrayStatsManager(21363): Exponential backoff active, 1991ms remaining (failures: 3)
+11-27 23:23:26.365 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:26.920 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:23:26.920 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:26.922 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:26.922 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:26.922 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:28.365 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:28.366 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:28.369 D/XrayStatsManager(21363): Created new CoreStatsClient
+11-27 23:23:28.376 W/CoreStatsClient(21363): GetSysStats RPC unavailable - Xray-core may not be ready
+11-27 23:23:28.377 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:30.056 D/powerkeeper.dfsmutstart(12969): it is board temp report time, so just update top use apk, foreground is com.hyperxray.an duration is 48.0
+11-27 23:23:30.056 D/powerkeeper.dfsmutstart(12969): Key: com.hyperxray.an, Value: 563.0;Key: com.miui.home, Value: 16.0;Key: com.android.chrome, Value: 13.0
+11-27 23:23:30.057 D/MiSightJni(12969): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"time":"23:23:30","broadTemp":37180,"packageName":"com.hyperxray.an","scenarioName":"normal","packageNames":"Key: com.hyperxray.an, Value: 563.0;Key: com.miui.home, Value: 16.0;Key: com.android.chrome, Value: 13.0"}'
+11-27 23:23:30.057 D/MiEvent (12969): flatten EventId 905001001 -t 1764275010 -paraList {"broadTemp":37180,"packageName":"com.hyperxray.an","packageNames":"Key: com.hyperxray.an, Value: 563.0;Key: com.miui.home, Value: 16.0;Key: com.android.chrome, Value: 13.0","scenarioName":"normal","time":"23:23:30"}
+11-27 23:23:30.057 D/MiEvent (12969): report:EventId 905001001 -t 1764275010 -paraList {"broadTemp":37180,"packageName":"com.hyperxray.an","packageNames":"Key: com.hyperxray.an, Value: 563.0;Key: com.miui.home, Value: 16.0;Key: com.android.chrome, Value: 13.0","scenarioName":"normal","time":"23:23:30"} success
+11-27 23:23:30.102 D/HyperXray-Bridge( 7518): [Stats] TX: 2516 bytes, RX: 0 bytes, Handshake: 0
+11-27 23:23:30.299 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:30.303 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:30.304 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:30.304 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:30.306 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:30.307 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:30.308 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:30.309 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:30.385 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:30.386 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:30.388 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:31.988 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:23:31.988 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:31.989 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:31.989 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:31.989 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:32.389 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:32.389 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:32.390 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:32.390 W/XrayStatsManager(21363): Multiple consecutive failures (3), closing client
+11-27 23:23:34.391 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:34.392 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:34.392 D/XrayStatsManager(21363): Client recreation cooldown active, 2998ms remaining
+11-27 23:23:34.392 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:35.310 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:35.315 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:35.316 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:35.316 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:35.319 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:35.320 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:35.320 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:35.321 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:36.393 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:36.394 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:36.394 D/XrayStatsManager(21363): Client recreation cooldown active, 996ms remaining
+11-27 23:23:36.394 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:37.120 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:23:37.120 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:37.122 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:37.122 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:37.122 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:38.395 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:38.396 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:38.396 D/XrayStatsManager(21363): Exponential backoff active, 3994ms remaining (failures: 3)
+11-27 23:23:38.396 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:40.101 D/HyperXray-Bridge( 7518): [Stats] TX: 2516 bytes, RX: 0 bytes, Handshake: 0
+11-27 23:23:40.322 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:40.327 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:40.328 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:40.328 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:40.330 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:40.331 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:40.331 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:40.331 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:40.400 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:40.400 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:40.400 D/XrayStatsManager(21363): Exponential backoff active, 1990ms remaining (failures: 3)
+11-27 23:23:40.400 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:42.125 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:23:42.125 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:42.126 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:42.126 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:42.126 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:42.401 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:42.402 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:42.406 D/XrayStatsManager(21363): Created new CoreStatsClient
+11-27 23:23:42.414 W/CoreStatsClient(21363): GetSysStats RPC unavailable - Xray-core may not be ready
+11-27 23:23:42.415 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:44.416 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:44.417 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:44.419 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:45.334 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:45.338 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:45.339 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:45.339 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:45.340 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:45.341 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:45.341 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:45.342 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:46.420 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:46.421 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:46.423 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:46.423 W/XrayStatsManager(21363): Multiple consecutive failures (3), closing client
+11-27 23:23:47.163 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:47.165 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:47.165 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:47.165 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:48.425 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:48.426 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:48.426 D/XrayStatsManager(21363): Client recreation cooldown active, 2997ms remaining
+11-27 23:23:48.426 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:48.902 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:48.903 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:48.903 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:50.102 D/HyperXray-Bridge( 7518): [Stats] TX: 2516 bytes, RX: 0 bytes, Handshake: 0
+11-27 23:23:50.345 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:50.349 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:50.350 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:50.350 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:50.351 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:50.353 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:50.355 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:50.358 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:50.419 W/RenderInspector(21363): DequeueBuffer time out on com.hyperxray.an/com.hyperxray.an.activity.MainActivity, count=3, avg=14 ms, max=15 ms.
+11-27 23:23:50.427 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:50.427 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:50.427 D/XrayStatsManager(21363): Client recreation cooldown active, 996ms remaining
+11-27 23:23:50.427 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:51.108 D/HyperXray-Bridge( 7518): [WireGuard] Failed to receive makeReceiveFunc packet: read timeout
+11-27 23:23:52.284 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:23:52.284 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:52.286 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:52.286 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:52.286 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:52.428 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:52.428 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:52.428 D/XrayStatsManager(21363): Exponential backoff active, 3995ms remaining (failures: 3)
+11-27 23:23:52.428 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:54.430 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:54.430 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:54.430 D/XrayStatsManager(21363): Exponential backoff active, 1993ms remaining (failures: 3)
+11-27 23:23:54.430 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:55.357 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:55.361 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:55.362 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:55.362 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:55.364 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:55.364 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:55.366 D/BroadcastQueue( 3688): Logging broadcast for com.hyperxray.an, stopped=false, firstLaunch=false
+11-27 23:23:55.367 W/Bundle  (21363): 	at com.hyperxray.an.core.service.ServiceEventObserver$logUpdateReceiver$1.onReceive(ServiceEventObserver.kt:108)
+11-27 23:23:56.431 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:56.432 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:56.434 D/XrayStatsManager(21363): Created new CoreStatsClient
+11-27 23:23:56.444 W/CoreStatsClient(21363): GetSysStats RPC unavailable - Xray-core may not be ready
+11-27 23:23:56.445 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:57.377 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:23:57.377 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:57.378 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:57.378 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:57.378 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe

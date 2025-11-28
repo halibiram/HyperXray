@@ -484,160 +484,10 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
         try {
             Log.d(TAG, "Starting Xray-core process")
             
-            val xrayPath = "$libraryDir/libxray.so"
-            val processBuilder = createProcessBuilder(xrayPath)
-            currentProcess = processBuilder.start()
-            xrayProcess = currentProcess
-            
-            // Validate process startup
-            var checksPerformed = 0
-            val checkInterval = 50L
-            val minStartupChecks = 2
-            val maxStartupChecks = 100
-            
-            while (checksPerformed < maxStartupChecks) {
-                delay(checkInterval)
-                checksPerformed++
-                
-                if (!currentProcess.isAlive) {
-                    val exitValue = try {
-                        currentProcess.exitValue()
-                    } catch (e: IllegalThreadStateException) {
-                        -1
-                    }
-                    val errorMessage = "Xray process exited during startup (exit code: $exitValue)"
-                    Log.e(TAG, errorMessage)
-                    _status.value = XrayRuntimeStatus.ProcessExited(exitValue, errorMessage)
-                    isStarting = false
-                    return
-                }
-                
-                if (checksPerformed >= minStartupChecks) {
-                    Log.d(TAG, "Process startup validated after ${checksPerformed * checkInterval}ms")
-                    break
-                }
-            }
-            
-            // CRITICAL: Start reading process output IMMEDIATELY (before config write)
-            // This allows us to capture error messages even if process crashes immediately after config write
-            val capturedOutput = mutableListOf<String>()
-            val processOutputJob = serviceScope.launch {
-                readProcessStreamWithCapture(currentProcess, capturedOutput)
-            }
-            
-            // Small delay to allow process to potentially output startup errors
-            delay(100)
-            
-            // Write config to stdin
-            Log.d(TAG, "Writing config to Xray stdin")
-            try {
-                currentProcess.outputStream.use { os ->
-                    os.write(configContent.toByteArray())
-                    os.flush()
-                }
-                Log.d(TAG, "Config written to Xray stdin successfully")
-            } catch (e: IOException) {
-                if (!currentProcess.isAlive) {
-                    val exitValue = try { currentProcess.exitValue() } catch (ex: IllegalThreadStateException) { -1 }
-                    Log.e(TAG, "Xray process exited while writing config, exit code: $exitValue")
-                    
-                    // Wait a moment for output capture to collect error messages
-                    delay(200)
-                    processOutputJob.cancel()
-                    
-                    val errorOutput = capturedOutput.joinToString("\n")
-                    val errorMessage = if (errorOutput.isNotEmpty()) {
-                        "Xray process exited during config write (exit code: $exitValue)\n\n" +
-                        "Xray error output:\n$errorOutput"
-                    } else {
-                        "Xray process exited during config write (exit code: $exitValue)\n\n" +
-                        "No error output captured. Possible causes:\n" +
-                        "1. Invalid JSON config format\n" +
-                        "2. Missing required config fields\n" +
-                        "3. Invalid inbound/outbound configuration"
-                    }
-                    
-                    Log.e(TAG, errorMessage)
-                    _status.value = XrayRuntimeStatus.ProcessExited(exitValue, errorMessage)
-                    isStarting = false
-                } else {
-                    processOutputJob.cancel()
-                }
-                throw e
-            }
-            
-            // CRITICAL: Check if process is still alive after config write
-            // Xray may exit immediately if config is invalid
-            // Use periodic checks instead of single delay to catch early exits faster
-            var postConfigChecks = 0
-            val maxPostConfigChecks = 20 // 20 * 100ms = 2 seconds total
-            val postConfigCheckInterval = 100L
-            
-            while (postConfigChecks < maxPostConfigChecks) {
-                delay(postConfigCheckInterval)
-                postConfigChecks++
-                
-                if (!currentProcess.isAlive) {
-                    val exitValue = try {
-                        currentProcess.exitValue()
-                    } catch (e: IllegalThreadStateException) {
-                        -1
-                    }
-                    
-                    // Wait a moment for output capture to collect error messages
-                    delay(300)
-                    processOutputJob.cancel()
-                    
-                    val errorOutput = capturedOutput.joinToString("\n")
-                    val errorMessage = if (errorOutput.isNotEmpty()) {
-                        "Xray process exited immediately after config write (exit code: $exitValue, after ${postConfigChecks * postConfigCheckInterval}ms)\n\n" +
-                        "Xray error output:\n$errorOutput"
-                    } else {
-                        "Xray process exited immediately after config write (exit code: $exitValue, after ${postConfigChecks * postConfigCheckInterval}ms)\n\n" +
-                        "No error output captured. Possible causes:\n" +
-                        "1. Invalid JSON config format\n" +
-                        "2. Missing required config fields\n" +
-                        "3. Invalid inbound/outbound configuration\n" +
-                        "4. File permissions issue\n" +
-                        "5. Missing geoip/geosite files\n" +
-                        "6. Port conflict or binding error"
-                    }
-                    
-                    Log.e(TAG, errorMessage)
-                    _status.value = XrayRuntimeStatus.ProcessExited(exitValue, errorMessage)
-                    isStarting = false
-                    return@runXrayProcess
-                }
-                
-                // If process is still alive after reasonable time, assume it's starting successfully
-                if (postConfigChecks >= 5) { // After 500ms, if still alive, likely OK
-                    Log.d(TAG, "Process still alive after ${postConfigChecks * postConfigCheckInterval}ms, assuming successful startup")
-                    break
-                }
-            }
-            
-            // Update status to Running
-            val processId = try {
-                // Get process ID using reflection (Android doesn't expose this directly)
-                val pidField = currentProcess.javaClass.getDeclaredField("pid")
-                pidField.isAccessible = true
-                pidField.getLong(currentProcess)
-            } catch (e: Exception) {
-                Log.w(TAG, "Could not get process ID: ${e.message}")
-                0L
-            }
-            
-            _status.value = XrayRuntimeStatus.Running(processId, apiPort)
-            // Reset isStarting flag now that process is successfully running
+            // Xray-core is embedded in libhyperxray.so, not started as separate process
+            Log.w(TAG, "XrayRuntimeService.runXrayProcess() is deprecated - Xray-core is embedded in libhyperxray.so")
+            _status.value = XrayRuntimeStatus.Error("Xray-core is embedded in libhyperxray.so, not started as separate process")
             isStarting = false
-            Log.d(TAG, "Xray-core started successfully (pid=$processId, apiPort=$apiPort)")
-            
-            // Monitor process output continues in background job
-            // CRITICAL FIX: Wait for process to exit. 
-            // If we don't wait here, the method returns, finally block executes, 
-            // and status is set to ProcessExited while process is actually running.
-            currentProcess.waitFor()
-            Log.d(TAG, "Xray process exited naturally")
             
         } catch (e: InterruptedIOException) {
             Log.d(TAG, "Xray process reading interrupted")
@@ -679,30 +529,9 @@ class XrayRuntimeService(private val context: Context) : XrayRuntimeServiceApi {
     }
     
     private fun createProcessBuilder(xrayPath: String): ProcessBuilder {
-        val filesDir = context.filesDir
-        
-        val libxrayFile = File(xrayPath)
-        if (!libxrayFile.exists()) {
-            throw IOException("libxray.so not found at: $xrayPath")
-        }
-        
-        val linkerPath = if (Build.SUPPORTED_64_BIT_ABIS.isNotEmpty()) {
-            "/system/bin/linker64"
-        } else {
-            "/system/bin/linker"
-        }
-        
-        Log.i(TAG, "Using linker: $linkerPath to execute: $xrayPath")
-        
-        val command = mutableListOf(linkerPath, xrayPath)
-        // Removed "run" argument as it might interfere with stdin config reading or cause issues on some Android versions
-        // val command = mutableListOf(linkerPath, xrayPath, "run")
-        val processBuilder = ProcessBuilder(command)
-        val environment = processBuilder.environment()
-        environment["XRAY_LOCATION_ASSET"] = filesDir.path
-        processBuilder.directory(filesDir)
-        processBuilder.redirectErrorStream(true)
-        return processBuilder
+        // DEPRECATED: Xray-core is embedded in libhyperxray.so, not started as separate process
+        Log.w(TAG, "createProcessBuilder() is deprecated - Xray-core is embedded in libhyperxray.so")
+        throw UnsupportedOperationException("libxray.so is no longer used - Xray-core is embedded in libhyperxray.so")
     }
     
     private suspend fun readProcessStream(process: Process) {

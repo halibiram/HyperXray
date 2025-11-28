@@ -81,7 +81,7 @@ fun WireGuardSection(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
-                text = "🌐 WARP / WireGuard Chain",
+                text = "🌐 WireGuard over Xray",
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Bold
                 ),
@@ -89,12 +89,12 @@ fun WireGuardSection(
             )
 
             Text(
-                text = "Route traffic through Cloudflare WARP to bypass IP bans",
+                text = "Use WireGuard as standalone outbound with routing rules",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFF808080)
             )
 
-            // Enable WARP Switch
+            // Enable WireGuard Switch
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -102,12 +102,12 @@ fun WireGuardSection(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Enable WARP Chain",
+                        text = "Enable WireGuard over Xray",
                         style = MaterialTheme.typography.bodyLarge,
                         color = Color(0xFFE0E0E0)
                     )
                     Text(
-                        text = "Chain proxy through Cloudflare WARP",
+                        text = "Use WireGuard as standalone outbound with routing rules",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF808080)
                     )
@@ -454,7 +454,7 @@ private fun WarpAccountCard(
                 trailingIcon = {
                     IconButton(onClick = { showLicenseKey = !showLicenseKey }) {
                         Icon(
-                            imageVector = if (showLicenseKey) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            imageVector = if (showLicenseKey) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
                             contentDescription = if (showLicenseKey) "Hide license key" else "Show license key",
                             tint = Color(0xFFB0B0B0)
                         )

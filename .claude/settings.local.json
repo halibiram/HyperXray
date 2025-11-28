@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(./gradlew assembleDebug:*)",
-      "Bash(tee:*)"
+      "Bash(tee:*)",
+      "Bash(go mod tidy:*)"
     ],
     "deny": [],
     "ask": []

@@ -500,7 +500,7 @@ class ConfigEditViewModel(
     }
 
     /**
-     * Update WARP (WireGuard) settings in config JSON.
+     * Update WireGuard over Xray settings in config JSON.
      * Delegates to WireGuardHandler.
      */
     fun updateWarpSettings(
@@ -530,10 +530,10 @@ class ConfigEditViewModel(
                 if (enabled) {
                     _uiEvent.trySend(
                         ConfigEditUiEvent.ShowSnackbar(
-                            "WARP configuration updated. If WARP doesn't work, check:\n" +
+                            "WireGuard over Xray configuration updated. If WireGuard doesn't work, check:\n" +
                             "1. Xray-core version supports WireGuard (v1.8.0+)\n" +
                             "2. Config file has 'warp-out' outbound with 'wireguard' protocol\n" +
-                            "3. Main outbound has 'proxySettings' pointing to 'warp-out'"
+                            "3. Routing rules are configured to use 'warp-out' outbound"
                         )
                     )
                 }

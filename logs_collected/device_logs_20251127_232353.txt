@@ -1,0 +1,500 @@
+11-27 23:22:36.448 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.452 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.456 D/TaskViewThumbnail( 5385): updateThumbnailScale, t=[TaskKey{id=813, stackId=0, baseIntent=Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10200000 cmp=com.hyperxray.an/.activity.MainActivity }, userId=0, lastActiveTime=52179470, windowingMode=1, isThumbnailBlur=false, isAccessLocked=false, isScreening=false, topActivity=ComponentInfo{com.hyperxray.an/com.hyperxray.an.activity.MainActivity}, mHashCode=25143635}, title=HyperXray, titleDescription=HyperXray, bounds=null, isLaunchTarget=false, isStackTask=true, isSystemApp=false, isDockable=true, baseActivity=ComponentInfo{com.hyperxray.an/com.hyperxray.an.activity.MainActivity}, isLocked=false, mNeedHide=false, hasMultipleTasks=false, cti1Key=, cti2Key=] , mThumbnailBitmapSizeAfterScaled=(522.0, 1161.1599)
+11-27 23:22:36.456 D/TaskViewThumbnail( 5385): updateThumbnailScale, t=[TaskKey{id=813, stackId=0, baseIntent=Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10200000 cmp=com.hyperxray.an/.activity.MainActivity }, userId=0, lastActiveTime=52179470, windowingMode=1, isThumbnailBlur=false, isAccessLocked=false, isScreening=false, topActivity=ComponentInfo{com.hyperxray.an/com.hyperxray.an.activity.MainActivity}, mHashCode=25143635}, title=HyperXray, titleDescription=HyperXray, bounds=null, isLaunchTarget=false, isStackTask=true, isSystemApp=false, isDockable=true, baseActivity=ComponentInfo{com.hyperxray.an/com.hyperxray.an.activity.MainActivity}, isLocked=false, mNeedHide=false, hasMultipleTasks=false, cti1Key=, cti2Key=] , mThumbnailBitmapSizeAfterScaled=(521.0, 1158.9355)
+11-27 23:22:36.459 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.459 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.459 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.459 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.459 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.459 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.460 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.462 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.462 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.462 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.462 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.462 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.462 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.462 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.462 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.468 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.469 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.469 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.469 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.469 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.470 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.470 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.470 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.470 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.470 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.470 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.470 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.470 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.470 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.470 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.476 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.478 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.478 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.478 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.478 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.478 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.478 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.478 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.478 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.484 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.492 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.495 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.495 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.495 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.495 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.495 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.495 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.495 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.495 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.495 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.495 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.500 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.509 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.517 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.526 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.529 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.529 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.529 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.529 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.529 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.529 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.529 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.529 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.529 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.529 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.533 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.542 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.550 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.552 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.552 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.552 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.552 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.552 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.552 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.553 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.553 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.553 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.553 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.558 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.567 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.569 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.569 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.569 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.569 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.569 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.569 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.569 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.569 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.569 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.570 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.575 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.577 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.577 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.577 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.577 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.577 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.577 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.577 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.577 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.583 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.586 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.586 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.586 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.586 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.586 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.586 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.587 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.587 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.587 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.587 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.591 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.600 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.608 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.611 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.611 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.611 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.611 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.611 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.611 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.611 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.611 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.611 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.611 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.616 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.624 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.627 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.627 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.627 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.627 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.627 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.627 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.628 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.628 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.628 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.628 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.633 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.641 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.649 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.654 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.654 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.654 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.654 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.654 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.654 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.654 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.654 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.654 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.654 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.657 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.660 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.660 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.660 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.660 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.660 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.660 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.660 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.660 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.666 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.674 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.676 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.676 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.676 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.676 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.676 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.676 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.676 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.676 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.676 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.676 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.682 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.685 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.685 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.685 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.686 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.686 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.686 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.686 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.686 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.689 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.689 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.689 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.689 E/MultiSpringDynamicAnimation10947a5( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.690 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.695 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:36.695 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:36.695 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:36.695 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:37.523 E/MultiSpringDynamicAnimation7961452( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:38.253 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:22:38.253 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:22:38.253 D/XrayStatsManager(21363): Client recreation cooldown active, 2999ms remaining
+11-27 23:22:38.253 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:22:40.101 D/HyperXray-Bridge( 7518): [Stats] TX: 1480 bytes, RX: 0 bytes, Handshake: 0
+11-27 23:22:40.193 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:22:40.194 D/HyperVpnService( 7518): 📊 Tunnel stats JSON: {"connected":true,"txBytes":1480,"rxBytes":0,"txPackets":10,"rxPackets":0,"lastHandshake":0,"endpoint":"162.159.192.1:2408","uptime":50000}
+11-27 23:22:40.195 D/HyperVpnService( 7518): 📊 Tunnel stats - connected: true, txBytes: 1480, rxBytes: 0, txPackets: 10, rxPackets: 0, lastHandshake: 0
+11-27 23:22:40.254 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:22:40.254 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:22:40.255 D/XrayStatsManager(21363): Client recreation cooldown active, 998ms remaining
+11-27 23:22:40.255 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:22:40.765 D/MiSightJni( 5949): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"fromRAT":13,"toRAT":13}'
+11-27 23:22:40.795 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:22:40.796 D/HyperXray-Bridge( 7518): [XrayUDP] Sent 148 bytes
+11-27 23:22:40.796 D/HyperXray-Bridge( 7518): [XrayBind] → Sent 148 bytes
+11-27 23:22:41.678 I/SmartPower: com.hyperxray.an:native/10570(7518)( 3688): background->invisible(10883ms) R(become foreground) adj=200.
+11-27 23:22:41.712 D/RecentsTaskLoader( 5385): reloadTasksData [TaskKey{id=813, stackId=0, baseIntent=Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10200000 cmp=com.hyperxray.an/.activity.MainActivity }, userId=0, lastActiveTime=52191137, windowingMode=1, isThumbnailBlur=false, isAccessLocked=false, isScreening=false, topActivity=ComponentInfo{com.hyperxray.an/com.hyperxray.an.activity.MainActivity}, mHashCode=25143635}, title=HyperXray, titleDescription=HyperXray, bounds=null, isLaunchTarget=false, isStackTask=true, isSystemApp=false, isDockable=true, baseActivity=ComponentInfo{com.hyperxray.an/com.hyperxray.an.activity.MainActivity}, isLocked=false, mNeedHide=false, hasMultipleTasks=false, cti1Key=, cti2Key=] 
+11-27 23:22:41.714 E/MultiSpringDynamicAnimation896ad7a( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:41.714 E/MultiSpringDynamicAnimation896ad7a( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:41.714 E/MultiSpringDynamicAnimation896ad7a( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:41.715 E/MultiSpringDynamicAnimation896ad7a( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:41.715 E/MultiSpringDynamicAnimation896ad7a( 5385): ERROR Not Found Bundle SurfaceExtAlpha
+11-27 23:22:41.715 E/MultiSpringDynamicAnimation896ad7a( 5385): ERROR Not Found Bundle appLeashBlurRadius
+11-27 23:22:41.777 D/RecentsTaskLoader( 5385): reloadTasksData [TaskKey{id=813, stackId=0, baseIntent=Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10200000 cmp=com.hyperxray.an/.activity.MainActivity }, userId=0, lastActiveTime=52191137, windowingMode=1, isThumbnailBlur=false, isAccessLocked=false, isScreening=false, topActivity=ComponentInfo{com.hyperxray.an/com.hyperxray.an.activity.MainActivity}, mHashCode=25143635}, title=HyperXray, titleDescription=HyperXray, bounds=null, isLaunchTarget=false, isStackTask=true, isSystemApp=false, isDockable=true, baseActivity=ComponentInfo{com.hyperxray.an/com.hyperxray.an.activity.MainActivity}, isLocked=false, mNeedHide=false, hasMultipleTasks=false, cti1Key=, cti2Key=] 
+11-27 23:22:42.254 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:22:42.255 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:22:42.255 D/XrayStatsManager(21363): Exponential backoff active, 3997ms remaining (failures: 3)
+11-27 23:22:42.255 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:22:42.344 E/MultiSpringDynamicAnimation896ad7a( 5385): ERROR Not Found Bundle Radius
+11-27 23:22:44.256 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:22:44.257 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:22:44.257 D/XrayStatsManager(21363): Exponential backoff active, 1995ms remaining (failures: 3)
+11-27 23:22:44.257 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:22:45.200 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:22:45.201 D/HyperVpnService( 7518): 📊 Tunnel stats JSON: {"connected":true,"txBytes":1628,"rxBytes":0,"txPackets":11,"rxPackets":0,"lastHandshake":0,"endpoint":"162.159.192.1:2408","uptime":55000}
+11-27 23:22:45.203 D/HyperVpnService( 7518): 📊 Tunnel stats - connected: true, txBytes: 1628, rxBytes: 0, txPackets: 11, rxPackets: 0, lastHandshake: 0
+11-27 23:22:45.819 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:22:45.821 D/HyperXray-Bridge( 7518): [XrayUDP] Sent 148 bytes
+11-27 23:22:45.821 D/HyperXray-Bridge( 7518): [XrayBind] → Sent 148 bytes
+11-27 23:22:46.257 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:22:46.258 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:22:46.262 D/XrayStatsManager(21363): Created new CoreStatsClient
+11-27 23:22:46.273 W/CoreStatsClient(21363): GetSysStats RPC unavailable - Xray-core may not be ready
+11-27 23:22:46.274 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:22:48.275 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:22:48.276 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:22:48.278 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:22:48.896 D/HyperVpnService( 7518): Heartbeat - VPN running for 58s
+11-27 23:22:50.101 D/HyperXray-Bridge( 7518): [Stats] TX: 1776 bytes, RX: 0 bytes, Handshake: 0
+11-27 23:22:50.207 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:22:50.208 D/HyperVpnService( 7518): 📊 Tunnel stats JSON: {"connected":true,"txBytes":1776,"rxBytes":0,"txPackets":12,"rxPackets":0,"lastHandshake":0,"endpoint":"162.159.192.1:2408","uptime":60000}
+11-27 23:22:50.210 D/HyperVpnService( 7518): 📊 Tunnel stats - connected: true, txBytes: 1776, rxBytes: 0, txPackets: 12, rxPackets: 0, lastHandshake: 0
+11-27 23:22:50.277 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:22:50.278 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:22:50.278 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:22:50.278 W/XrayStatsManager(21363): Multiple consecutive failures (3), closing client
+11-27 23:22:50.438 D/HyperXray-Bridge( 7518): [WireGuard] Failed to receive makeReceiveFunc packet: read timeout
+11-27 23:22:50.824 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:22:50.824 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:22:50.827 D/HyperXray-Bridge( 7518): [XrayUDP] Sent 148 bytes
+11-27 23:22:50.827 D/HyperXray-Bridge( 7518): [XrayBind] → Sent 148 bytes
+11-27 23:22:51.962 D/MiSightJni( 5949): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"fromRAT":13,"toRAT":13}'
+11-27 23:22:51.969 D/MiSightJni( 5949): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"fromRAT":13,"toRAT":13}'
+11-27 23:22:52.279 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:22:52.280 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:22:52.280 D/XrayStatsManager(21363): Client recreation cooldown active, 2998ms remaining
+11-27 23:22:52.280 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:22:54.281 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:22:54.282 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:22:54.282 D/XrayStatsManager(21363): Client recreation cooldown active, 996ms remaining
+11-27 23:22:54.282 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:22:55.220 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:22:55.220 D/HyperVpnService( 7518): 📊 Tunnel stats JSON: {"connected":true,"txBytes":1924,"rxBytes":0,"txPackets":13,"rxPackets":0,"lastHandshake":0,"endpoint":"162.159.192.1:2408","uptime":65000}
+11-27 23:22:55.223 D/HyperVpnService( 7518): 📊 Tunnel stats - connected: true, txBytes: 1924, rxBytes: 0, txPackets: 13, rxPackets: 0, lastHandshake: 0
+11-27 23:22:56.076 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:22:56.076 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:22:56.077 D/HyperXray-Bridge( 7518): [XrayUDP] Sent 148 bytes
+11-27 23:22:56.077 D/HyperXray-Bridge( 7518): [XrayBind] → Sent 148 bytes
+11-27 23:22:56.283 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:22:56.284 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:22:56.284 D/XrayStatsManager(21363): Exponential backoff active, 3994ms remaining (failures: 3)
+11-27 23:22:56.284 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:22:58.283 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:22:58.284 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:22:58.284 D/XrayStatsManager(21363): Exponential backoff active, 1994ms remaining (failures: 3)
+11-27 23:22:58.284 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:00.101 D/HyperXray-Bridge( 7518): [Stats] TX: 2072 bytes, RX: 0 bytes, Handshake: 0
+11-27 23:23:00.232 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:00.233 D/HyperVpnService( 7518): 📊 Tunnel stats JSON: {"connected":true,"txBytes":2072,"rxBytes":0,"txPackets":14,"rxPackets":0,"lastHandshake":0,"endpoint":"162.159.192.1:2408","uptime":70000}
+11-27 23:23:00.234 D/HyperVpnService( 7518): 📊 Tunnel stats - connected: true, txBytes: 2072, rxBytes: 0, txPackets: 14, rxPackets: 0, lastHandshake: 0
+11-27 23:23:00.285 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:00.285 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:00.287 D/XrayStatsManager(21363): Created new CoreStatsClient
+11-27 23:23:00.290 W/CoreStatsClient(21363): GetSysStats RPC unavailable - Xray-core may not be ready
+11-27 23:23:00.291 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:00.844 E/AuthPII ( 6328): [RequestTokenManager] getToken() -> NETWORK_ERROR. App: com.android.chrome, Service: oauth2:https://www.googleapis.com/auth/chromesync
+11-27 23:23:00.846 W/Auth    ( 7158): [GoogleAuthUtil] [GoogleAuthUtil] error status:NETWORK_ERROR with method:getTokenWithDetails
+11-27 23:23:01.084 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:01.085 D/HyperXray-Bridge( 7518): [XrayUDP] Sent 148 bytes
+11-27 23:23:01.085 D/HyperXray-Bridge( 7518): [XrayBind] → Sent 148 bytes
+11-27 23:23:01.848 D/MiSightJni( 5949): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"fromRAT":13,"toRAT":13}'
+11-27 23:23:02.291 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:02.292 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:02.294 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:04.295 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:04.296 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:04.298 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:04.298 W/XrayStatsManager(21363): Multiple consecutive failures (3), closing client
+11-27 23:23:05.241 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:05.242 D/HyperVpnService( 7518): 📊 Tunnel stats JSON: {"connected":true,"txBytes":2220,"rxBytes":0,"txPackets":15,"rxPackets":0,"lastHandshake":0,"endpoint":"162.159.192.1:2408","uptime":75000}
+11-27 23:23:05.244 D/HyperVpnService( 7518): 📊 Tunnel stats - connected: true, txBytes: 2220, rxBytes: 0, txPackets: 15, rxPackets: 0, lastHandshake: 0
+11-27 23:23:06.246 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:23:06.246 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:06.247 D/HyperXray-Bridge( 7518): [XrayUDP] Sent 148 bytes
+11-27 23:23:06.247 D/HyperXray-Bridge( 7518): [XrayBind] → Sent 148 bytes
+11-27 23:23:06.301 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:06.303 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:06.303 D/XrayStatsManager(21363): Client recreation cooldown active, 2995ms remaining
+11-27 23:23:06.303 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:08.303 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:08.304 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:08.305 D/XrayStatsManager(21363): Client recreation cooldown active, 993ms remaining
+11-27 23:23:08.305 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:10.102 D/HyperXray-Bridge( 7518): [Stats] TX: 2368 bytes, RX: 0 bytes, Handshake: 0
+11-27 23:23:10.253 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:10.254 D/HyperVpnService( 7518): 📊 Tunnel stats JSON: {"connected":true,"txBytes":2368,"rxBytes":0,"txPackets":16,"rxPackets":0,"lastHandshake":0,"endpoint":"162.159.192.1:2408","uptime":80001}
+11-27 23:23:10.257 D/HyperVpnService( 7518): 📊 Tunnel stats - connected: true, txBytes: 2368, rxBytes: 0, txPackets: 16, rxPackets: 0, lastHandshake: 0
+11-27 23:23:10.333 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:10.333 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:10.333 D/XrayStatsManager(21363): Exponential backoff active, 3965ms remaining (failures: 3)
+11-27 23:23:10.333 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:11.268 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:11.273 D/HyperXray-Bridge( 7518): [XrayUDP] Sent 148 bytes
+11-27 23:23:11.273 D/HyperXray-Bridge( 7518): [XrayBind] → Sent 148 bytes
+11-27 23:23:12.110 E/HyperXray-Bridge( 7518): [XrayUDP] Read error: io: read/write on closed pipe
+11-27 23:23:12.334 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:12.335 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:12.335 D/XrayStatsManager(21363): Exponential backoff active, 1963ms remaining (failures: 3)
+11-27 23:23:12.335 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:14.336 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:14.337 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:14.340 D/XrayStatsManager(21363): Created new CoreStatsClient
+11-27 23:23:14.349 W/CoreStatsClient(21363): GetSysStats RPC unavailable - Xray-core may not be ready
+11-27 23:23:14.350 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:15.264 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:15.264 D/HyperVpnService( 7518): 📊 Tunnel stats JSON: {"connected":true,"txBytes":2516,"rxBytes":0,"txPackets":17,"rxPackets":0,"lastHandshake":0,"endpoint":"162.159.192.1:2408","uptime":85000}
+11-27 23:23:15.268 D/HyperVpnService( 7518): 📊 Tunnel stats - connected: true, txBytes: 2516, rxBytes: 0, txPackets: 17, rxPackets: 0, lastHandshake: 0
+11-27 23:23:16.349 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:16.350 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:16.352 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:16.380 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:16.381 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:16.381 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:16.381 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:18.353 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:18.354 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:18.356 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:18.356 W/XrayStatsManager(21363): Multiple consecutive failures (3), closing client
+11-27 23:23:18.898 D/HyperVpnService( 7518): Heartbeat - VPN running for 88s
+11-27 23:23:20.101 D/HyperXray-Bridge( 7518): [Stats] TX: 2516 bytes, RX: 0 bytes, Handshake: 0
+11-27 23:23:20.280 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:20.280 D/HyperVpnService( 7518): 📊 Tunnel stats JSON: {"connected":true,"txBytes":2516,"rxBytes":0,"txPackets":17,"rxPackets":0,"lastHandshake":0,"endpoint":"162.159.192.1:2408","uptime":90000}
+11-27 23:23:20.281 D/HyperVpnService( 7518): 📊 Tunnel stats - connected: true, txBytes: 2516, rxBytes: 0, txPackets: 17, rxPackets: 0, lastHandshake: 0
+11-27 23:23:20.359 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:20.360 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:20.360 D/XrayStatsManager(21363): Client recreation cooldown active, 2996ms remaining
+11-27 23:23:20.360 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:20.773 D/HyperXray-Bridge( 7518): [WireGuard] Failed to receive makeReceiveFunc packet: read timeout
+11-27 23:23:21.682 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:23:21.682 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:21.684 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:21.684 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:21.684 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:22.361 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:22.362 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:22.362 D/XrayStatsManager(21363): Client recreation cooldown active, 994ms remaining
+11-27 23:23:22.362 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:24.363 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:24.364 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:24.364 D/XrayStatsManager(21363): Exponential backoff active, 3992ms remaining (failures: 3)
+11-27 23:23:24.364 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:25.288 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:25.289 D/HyperVpnService( 7518): 📊 Tunnel stats JSON: {"connected":true,"txBytes":2516,"rxBytes":0,"txPackets":17,"rxPackets":0,"lastHandshake":0,"endpoint":"162.159.192.1:2408","uptime":95000}
+11-27 23:23:25.290 D/HyperVpnService( 7518): 📊 Tunnel stats - connected: true, txBytes: 2516, rxBytes: 0, txPackets: 17, rxPackets: 0, lastHandshake: 0
+11-27 23:23:25.933 D/MiSightJni( 5949): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"fromRAT":13,"toRAT":13}'
+11-27 23:23:25.941 D/MiSightJni( 5949): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"fromRAT":13,"toRAT":13}'
+11-27 23:23:25.955 D/MiSightJni( 5949): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"fromRAT":13,"toRAT":13}'
+11-27 23:23:26.364 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:26.365 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:26.365 D/XrayStatsManager(21363): Exponential backoff active, 1991ms remaining (failures: 3)
+11-27 23:23:26.365 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:26.920 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:23:26.920 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:26.922 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:26.922 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:26.922 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:27.880 E/libsensor-parseRGB( 2743):  203 Dump  setCWBOutputBuffer ERROR for mRequestDisplayId 0
+11-27 23:23:28.365 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:28.366 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:28.369 D/XrayStatsManager(21363): Created new CoreStatsClient
+11-27 23:23:28.376 W/CoreStatsClient(21363): GetSysStats RPC unavailable - Xray-core may not be ready
+11-27 23:23:28.377 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:30.057 D/MiSightJni(12969): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"time":"23:23:30","broadTemp":37180,"packageName":"com.hyperxray.an","scenarioName":"normal","packageNames":"Key: com.hyperxray.an, Value: 563.0;Key: com.miui.home, Value: 16.0;Key: com.android.chrome, Value: 13.0"}'
+11-27 23:23:30.102 D/HyperXray-Bridge( 7518): [Stats] TX: 2516 bytes, RX: 0 bytes, Handshake: 0
+11-27 23:23:30.299 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:30.299 D/HyperVpnService( 7518): 📊 Tunnel stats JSON: {"connected":true,"txBytes":2516,"rxBytes":0,"txPackets":17,"rxPackets":0,"lastHandshake":0,"endpoint":"162.159.192.1:2408","uptime":100001}
+11-27 23:23:30.302 D/HyperVpnService( 7518): 📊 Tunnel stats - connected: true, txBytes: 2516, rxBytes: 0, txPackets: 17, rxPackets: 0, lastHandshake: 0
+11-27 23:23:30.385 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:30.386 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:30.388 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:31.988 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:23:31.988 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:31.989 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:31.989 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:31.989 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:32.389 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:32.389 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:32.390 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:32.390 W/XrayStatsManager(21363): Multiple consecutive failures (3), closing client
+11-27 23:23:34.391 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:34.392 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:34.392 D/XrayStatsManager(21363): Client recreation cooldown active, 2998ms remaining
+11-27 23:23:34.392 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:35.310 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:35.311 D/HyperVpnService( 7518): 📊 Tunnel stats JSON: {"connected":true,"txBytes":2516,"rxBytes":0,"txPackets":17,"rxPackets":0,"lastHandshake":0,"endpoint":"162.159.192.1:2408","uptime":105000}
+11-27 23:23:35.313 D/HyperVpnService( 7518): 📊 Tunnel stats - connected: true, txBytes: 2516, rxBytes: 0, txPackets: 17, rxPackets: 0, lastHandshake: 0
+11-27 23:23:35.941 D/MiSightJni( 5949): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"fromRAT":13,"toRAT":13}'
+11-27 23:23:36.393 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:36.394 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:36.394 D/XrayStatsManager(21363): Client recreation cooldown active, 996ms remaining
+11-27 23:23:36.394 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:37.120 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:23:37.120 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:37.122 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:37.122 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:37.122 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:38.395 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:38.396 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:38.396 D/XrayStatsManager(21363): Exponential backoff active, 3994ms remaining (failures: 3)
+11-27 23:23:38.396 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:40.101 D/HyperXray-Bridge( 7518): [Stats] TX: 2516 bytes, RX: 0 bytes, Handshake: 0
+11-27 23:23:40.322 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:40.323 D/HyperVpnService( 7518): 📊 Tunnel stats JSON: {"connected":true,"txBytes":2516,"rxBytes":0,"txPackets":17,"rxPackets":0,"lastHandshake":0,"endpoint":"162.159.192.1:2408","uptime":110000}
+11-27 23:23:40.326 D/HyperVpnService( 7518): 📊 Tunnel stats - connected: true, txBytes: 2516, rxBytes: 0, txPackets: 17, rxPackets: 0, lastHandshake: 0
+11-27 23:23:40.400 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:40.400 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:40.400 D/XrayStatsManager(21363): Exponential backoff active, 1990ms remaining (failures: 3)
+11-27 23:23:40.400 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:41.423 D/MiSightJni( 5949): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"rsrpValue":-111}'
+11-27 23:23:42.125 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:23:42.125 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:42.126 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:42.126 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:42.126 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:42.401 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:42.402 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:42.406 D/XrayStatsManager(21363): Created new CoreStatsClient
+11-27 23:23:42.414 W/CoreStatsClient(21363): GetSysStats RPC unavailable - Xray-core may not be ready
+11-27 23:23:42.415 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:44.416 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:44.417 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:44.419 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:45.334 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:45.335 D/HyperVpnService( 7518): 📊 Tunnel stats JSON: {"connected":true,"txBytes":2516,"rxBytes":0,"txPackets":17,"rxPackets":0,"lastHandshake":0,"endpoint":"162.159.192.1:2408","uptime":115000}
+11-27 23:23:45.337 D/HyperVpnService( 7518): 📊 Tunnel stats - connected: true, txBytes: 2516, rxBytes: 0, txPackets: 17, rxPackets: 0, lastHandshake: 0
+11-27 23:23:46.420 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:46.421 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:46.423 W/XrayStatsManager(21363): Stats query failed (timeout/exception/disabled)
+11-27 23:23:46.423 W/XrayStatsManager(21363): Multiple consecutive failures (3), closing client
+11-27 23:23:47.163 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:47.165 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:47.165 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:47.165 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:48.425 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:48.426 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:48.426 D/XrayStatsManager(21363): Client recreation cooldown active, 2997ms remaining
+11-27 23:23:48.426 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:48.900 D/HyperVpnService( 7518): Heartbeat - VPN running for 118s
+11-27 23:23:49.963 W/PushService(12087): [Tid:552] update the connection status. connecting -> disconnected : ERROR_NETWORK_FAILED 
+11-27 23:23:49.972 W/PushService(12087): [Tid:552] update the connection status. disconnected -> connecting : ERROR_OK 
+11-27 23:23:50.102 D/HyperXray-Bridge( 7518): [Stats] TX: 2516 bytes, RX: 0 bytes, Handshake: 0
+11-27 23:23:50.345 D/HyperXray-JNI( 7518): getTunnelStats called
+11-27 23:23:50.345 D/HyperVpnService( 7518): 📊 Tunnel stats JSON: {"connected":true,"txBytes":2516,"rxBytes":0,"txPackets":17,"rxPackets":0,"lastHandshake":0,"endpoint":"162.159.192.1:2408","uptime":120001}
+11-27 23:23:50.348 D/HyperVpnService( 7518): 📊 Tunnel stats - connected: true, txBytes: 2516, rxBytes: 0, txPackets: 17, rxPackets: 0, lastHandshake: 0
+11-27 23:23:50.427 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:50.427 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:50.427 D/XrayStatsManager(21363): Client recreation cooldown active, 996ms remaining
+11-27 23:23:50.427 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:51.108 D/HyperXray-Bridge( 7518): [WireGuard] Failed to receive makeReceiveFunc packet: read timeout
+11-27 23:23:51.321 D/MiSightJni( 5949): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"rsrpValue":-106}'
+11-27 23:23:52.284 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Handshake did not complete after 5 seconds, retrying (try 2)
+11-27 23:23:52.284 D/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Sending handshake initiation
+11-27 23:23:52.286 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:52.286 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:52.286 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:52.428 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:52.428 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:52.428 D/XrayStatsManager(21363): Exponential backoff active, 3995ms remaining (failures: 3)
+11-27 23:23:52.428 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call
+11-27 23:23:52.437 D/MiSightJni( 5949): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"fromRAT":13,"toRAT":13}'
+11-27 23:23:52.438 D/MiSightJni( 5949): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"rsrpValue":-106}'
+11-27 23:23:52.445 D/MiSightJni( 5949): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"fromRAT":13,"toRAT":13}'
+11-27 23:23:52.467 D/MiSightJni( 5949): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"fromRAT":13,"toRAT":13}'
+11-27 23:23:54.430 D/XrayStatsManager(21363): Active instances provider is null, using single instance mode
+11-27 23:23:54.430 D/XrayStatsManager(21363): Using single instance mode (apiPort: 65276)
+11-27 23:23:54.430 D/XrayStatsManager(21363): Exponential backoff active, 1993ms remaining (failures: 3)
+11-27 23:23:54.430 W/XrayStatsManager(21363): CoreStatsClient is null, cannot update stats - will retry on next call

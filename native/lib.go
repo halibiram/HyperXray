@@ -1,0 +1,963 @@
+package main
+
+/*
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <android/log.h>
+#include <dlfcn.h>
+
+static void android_log_print(int priority, const char* tag, const char* msg) {
+    __android_log_print(priority, tag, "%s", msg);
+}
+
+// Optional callAiLogHelper wrapper - uses dlsym to find symbol at runtime
+// If symbol doesn't exist, silently falls back to Android log only
+static void safe_callAiLogHelper(const char* tag, const char* level, const char* message) {
+    // Try to find callAiLogHelper symbol dynamically
+    static void (*callAiLogHelper_func)(const char*, const char*, const char*) = NULL;
+    static int checked = 0;
+
+    if (!checked) {
+        checked = 1;
+        // Try to get symbol from current process
+        // RTLD_DEFAULT means search in all loaded libraries
+        callAiLogHelper_func = (void (*)(const char*, const char*, const char*))
+            dlsym(RTLD_DEFAULT, "callAiLogHelper");
+    }
+
+    // If symbol found, call it; otherwise just use Android log (already called)
+    if (callAiLogHelper_func != NULL) {
+        callAiLogHelper_func(tag, level, message);
+    }
+    // If not found, we already logged to Android log, so just return
+}
+
+// Socket protector callback type
+typedef bool (*socket_protector_func)(int fd);
+
+// Global protector function pointer
+// CRITICAL: Define here (not extern) so Go library has its own definition
+// This will be set by libhyperxray-jni.so via SetSocketProtector
+// We use a weak symbol so it can be overridden by libhyperxray-jni.so
+socket_protector_func g_protector __attribute__((weak)) = NULL;
+
+// Set the protector function
+static void set_protector(socket_protector_func func) {
+    g_protector = func;
+}
+
+// Call the protector (used by Go)
+static bool call_protector(int fd) {
+    if (g_protector != NULL) {
+        return g_protector(fd);
+    }
+    return false;
+}
+*/
+import "C"
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"runtime/debug"
+	"strings"
+	"sync"
+	"unsafe"
+
+	"github.com/hyperxray/native/bridge"
+	"github.com/hyperxray/native/dns"
+	"github.com/hyperxray/native/xray"
+)
+
+var (
+	tunnel     *bridge.HyperTunnel
+	tunnelLock sync.Mutex
+	lastError  string
+	
+	// Multi-instance manager
+	multiManager     *xray.MultiInstanceManager
+	multiManagerLock sync.Mutex
+)
+
+// Error codes
+const (
+	ErrorSuccess              = 0
+	ErrorTunnelCreationFailed = -1
+	ErrorTunnelStartFailed    = -2
+	ErrorInvalidTunFd         = -3
+	ErrorInvalidWgConfig      = -4
+	ErrorInvalidXrayConfig    = -5
+	ErrorTunnelAlreadyRunning  = -6
+	ErrorTunnelNotRunning     = -7
+	ErrorXrayConnectivityFailed = -20
+	ErrorXrayServerUnreachable  = -21
+	ErrorXrayTLSFailed          = -22
+	ErrorPanic                = -99
+)
+
+const logTag = "HyperXray-Go"
+
+// logInfo logs info level messages to Android logcat and AiLogHelper
+func logInfo(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	tag := C.CString(logTag)
+	defer C.free(unsafe.Pointer(tag))
+	msgC := C.CString(msg)
+	defer C.free(unsafe.Pointer(msgC))
+	
+	// Log to Android logcat
+	C.android_log_print(C.ANDROID_LOG_INFO, tag, msgC)
+	
+	// Also log to AiLogHelper (optional - will work if symbol exists)
+	levelC := C.CString("INFO")
+	defer C.free(unsafe.Pointer(levelC))
+	C.safe_callAiLogHelper(tag, levelC, msgC)
+}
+
+// logError logs error level messages to Android logcat and AiLogHelper
+func logError(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	lastError = msg
+	tag := C.CString(logTag)
+	defer C.free(unsafe.Pointer(tag))
+	msgC := C.CString(msg)
+	defer C.free(unsafe.Pointer(msgC))
+	
+	// Log to Android logcat
+	C.android_log_print(C.ANDROID_LOG_ERROR, tag, msgC)
+	
+	// Also log to AiLogHelper (optional - will work if symbol exists)
+	levelC := C.CString("ERROR")
+	defer C.free(unsafe.Pointer(levelC))
+	C.safe_callAiLogHelper(tag, levelC, msgC)
+}
+
+// logDebug logs debug level messages to Android logcat and AiLogHelper
+func logDebug(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	tag := C.CString(logTag)
+	defer C.free(unsafe.Pointer(tag))
+	msgC := C.CString(msg)
+	defer C.free(unsafe.Pointer(msgC))
+	
+	// Log to Android logcat
+	C.android_log_print(C.ANDROID_LOG_DEBUG, tag, msgC)
+	
+	// Also log to AiLogHelper (optional - will work if symbol exists)
+	levelC := C.CString("DEBUG")
+	defer C.free(unsafe.Pointer(levelC))
+	C.safe_callAiLogHelper(tag, levelC, msgC)
+}
+
+// WireGuardConfig represents WireGuard configuration
+type WireGuardConfig struct {
+	PrivateKey string `json:"privateKey"`
+	PublicKey  string `json:"publicKey"`
+	Address    string `json:"address"`
+	AddressV6  string `json:"addressV6,omitempty"`
+	DNS        string `json:"dns"`
+	MTU        int    `json:"mtu"`
+	Endpoint   string `json:"endpoint"`
+	PeerPublicKey string `json:"peerPublicKey"`
+	AllowedIPs string `json:"allowedIPs"`
+	PersistentKeepalive int `json:"persistentKeepalive,omitempty"`
+}
+
+// XrayConfig represents Xray configuration (simplified)
+type XrayConfig struct {
+	Inbounds  []interface{} `json:"inbounds"`
+	Outbounds []interface{} `json:"outbounds"`
+	Routing   interface{}   `json:"routing,omitempty"`
+	Log       interface{}   `json:"log,omitempty"`
+}
+
+// validateWireGuardConfig validates WireGuard configuration
+func validateWireGuardConfig(jsonStr string) (*WireGuardConfig, error) {
+	if jsonStr == "" {
+		return nil, fmt.Errorf("WireGuard config is empty")
+	}
+
+	var config WireGuardConfig
+	if err := json.Unmarshal([]byte(jsonStr), &config); err != nil {
+		return nil, fmt.Errorf("failed to parse WireGuard config: %v", err)
+	}
+
+	// Validate required fields
+	if config.PrivateKey == "" {
+		return nil, fmt.Errorf("WireGuard privateKey is missing")
+	}
+	if config.Endpoint == "" {
+		return nil, fmt.Errorf("WireGuard endpoint is missing")
+	}
+	if config.PeerPublicKey == "" {
+		return nil, fmt.Errorf("WireGuard peerPublicKey is missing")
+	}
+	if config.Address == "" {
+		return nil, fmt.Errorf("WireGuard address is missing")
+	}
+
+	logDebug("WireGuard config validated: endpoint=%s, address=%s", config.Endpoint, config.Address)
+	return &config, nil
+}
+
+// validateXrayConfig validates Xray configuration
+func validateXrayConfig(jsonStr string) (*XrayConfig, error) {
+	if jsonStr == "" {
+		return nil, fmt.Errorf("Xray config is empty")
+	}
+
+	var config XrayConfig
+	if err := json.Unmarshal([]byte(jsonStr), &config); err != nil {
+		return nil, fmt.Errorf("failed to parse Xray config: %v", err)
+	}
+
+	// Validate required fields
+	if len(config.Outbounds) == 0 {
+		return nil, fmt.Errorf("Xray outbounds is empty")
+	}
+
+	logDebug("Xray config validated: %d inbounds, %d outbounds", len(config.Inbounds), len(config.Outbounds))
+	return &config, nil
+}
+
+//export StartHyperTunnel
+func StartHyperTunnel(tunFd C.int, wgConfigJSON, xrayConfigJSON, warpEndpoint, warpPrivateKey, nativeLibDir, filesDir *C.char) C.int {
+	// Recover from panics with proper error handling and cleanup
+	defer func() {
+		if r := recover(); r != nil {
+			stackTrace := string(debug.Stack())
+			logError("PANIC in StartHyperTunnel: %v\n%s", r, stackTrace)
+			lastError = fmt.Sprintf("panic: %v", r)
+			// Ensure tunnel is cleaned up on panic to prevent resource leaks
+			tunnelLock.Lock()
+			defer tunnelLock.Unlock()
+			if tunnel != nil {
+				logError("Cleaning up tunnel due to panic")
+				tunnel.Stop()
+				tunnel = nil
+			}
+		}
+	}()
+
+	logInfo("========================================")
+	logInfo("StartHyperTunnel called")
+	logInfo("========================================")
+
+	// Verify protector is set
+	if C.g_protector == nil {
+		logError("Socket protector not set! Call SetSocketProtector first!")
+		return -30 // New error code
+	}
+
+	// Lock to prevent concurrent access
+	tunnelLock.Lock()
+	defer tunnelLock.Unlock()
+
+	// Check if tunnel already running
+	if tunnel != nil {
+		logError("Tunnel already running")
+		return ErrorTunnelAlreadyRunning
+	}
+
+	// Validate TUN file descriptor
+	tunFdInt := int(tunFd)
+	logDebug("TUN file descriptor: %d", tunFdInt)
+	
+	if tunFdInt < 0 {
+		logError("Invalid TUN file descriptor: %d", tunFdInt)
+		return ErrorInvalidTunFd
+	}
+
+	// Verify TUN fd is valid
+	if _, err := os.Stat(fmt.Sprintf("/proc/self/fd/%d", tunFdInt)); err != nil {
+		logError("TUN file descriptor %d is not valid: %v", tunFdInt, err)
+		return ErrorInvalidTunFd
+	}
+	logDebug("TUN file descriptor is valid")
+
+	// Convert C strings to Go strings
+	wgConfig := C.GoString(wgConfigJSON)
+	xrayConfig := C.GoString(xrayConfigJSON)
+	endpoint := C.GoString(warpEndpoint)
+	privateKey := C.GoString(warpPrivateKey)
+
+	logDebug("WireGuard config length: %d bytes", len(wgConfig))
+	logDebug("Xray config length: %d bytes", len(xrayConfig))
+	logDebug("WARP endpoint: %s", endpoint)
+	logDebug("WARP private key length: %d", len(privateKey))
+
+	// Early validation: Check for empty or null configs
+	// This prevents unnecessary processing and provides clear error messages
+	if wgConfig == "" || wgConfig == "{}" || wgConfig == "null" {
+		logError("WireGuard config is empty, null, or invalid JSON object")
+		logError("WireGuard config value: '%s'", wgConfig)
+		return ErrorInvalidWgConfig
+	}
+
+	if xrayConfig == "" || xrayConfig == "{}" || xrayConfig == "null" {
+		logError("Xray config is empty, null, or invalid JSON object")
+		logError("Xray config value: '%s'", xrayConfig)
+		return ErrorInvalidXrayConfig
+	}
+
+	logDebug("Configs are not empty, proceeding with validation...")
+
+	// Validate WireGuard config
+	logInfo("Validating WireGuard configuration...")
+	wgCfg, err := validateWireGuardConfig(wgConfig)
+	if err != nil {
+		logError("WireGuard config validation failed: %v", err)
+		logError("WireGuard config (first 500 chars): %.500s", wgConfig)
+		return ErrorInvalidWgConfig
+	}
+	logInfo("WireGuard config valid")
+
+	// Validate Xray config
+	logInfo("Validating Xray configuration...")
+	_, err = validateXrayConfig(xrayConfig)
+	if err != nil {
+		logError("Xray config validation failed: %v", err)
+		logError("Xray config (first 500 chars): %.500s", xrayConfig)
+		return ErrorInvalidXrayConfig
+	}
+	logInfo("Xray config valid")
+
+	// Get native library and files directories with null pointer checks
+	logDebug("Checking native library and files directories...")
+	
+	var nativeDir string
+	var filesDirPath string
+	
+	if nativeLibDir == nil {
+		logError("nativeLibDir parameter is NULL - this will cause a crash!")
+		lastError = "nativeLibDir is null"
+		return ErrorTunnelCreationFailed
+	}
+	nativeDir = C.GoString(nativeLibDir)
+	logDebug("Native lib dir converted: %s", nativeDir)
+	
+	if filesDir == nil {
+		logError("filesDir parameter is NULL - this will cause a crash!")
+		lastError = "filesDir is null"
+		return ErrorTunnelCreationFailed
+	}
+	filesDirPath = C.GoString(filesDir)
+	logDebug("Files dir converted: %s", filesDirPath)
+	
+	logDebug("Native lib dir: %s, Files dir: %s", nativeDir, filesDirPath)
+	
+	// Validate directories are not empty
+	if nativeDir == "" {
+		logError("Native lib dir is empty after conversion")
+		lastError = "nativeLibDir is empty"
+		return ErrorTunnelCreationFailed
+	}
+	if filesDirPath == "" {
+		logError("Files dir is empty after conversion")
+		lastError = "filesDir is empty"
+		return ErrorTunnelCreationFailed
+	}
+
+	// Create tunnel configuration
+	logInfo("Creating HyperTunnel instance...")
+	
+	tunnelConfig := bridge.TunnelConfig{
+		TunFd:          tunFdInt,
+		WgConfig:       wgConfig,
+		XrayConfig:     xrayConfig,
+		WarpEndpoint:   endpoint,
+		WarpPrivateKey: privateKey,
+		MTU:            wgCfg.MTU,
+		NativeLibDir:   nativeDir,
+		FilesDir:       filesDirPath,
+	}
+
+	// If MTU is 0, use default
+	if tunnelConfig.MTU == 0 {
+		tunnelConfig.MTU = 1280
+		logDebug("Using default MTU: 1280")
+	}
+
+	// Create tunnel instance
+	var createErr error
+	tunnel, createErr = bridge.NewHyperTunnel(tunnelConfig)
+	if createErr != nil {
+		logError("Failed to create HyperTunnel: %v", createErr)
+		tunnel = nil
+		return ErrorTunnelCreationFailed
+	}
+	logInfo("HyperTunnel instance created successfully")
+
+	// Start tunnel
+	logInfo("Starting tunnel...")
+	if startErr := tunnel.Start(); startErr != nil {
+		errStr := startErr.Error()
+		
+		// Categorize error for Kotlin
+		if strings.Contains(errStr, "connectivity") || strings.Contains(errStr, "connectivity check failed") {
+			lastError = "XRAY_CONNECTIVITY_FAILED: " + errStr
+			logError("Xray cannot reach internet - check server config")
+			tunnel.Stop()
+			tunnel = nil
+			return ErrorXrayConnectivityFailed
+		}
+		
+		if strings.Contains(errStr, "server unreachable") || strings.Contains(errStr, "cannot reach server") {
+			lastError = "XRAY_SERVER_UNREACHABLE: " + errStr
+			logError("Cannot connect to Xray server")
+			tunnel.Stop()
+			tunnel = nil
+			return ErrorXrayServerUnreachable
+		}
+		
+		if strings.Contains(errStr, "TLS") || strings.Contains(errStr, "handshake") {
+			lastError = "XRAY_TLS_FAILED: " + errStr
+			logError("TLS handshake with Xray server failed")
+			tunnel.Stop()
+			tunnel = nil
+			return ErrorXrayTLSFailed
+		}
+		
+		lastError = "Start tunnel: " + errStr
+		logError(lastError)
+		tunnel.Stop()
+		tunnel = nil
+		return ErrorTunnelStartFailed
+	}
+
+	logInfo("========================================")
+	logInfo("Tunnel started successfully!")
+	logInfo("========================================")
+	
+	return ErrorSuccess
+}
+
+//export StopHyperTunnel
+func StopHyperTunnel() C.int {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in StopHyperTunnel: %v\n%s", r, debug.Stack())
+		}
+	}()
+
+	logInfo("StopHyperTunnel called")
+
+	tunnelLock.Lock()
+	defer tunnelLock.Unlock()
+
+	if tunnel == nil {
+		logError("No tunnel running")
+		return ErrorTunnelNotRunning
+	}
+
+	logInfo("Stopping tunnel...")
+	tunnel.Stop()
+	tunnel = nil
+	
+	logInfo("Tunnel stopped successfully")
+	return ErrorSuccess
+}
+
+//export GetTunnelStats
+func GetTunnelStats() *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in GetTunnelStats: %v", r)
+		}
+	}()
+
+	tunnelLock.Lock()
+	defer tunnelLock.Unlock()
+
+	if tunnel == nil {
+		return C.CString(`{"connected":false,"error":"no tunnel running"}`)
+	}
+
+	stats := tunnel.GetStats()
+	jsonBytes, err := json.Marshal(stats)
+	if err != nil {
+		return C.CString(`{"connected":false,"error":"failed to marshal stats"}`)
+	}
+
+	return C.CString(string(jsonBytes))
+}
+
+//export GetLastError
+func GetLastError() *C.char {
+	return C.CString(lastError)
+}
+
+//export GetXrayConfig
+func GetXrayConfig() *C.char {
+	tunnelLock.Lock()
+	defer tunnelLock.Unlock()
+	
+	if tunnel == nil {
+		return C.CString("{}")
+	}
+	
+	return C.CString(tunnel.ExportXrayConfig())
+}
+
+//export NativeGeneratePublicKey
+func NativeGeneratePublicKey(privateKeyBase64 *C.char) *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in NativeGeneratePublicKey: %v", r)
+		}
+	}()
+
+	privateKey := C.GoString(privateKeyBase64)
+	if privateKey == "" {
+		return C.CString("")
+	}
+
+	// Use WireGuard's curve25519 to generate public key
+	publicKey, err := bridge.GeneratePublicKey(privateKey)
+	if err != nil {
+		logError("Failed to generate public key: %v", err)
+		return C.CString("")
+	}
+
+	return C.CString(publicKey)
+}
+
+//export FreeString
+func FreeString(str *C.char) {
+	if str != nil {
+		C.free(unsafe.Pointer(str))
+	}
+}
+
+// Go callback that calls back to C/JNI
+func goSocketProtector(fd int) bool {
+	result := C.call_protector(C.int(fd))
+	return bool(result)
+}
+
+//export SetSocketProtector
+func SetSocketProtector(protector C.socket_protector_func) {
+	C.set_protector(protector)
+	bridge.SetSocketProtector(goSocketProtector)
+	logInfo("[JNI] Socket protector registered")
+}
+
+// ============================================================================
+// Multi-Instance Management Functions
+// ============================================================================
+
+//export InitMultiInstanceManager
+func InitMultiInstanceManager(nativeLibDir, filesDir *C.char, maxInstances C.int) C.int {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in InitMultiInstanceManager: %v\n%s", r, debug.Stack())
+		}
+	}()
+
+	multiManagerLock.Lock()
+	defer multiManagerLock.Unlock()
+
+	nativeDir := C.GoString(nativeLibDir)
+	files := C.GoString(filesDir)
+	max := int(maxInstances)
+
+	logInfo("InitMultiInstanceManager: nativeLibDir=%s, filesDir=%s, maxInstances=%d", nativeDir, files, max)
+
+	multiManager = xray.NewMultiInstanceManager(nativeDir, files, max)
+	
+	logInfo("MultiInstanceManager initialized successfully")
+	return ErrorSuccess
+}
+
+//export StartMultiInstances
+func StartMultiInstances(count C.int, configJSON *C.char, excludedPortsJSON *C.char) *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in StartMultiInstances: %v\n%s", r, debug.Stack())
+		}
+	}()
+
+	multiManagerLock.Lock()
+	defer multiManagerLock.Unlock()
+
+	if multiManager == nil {
+		logError("MultiInstanceManager not initialized")
+		return C.CString(`{"error":"manager not initialized"}`)
+	}
+
+	config := C.GoString(configJSON)
+	excludedStr := C.GoString(excludedPortsJSON)
+	
+	var excludedPorts []int
+	if excludedStr != "" {
+		json.Unmarshal([]byte(excludedStr), &excludedPorts)
+	}
+
+	logInfo("StartMultiInstances: count=%d, configLen=%d, excludedPorts=%v", count, len(config), excludedPorts)
+
+	result, err := multiManager.StartInstances(int(count), config, excludedPorts)
+	if err != nil {
+		logError("StartMultiInstances failed: %v", err)
+		errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
+		return C.CString(string(errJSON))
+	}
+
+	logInfo("StartMultiInstances successful: %v", result)
+	resultJSON, _ := json.Marshal(map[string]interface{}{
+		"success":   true,
+		"instances": result,
+	})
+	return C.CString(string(resultJSON))
+}
+
+//export StopMultiInstance
+func StopMultiInstance(index C.int) C.int {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in StopMultiInstance: %v\n%s", r, debug.Stack())
+		}
+	}()
+
+	multiManagerLock.Lock()
+	defer multiManagerLock.Unlock()
+
+	if multiManager == nil {
+		logError("MultiInstanceManager not initialized")
+		return ErrorTunnelNotRunning
+	}
+
+	err := multiManager.StopInstance(int(index))
+	if err != nil {
+		logError("StopMultiInstance failed: %v", err)
+		return ErrorTunnelNotRunning
+	}
+
+	logInfo("StopMultiInstance %d successful", index)
+	return ErrorSuccess
+}
+
+//export StopAllMultiInstances
+func StopAllMultiInstances() C.int {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in StopAllMultiInstances: %v\n%s", r, debug.Stack())
+		}
+	}()
+
+	multiManagerLock.Lock()
+	defer multiManagerLock.Unlock()
+
+	if multiManager == nil {
+		logError("MultiInstanceManager not initialized")
+		return ErrorTunnelNotRunning
+	}
+
+	multiManager.StopAllInstances()
+	logInfo("StopAllMultiInstances successful")
+	return ErrorSuccess
+}
+
+//export GetMultiInstanceStatus
+func GetMultiInstanceStatus(index C.int) *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in GetMultiInstanceStatus: %v", r)
+		}
+	}()
+
+	multiManagerLock.Lock()
+	defer multiManagerLock.Unlock()
+
+	if multiManager == nil {
+		return C.CString(`{"error":"manager not initialized"}`)
+	}
+
+	info, err := multiManager.GetInstanceStatus(int(index))
+	if err != nil {
+		errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
+		return C.CString(string(errJSON))
+	}
+
+	infoJSON, _ := json.Marshal(info)
+	return C.CString(string(infoJSON))
+}
+
+//export GetAllMultiInstancesStatus
+func GetAllMultiInstancesStatus() *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in GetAllMultiInstancesStatus: %v", r)
+		}
+	}()
+
+	multiManagerLock.Lock()
+	defer multiManagerLock.Unlock()
+
+	if multiManager == nil {
+		return C.CString(`{"error":"manager not initialized"}`)
+	}
+
+	return C.CString(multiManager.GetAllInstancesStatusJSON())
+}
+
+//export GetMultiInstanceCount
+func GetMultiInstanceCount() C.int {
+	multiManagerLock.Lock()
+	defer multiManagerLock.Unlock()
+
+	if multiManager == nil {
+		return 0
+	}
+
+	return C.int(multiManager.GetInstanceCount())
+}
+
+//export IsMultiInstanceRunning
+func IsMultiInstanceRunning() C.int {
+	multiManagerLock.Lock()
+	defer multiManagerLock.Unlock()
+
+	if multiManager == nil {
+		return 0
+	}
+
+	if multiManager.IsRunning() {
+		return 1
+	}
+	return 0
+}
+
+// ============================================================================
+// DNS Cache Management Functions
+// ============================================================================
+
+//export InitDNSCache
+func InitDNSCache(cacheDir *C.char) C.int {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in InitDNSCache: %v\n%s", r, debug.Stack())
+		}
+	}()
+
+	dir := C.GoString(cacheDir)
+	logInfo("InitDNSCache: cacheDir=%s", dir)
+
+	cacheManager := dns.GetCacheManager()
+	if err := cacheManager.Initialize(dir); err != nil {
+		logError("Failed to initialize DNS cache: %v", err)
+		return -1
+	}
+
+	logInfo("DNS cache initialized successfully")
+	return ErrorSuccess
+}
+
+//export DNSCacheLookup
+func DNSCacheLookup(hostname *C.char) *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in DNSCacheLookup: %v", r)
+		}
+	}()
+
+	host := C.GoString(hostname)
+	cacheManager := dns.GetCacheManager()
+
+	ips, found := cacheManager.Lookup(host)
+	if !found || len(ips) == 0 {
+		return C.CString("")
+	}
+
+	// Return first IP
+	return C.CString(ips[0].String())
+}
+
+//export DNSCacheLookupAll
+func DNSCacheLookupAll(hostname *C.char) *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in DNSCacheLookupAll: %v", r)
+		}
+	}()
+
+	host := C.GoString(hostname)
+	cacheManager := dns.GetCacheManager()
+
+	ips, found := cacheManager.Lookup(host)
+	if !found || len(ips) == 0 {
+		return C.CString("[]")
+	}
+
+	var ipStrings []string
+	for _, ip := range ips {
+		ipStrings = append(ipStrings, ip.String())
+	}
+
+	jsonBytes, _ := json.Marshal(ipStrings)
+	return C.CString(string(jsonBytes))
+}
+
+//export DNSCacheSave
+func DNSCacheSave(hostname *C.char, ipsJSON *C.char, ttl C.long) {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in DNSCacheSave: %v", r)
+		}
+	}()
+
+	host := C.GoString(hostname)
+	ipsStr := C.GoString(ipsJSON)
+
+	var ipStrings []string
+	json.Unmarshal([]byte(ipsStr), &ipStrings)
+
+	cacheManager := dns.GetCacheManager()
+	cacheManager.SaveFromStrings(host, ipStrings, int64(ttl))
+}
+
+//export DNSCacheGetMetrics
+func DNSCacheGetMetrics() *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in DNSCacheGetMetrics: %v", r)
+		}
+	}()
+
+	cacheManager := dns.GetCacheManager()
+	return C.CString(cacheManager.GetMetricsJSON())
+}
+
+//export DNSCacheClear
+func DNSCacheClear() {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in DNSCacheClear: %v", r)
+		}
+	}()
+
+	cacheManager := dns.GetCacheManager()
+	cacheManager.Clear()
+	logInfo("DNS cache cleared")
+}
+
+//export DNSCacheCleanupExpired
+func DNSCacheCleanupExpired() C.int {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in DNSCacheCleanupExpired: %v", r)
+		}
+	}()
+
+	cacheManager := dns.GetCacheManager()
+	removed := cacheManager.CleanupExpired()
+	return C.int(removed)
+}
+
+// ============================================================================
+// DNS Server Functions
+// ============================================================================
+
+//export StartDNSServer
+func StartDNSServer(port C.int, upstreamDNS *C.char) C.int {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in StartDNSServer: %v\n%s", r, debug.Stack())
+		}
+	}()
+
+	upstream := C.GoString(upstreamDNS)
+	if upstream == "" {
+		upstream = "1.1.1.1:53"
+	}
+
+	server := dns.GetDNSServer()
+	server.SetUpstreamDNS(upstream)
+	server.SetLogCallback(func(msg string) {
+		logInfo("[DNS] %s", msg)
+	})
+
+	if err := server.Start(int(port)); err != nil {
+		logError("Failed to start DNS server: %v", err)
+		return -1
+	}
+
+	logInfo("DNS server started on port %d with upstream %s", server.GetListeningPort(), upstream)
+	return C.int(server.GetListeningPort())
+}
+
+//export StopDNSServer
+func StopDNSServer() C.int {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in StopDNSServer: %v", r)
+		}
+	}()
+
+	server := dns.GetDNSServer()
+	server.Stop()
+
+	logInfo("DNS server stopped")
+	return ErrorSuccess
+}
+
+//export IsDNSServerRunning
+func IsDNSServerRunning() C.int {
+	server := dns.GetDNSServer()
+	if server.IsRunning() {
+		return 1
+	}
+	return 0
+}
+
+//export GetDNSServerPort
+func GetDNSServerPort() C.int {
+	server := dns.GetDNSServer()
+	return C.int(server.GetListeningPort())
+}
+
+//export GetDNSServerStats
+func GetDNSServerStats() *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in GetDNSServerStats: %v", r)
+		}
+	}()
+
+	server := dns.GetDNSServer()
+	stats := server.GetStats()
+
+	jsonBytes, err := json.Marshal(stats)
+	if err != nil {
+		return C.CString("{}")
+	}
+
+	return C.CString(string(jsonBytes))
+}
+
+//export DNSResolve
+func DNSResolve(hostname *C.char) *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in DNSResolve: %v", r)
+		}
+	}()
+
+	host := C.GoString(hostname)
+	server := dns.GetDNSServer()
+
+	ips, err := server.Resolve(host)
+	if err != nil || len(ips) == 0 {
+		return C.CString("")
+	}
+
+	var ipStrings []string
+	for _, ip := range ips {
+		ipStrings = append(ipStrings, ip.String())
+	}
+
+	jsonBytes, _ := json.Marshal(ipStrings)
+	return C.CString(string(jsonBytes))
+}
+
+func main() {}

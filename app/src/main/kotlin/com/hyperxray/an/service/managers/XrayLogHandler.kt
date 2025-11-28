@@ -5,7 +5,7 @@ import android.content.Intent
 import android.util.Log
 import com.hyperxray.an.common.AiLogHelper
 import com.hyperxray.an.data.source.LogFileManager
-import com.hyperxray.an.service.TProxyService
+import com.hyperxray.an.vpn.HyperVpnService
 import com.hyperxray.an.service.utils.TProxyUtils
 import com.hyperxray.an.service.utils.TProxyUtils.UdpErrorRecord
 import com.hyperxray.an.service.utils.TProxyUtils.UdpErrorPattern
@@ -725,7 +725,7 @@ class XrayLogHandler(
     private fun broadcastLogsBatch() {
         if (broadcastBuffer.isEmpty()) return
 
-        val logUpdateIntent = Intent(TProxyService.ACTION_LOG_UPDATE)
+        val logUpdateIntent = Intent(HyperVpnService.ACTION_LOG_UPDATE)
         logUpdateIntent.setPackage(context.packageName)
 
         // Optimize: reuse list and only resize if needed
@@ -734,7 +734,7 @@ class XrayLogHandler(
             reusableBroadcastList.ensureCapacity(broadcastBuffer.size)
         }
         reusableBroadcastList.addAll(broadcastBuffer)
-        logUpdateIntent.putStringArrayListExtra(TProxyService.EXTRA_LOG_DATA, reusableBroadcastList)
+        logUpdateIntent.putStringArrayListExtra("log_data", reusableBroadcastList)
         context.sendBroadcast(logUpdateIntent)
         broadcastBuffer.clear()
         Log.d(TAG, "Broadcasted a batch of logs.")

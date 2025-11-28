@@ -7,7 +7,6 @@ import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.notification.TelegramNotificationManager
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.service.state.ServiceSessionState
-import com.hyperxray.an.telemetry.TProxyAiOptimizer
 
 /**
  * Manages initialization and cleanup of service dependencies.
@@ -17,8 +16,6 @@ class ServiceDependencyManager {
     private val TAG = "ServiceDependencyManager"
     
     // Dependencies - exposed as properties
-    var tproxyAiOptimizer: TProxyAiOptimizer? = null
-        private set
     
     var telegramNotificationManager: TelegramNotificationManager? = null
         private set
@@ -32,9 +29,6 @@ class ServiceDependencyManager {
      */
     fun setup(context: Context, session: ServiceSessionState) {
         Log.d(TAG, "Setting up service dependencies...")
-        
-        // Initialize TProxyAiOptimizer
-        initializeTProxyAiOptimizer(context, session)
         
         // Initialize ONNX Runtime Manager
         initializeOnnxRuntimeManager(context)
@@ -54,10 +48,6 @@ class ServiceDependencyManager {
     fun cleanup() {
         Log.d(TAG, "Cleaning up service dependencies...")
         
-        // Stop AI optimizer
-        tproxyAiOptimizer?.stopOptimization()
-        tproxyAiOptimizer = null
-        
         // Release ONNX Runtime Manager
         OnnxRuntimeManager.release()
         
@@ -68,20 +58,6 @@ class ServiceDependencyManager {
         dnsCacheInitialized = false
         
         Log.d(TAG, "Service dependencies cleanup completed")
-    }
-    
-    /**
-     * Initialize AI-powered TProxy optimizer.
-     */
-    private fun initializeTProxyAiOptimizer(context: Context, session: ServiceSessionState) {
-        try {
-            val prefs = Preferences(context)
-            session.tproxyAiOptimizer = TProxyAiOptimizer(context, prefs)
-            tproxyAiOptimizer = session.tproxyAiOptimizer
-            Log.d(TAG, "TProxyAiOptimizer initialized successfully")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize TProxyAiOptimizer: ${e.message}", e)
-        }
     }
     
     /**

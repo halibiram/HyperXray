@@ -3,7 +3,7 @@ package com.hyperxray.an.notification
 import android.app.ActivityManager
 import android.content.Context
 import com.hyperxray.an.feature.telegram.domain.usecase.GetVpnStatusUseCase
-import com.hyperxray.an.service.TProxyService
+import com.hyperxray.an.vpn.HyperVpnService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -15,7 +15,7 @@ class GetVpnStatusUseCaseImpl(
 ) : GetVpnStatusUseCase {
     override suspend fun invoke(): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val isRunning = isVpnServiceRunning(context, TProxyService::class.java)
+            val isRunning = isVpnServiceRunning(context, HyperVpnService::class.java)
             val status = if (isRunning) {
                 buildString {
                     appendLine("<b>📡 VPN CONNECTION STATUS</b>")

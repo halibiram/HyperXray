@@ -58,20 +58,6 @@
         </receiver>
 
         <service
-            android:name="com.hyperxray.an.service.TProxyService"
-            android:exported="true"
-            android:foregroundServiceType="specialUse"
-            android:permission="android.permission.BIND_VPN_SERVICE"
-            android:process=":native">
-            <intent-filter>
-                <action android:name="android.net.VpnService" />
-            </intent-filter>
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="VPN service" />
-        </service>
-
-        <service
             android:name="com.hyperxray.an.service.QuickTileService"
             android:exported="true"
             android:icon="@drawable/ic_stat_name"
@@ -80,6 +66,27 @@
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
+        </service>
+
+        <service
+            android:name="com.hyperxray.an.vpn.HyperVpnService"
+            android:exported="true"
+            android:foregroundServiceType="specialUse"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:process=":native">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+                <action android:name="com.hyperxray.an.HYPER_VPN_START" />
+                <action android:name="com.hyperxray.an.HYPER_VPN_STOP" />
+                <action android:name="com.hyperxray.an.CONNECT" />
+                <action android:name="com.hyperxray.an.DISCONNECT" />
+                <action android:name="com.hyperxray.an.RELOAD_CONFIG" />
+                <action android:name="com.hyperxray.an.ERROR" />
+                <action android:name="com.hyperxray.an.LOG_UPDATE" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="WireGuard over Xray VPN service" />
         </service>
 
         <activity

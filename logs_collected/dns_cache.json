@@ -1,1955 +1,444 @@
 {
-  "version": 2,
+  "version": 1,
   "entries": {
-    "release-assets.githubusercontent.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1178112123
-        },
-        {
-          "ipv4": -1178112379
-        },
-        {
-          "ipv4": -1178112635
-        },
-        {
-          "ipv4": -1178112891
-        }
-      ],
-      "timestamp": 1763676570,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "pbs.twimg.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1746019474
-        },
-        {
-          "ipv4": -1405053074
-        }
-      ],
-      "timestamp": 1763722120,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "auth-engine.sec.intl.miui.com": {
-      "compressedIps": [
-        {
-          "ipv4": 338654070
-        }
-      ],
-      "timestamp": 1763722121,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "alt1-mtalk.google.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1062021700
-        }
-      ],
-      "timestamp": 1763722127,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "safebrowsing.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1113981279
-        }
-      ],
-      "timestamp": 1763722131,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "translate.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1249758815
-        }
-      ],
-      "timestamp": 1763722131,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "optimizationguide-pa.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1089054303
-        },
-        {
-          "ipv4": 1823543135
-        },
-        {
-          "ipv4": 1113981279
-        },
-        {
-          "ipv4": 1089058911
-        },
-        {
-          "ipv4": -1896109985
-        },
-        {
-          "ipv4": -1896108705
-        },
-        {
-          "ipv4": 1089054559
-        },
-        {
-          "ipv4": -1379775393
-        },
-        {
-          "ipv4": -1896190369
-        },
-        {
-          "ipv4": 1249724255
-        },
-        {
-          "ipv4": 1249758815
-        },
-        {
-          "ipv4": 1249740127
-        }
-      ],
-      "timestamp": 1763722131,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "fast.com": {
-      "compressedIps": [
-        {
-          "ipv4": 389450818
-        }
-      ],
-      "timestamp": 1763722132,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "ichnaea-web.netflix.com": {
-      "compressedIps": [
-        {
-          "ipv4": 886222820
-        },
-        {
-          "ipv4": 910993444
-        },
-        {
-          "ipv4": 920451765
-        }
-      ],
-      "timestamp": 1763722131,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "api.fast.com": {
-      "compressedIps": [
-        {
-          "ipv4": 586285908
-        },
-        {
-          "ipv4": 586781790
-        },
-        {
-          "ipv4": 1059293195
-        }
-      ],
-      "timestamp": 1763722131,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "ipv4-c002-slz001-mobtelecom-isp.1.oca.nflxvideo.net": {
-      "compressedIps": [
-        {
-          "ipv4": -913021490
-        }
-      ],
-      "timestamp": 1763722137,
-      "ttl": 60479,
-      "isNegative": false
-    },
-    "safebrowsing.google.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1823543131
-        },
-        {
-          "ipv4": 1823543230
-        },
-        {
-          "ipv4": 1823543133
-        },
-        {
-          "ipv4": 1823543176
-        }
-      ],
-      "timestamp": 1763722138,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "tekno47.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1847627016
-        }
-      ],
-      "timestamp": 1763722138,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "ipv4-c229-ams001-ix.1.oca.nflxvideo.net": {
-      "compressedIps": [
-        {
-          "ipv4": -970558581
-        }
-      ],
-      "timestamp": 1763722140,
-      "ttl": 60479,
-      "isNegative": false
-    },
-    "code.jivosite.com": {
-      "compressedIps": [
-        {
-          "ipv4": 90514725
-        }
-      ],
-      "timestamp": 1763722141,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "jules.google": {
-      "compressedIps": [
-        {
-          "ipv4": -655417317
-        }
-      ],
-      "timestamp": 1763722143,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "node-ya-2.jivosite.com": {
-      "compressedIps": [
-        {
-          "ipv4": 964708929
-        }
-      ],
-      "timestamp": 1763722144,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "www.googleadservices.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1089054619
-        },
-        {
-          "ipv4": 1089054621
-        },
-        {
-          "ipv4": 1089054620
-        },
-        {
-          "ipv4": 1089054618
-        }
-      ],
-      "timestamp": 1763722161,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "encrypted-tbn0.gstatic.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1896190325
-        },
-        {
-          "ipv4": -1896190364
-        },
-        {
-          "ipv4": -1896190351
-        },
-        {
-          "ipv4": -1896190326
-        },
-        {
-          "ipv4": -1896190362
-        },
-        {
-          "ipv4": -1896190363
-        }
-      ],
-      "timestamp": 1763722162,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "yabancidizibox.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1746538035
-        },
-        {
-          "ipv4": 1746538291
-        },
-        {
-          "ipv4": -1404876364
-        }
-      ],
-      "timestamp": 1763722163,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "searchnotifications-pa.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1089054303
-        },
-        {
-          "ipv4": -1896108705
-        },
-        {
-          "ipv4": 1249740127
-        },
-        {
-          "ipv4": -1896190369
-        },
-        {
-          "ipv4": -1896109985
-        },
-        {
-          "ipv4": 1113981279
-        },
-        {
-          "ipv4": 1249758815
-        },
-        {
-          "ipv4": 1823543135
-        },
-        {
-          "ipv4": 1089058911
-        },
-        {
-          "ipv4": 1089054559
-        },
-        {
-          "ipv4": -1379775393
-        },
-        {
-          "ipv4": 1249724255
-        }
-      ],
-      "timestamp": 1763722164,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "img.yabancidizibox.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1404876364
-        },
-        {
-          "ipv4": 1746538035
-        },
-        {
-          "ipv4": 1746538291
-        }
-      ],
-      "timestamp": 1763722167,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "www.gstatic.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1249758814
-        }
-      ],
-      "timestamp": 1763722161,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "cdn.ampproject.org": {
-      "compressedIps": [
-        {
-          "ipv4": 1249758852
-        }
-      ],
-      "timestamp": 1763722162,
-      "ttl": 60479,
-      "isNegative": false
-    },
-    "googleads.g.doubleclick.net": {
-      "compressedIps": [
-        {
-          "ipv4": -1896190309
-        },
-        {
-          "ipv4": -1896190308
-        },
-        {
-          "ipv4": -1896190307
-        },
-        {
-          "ipv4": -1896190310
-        }
-      ],
-      "timestamp": 1763722169,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "static.doubleclick.net": {
-      "compressedIps": [
-        {
-          "ipv4": 1113981333
-        },
-        {
-          "ipv4": 1113981332
-        }
-      ],
-      "timestamp": 1763722169,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "play.google.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1089058916
-        },
-        {
-          "ipv4": 1089058917
-        },
-        {
-          "ipv4": 1089058954
-        },
-        {
-          "ipv4": 1089058929
-        },
-        {
-          "ipv4": 1089058918
-        },
-        {
-          "ipv4": 1089058955
-        }
-      ],
-      "timestamp": 1763722162,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "filmizlefullizle.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1404842834
-        },
-        {
-          "ipv4": 1746222347
-        }
-      ],
-      "timestamp": 1763722169,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "ogads-pa.clients6.google.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1089054303
-        }
-      ],
-      "timestamp": 1763722164,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "www.hdfilmizle.life": {
-      "compressedIps": [
-        {
-          "ipv4": 1746538441
-        },
-        {
-          "ipv4": 1746538185
-        },
-        {
-          "ipv4": -1404876222
-        }
-      ],
-      "timestamp": 1763722176,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "slack.com": {
-      "compressedIps": [
-        {
-          "ipv4": 54819935
-        },
-        {
-          "ipv4": 874376916
-        },
-        {
-          "ipv4": 54831769
-        },
-        {
-          "ipv4": 312460769
-        },
-        {
-          "ipv4": 54832994
-        },
-        {
-          "ipv4": 54820008
-        }
-      ],
-      "timestamp": 1763722178,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "api-stream.twitter.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1404960541
-        },
-        {
-          "ipv4": -1566602011
-        }
-      ],
-      "timestamp": 1763722120,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "api.twitter.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1566602011
-        },
-        {
-          "ipv4": -1404960541
-        }
-      ],
-      "timestamp": 1763722179,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "www.googletagmanager.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1823543137
-        }
-      ],
-      "timestamp": 1763722144,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "region1.google-analytics.com": {
-      "compressedIps": [
-        {
-          "ipv4": -655417308
-        },
-        {
-          "ipv4": -655416796
-        }
-      ],
-      "timestamp": 1763722146,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "readaloud.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1089054559
-        },
-        {
-          "ipv4": -1379775393
-        },
-        {
-          "ipv4": -1896151713
-        },
-        {
-          "ipv4": 1823543135
-        },
-        {
-          "ipv4": 1249724255
-        },
-        {
-          "ipv4": 1089054303
-        },
-        {
-          "ipv4": 1113981279
-        },
-        {
-          "ipv4": 1249758815
-        },
-        {
-          "ipv4": 1089058911
-        },
-        {
-          "ipv4": 1249740127
-        },
-        {
-          "ipv4": -1896109985
-        },
-        {
-          "ipv4": -1896190369
-        }
-      ],
-      "timestamp": 1763722133,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "clients4.google.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1089054603
-        },
-        {
-          "ipv4": 1089054566
-        },
-        {
-          "ipv4": 1089054565
-        },
-        {
-          "ipv4": 1089054577
-        },
-        {
-          "ipv4": 1089054564
-        },
-        {
-          "ipv4": 1089054602
-        }
-      ],
-      "timestamp": 1763722138,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "config.edge.skype.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1767172591
-        }
-      ],
-      "timestamp": 1763722378,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "taskassist-pa.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1089054559
-        },
-        {
-          "ipv4": 1089054303
-        },
-        {
-          "ipv4": 1249724255
-        },
-        {
-          "ipv4": 1113981279
-        },
-        {
-          "ipv4": -1896109985
-        },
-        {
-          "ipv4": -1379775393
-        },
-        {
-          "ipv4": 1089058911
-        },
-        {
-          "ipv4": -1896190369
-        },
-        {
-          "ipv4": 1249758815
-        },
-        {
-          "ipv4": 1823543135
-        },
-        {
-          "ipv4": -1896108705
-        },
-        {
-          "ipv4": 1249740127
-        }
-      ],
-      "timestamp": 1763722387,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "appsgrowthpromo-pa.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1379775393
-        },
-        {
-          "ipv4": 1089058911
-        },
-        {
-          "ipv4": -1896108705
-        },
-        {
-          "ipv4": 1823543135
-        },
-        {
-          "ipv4": 1249758815
-        },
-        {
-          "ipv4": 1249724255
-        },
-        {
-          "ipv4": 1089054303
-        },
-        {
-          "ipv4": -1896190369
-        },
-        {
-          "ipv4": 1089054559
-        },
-        {
-          "ipv4": 1249740127
-        },
-        {
-          "ipv4": 1113981279
-        },
-        {
-          "ipv4": -1896109985
-        }
-      ],
-      "timestamp": 1763722387,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "appsgenaiserver-pa.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1896108705
-        },
-        {
-          "ipv4": 1249724255
-        },
-        {
-          "ipv4": 1249758815
-        },
-        {
-          "ipv4": 1089058911
-        },
-        {
-          "ipv4": -1379775393
-        },
-        {
-          "ipv4": 1089054303
-        },
-        {
-          "ipv4": 1113981279
-        },
-        {
-          "ipv4": 1249740127
-        },
-        {
-          "ipv4": 1823543135
-        },
-        {
-          "ipv4": -1896190369
-        },
-        {
-          "ipv4": -1896109985
-        },
-        {
-          "ipv4": 1089054559
-        }
-      ],
-      "timestamp": 1763722392,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "e2c53.gcp.gvt2.com": {
-      "compressedIps": [
-        {
-          "ipv4": 601447871
-        }
-      ],
-      "timestamp": 1763722469,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "beacons.gvt2.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1896146338
-        }
-      ],
-      "timestamp": 1763722472,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "mobile.pipe.aria.microsoft.com": {
-      "compressedIps": [
-        {
-          "ipv4": 338315551
-        }
-      ],
-      "timestamp": 1763722379,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "cdn.exp.xiaomi.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1600423244
-        },
-        {
-          "ipv4": 1600423258
-        }
-      ],
-      "timestamp": 1763722516,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "instantmessaging-pa.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": -655415585
-        },
-        {
-          "ipv4": -655416609
-        },
-        {
-          "ipv4": -655416097
-        },
-        {
-          "ipv4": -655417121
-        }
-      ],
-      "timestamp": 1763722610,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "sdkconfig.intl.xiaomi.com": {
-      "compressedIps": [
-        {
-          "ipv4": 337717096
-        },
-        {
-          "ipv4": 337717091
-        },
-        {
-          "ipv4": 337717097
-        }
-      ],
-      "timestamp": 1763722678,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "youtubei.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": -655416097
-        },
-        {
-          "ipv4": -655416609
-        },
-        {
-          "ipv4": -655417121
-        },
-        {
-          "ipv4": -655415585
-        }
-      ],
-      "timestamp": 1763722568,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "android.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": -655416609
-        },
-        {
-          "ipv4": -655416097
-        },
-        {
-          "ipv4": -655415585
-        },
-        {
-          "ipv4": -655417121
-        }
-      ],
-      "timestamp": 1763722143,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "improving.duckduckgo.com": {
-      "compressedIps": [
-        {
-          "ipv4": 881753303
-        }
-      ],
-      "timestamp": 1763722825,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "staticcdn.duckduckgo.com": {
-      "compressedIps": [
-        {
-          "ipv4": 881753566
-        }
-      ],
-      "timestamp": 1763722825,
-      "ttl": 60479,
-      "isNegative": false
-    },
-    "duckduckgo.com": {
-      "compressedIps": [
-        {
-          "ipv4": 34993367
-        },
-        {
-          "ipv4": 34993373
-        }
-      ],
-      "timestamp": 1763722825,
-      "ttl": 60479,
-      "isNegative": false
-    },
-    "api16-access-ttp.tiktokpangle.us": {
-      "compressedIps": [
-        {
-          "ipv4": 34993367
-        },
-        {
-          "ipv4": 34993373
-        }
-      ],
-      "timestamp": 1763722825,
-      "ttl": 60479,
-      "isNegative": false
-    },
-    "firebase-settings.crashlytics.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1896109986
-        }
-      ],
-      "timestamp": 1763722825,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "cloudflare-dns.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1745942777
-        },
-        {
-          "ipv4": 1745943033
-        }
-      ],
-      "timestamp": 1763722828,
-      "ttl": 60479,
-      "isNegative": false
-    },
-    "data-api-prod.opensignal.com": {
-      "compressedIps": [
-        {
-          "ipv4": -2006009144
-        }
-      ],
-      "timestamp": 1763722825,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "api.crashguard.me": {
-      "compressedIps": [
-        {
-          "ipv4": 1746535461
-        },
-        {
-          "ipv4": 1746535717
-        },
-        {
-          "ipv4": -1404876229
-        }
-      ],
-      "timestamp": 1763722834,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "api.ad.intl.xiaomi.com": {
-      "compressedIps": [
-        {
-          "ipv4": 337724102
-        },
-        {
-          "ipv4": 337724103
-        },
-        {
-          "ipv4": 337724096
-        },
-        {
-          "ipv4": 337724101
-        }
-      ],
-      "timestamp": 1763722835,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "play-fe.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1395059538
-        }
-      ],
-      "timestamp": 1763722825,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "frontier.tiktokv.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1192426822
-        }
-      ],
-      "timestamp": 1763722824,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "api64.ipify.org": {
-      "compressedIps": [
-        {
-          "ipv4": -1377365939
-        },
-        {
-          "ipv4": 1760378581
-        }
-      ],
-      "timestamp": 1763722832,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "firebaselogging.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": 881753303
-        }
-      ],
-      "timestamp": 1763722825,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "instantmessaging-pa-jms-eu.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": -655416162
-        }
-      ],
-      "timestamp": 1763723048,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "media-fra3-2.cdn.whatsapp.net": {
-      "compressedIps": [
-        {
-          "ipv4": -1645215684
-        }
-      ],
-      "timestamp": 1763723067,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "media-fra5-1.cdn.whatsapp.net": {
-      "compressedIps": [
-        {
-          "ipv4": 965801248
-        }
-      ],
-      "timestamp": 1763723067,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "mmg.whatsapp.net": {
-      "compressedIps": [
-        {
-          "ipv4": -1645163972
-        }
-      ],
-      "timestamp": 1763723074,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "media-cdg4-2.cdn.whatsapp.net": {
-      "compressedIps": [
-        {
-          "ipv4": -1645163972
-        }
-      ],
-      "timestamp": 1763723077,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "media-fra3-1.cdn.whatsapp.net": {
-      "compressedIps": [
-        {
-          "ipv4": 965802272
-        }
-      ],
-      "timestamp": 1763723083,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "media-cdg4-3.cdn.whatsapp.net": {
-      "compressedIps": [
-        {
-          "ipv4": -1555660740
-        }
-      ],
-      "timestamp": 1763723085,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "media-fra5-2.cdn.whatsapp.net": {
-      "compressedIps": [
-        {
-          "ipv4": -1645150916
-        }
-      ],
-      "timestamp": 1763723091,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "media-cdg4-1.cdn.whatsapp.net": {
-      "compressedIps": [
-        {
-          "ipv4": -1187194052
-        }
-      ],
-      "timestamp": 1763723056,
-      "ttl": 60479,
-      "isNegative": false
-    },
-    "raw.githubusercontent.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1178112635
-        },
-        {
-          "ipv4": -1178112379
-        },
-        {
-          "ipv4": -1178112123
-        },
-        {
-          "ipv4": -1178112891
-        }
-      ],
-      "timestamp": 1763723098,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "mtalk.google.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1896108612
-        }
-      ],
-      "timestamp": 1763722127,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "web.facebook.com": {
-      "compressedIps": [
-        {
-          "ipv4": 965799565
-        }
-      ],
-      "timestamp": 1763722825,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "firebaseremoteconfigrealtime.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1089058911
-        },
-        {
-          "ipv4": -1896109985
-        },
-        {
-          "ipv4": -1379775393
-        },
-        {
-          "ipv4": -1896190369
-        },
-        {
-          "ipv4": 1823543135
-        },
-        {
-          "ipv4": 1249740127
-        },
-        {
-          "ipv4": 1249724255
-        },
-        {
-          "ipv4": 1089054303
-        },
-        {
-          "ipv4": 1089054559
-        },
-        {
-          "ipv4": 1249758815
-        },
-        {
-          "ipv4": 1113981279
-        },
-        {
-          "ipv4": -1896108705
-        }
-      ],
-      "timestamp": 1763722294,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "crashlyticsreports-pa.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1089054558
-        }
-      ],
-      "timestamp": 1763722825,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "as.hepsiburada.com": {
-      "compressedIps": [
-        {
-          "ipv4": 388939185
-        }
-      ],
-      "timestamp": 1763722825,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "featureassets.org": {
-      "compressedIps": [
-        {
-          "ipv4": 578846720
-        }
-      ],
-      "timestamp": 1763722825,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "www.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1896190369
-        },
-        {
-          "ipv4": 1823543135
-        },
-        {
-          "ipv4": 1249758815
-        },
-        {
-          "ipv4": 1249724255
-        },
-        {
-          "ipv4": -1896109985
-        },
-        {
-          "ipv4": 1089054303
-        },
-        {
-          "ipv4": -1379775393
-        },
-        {
-          "ipv4": 1249740127
-        },
-        {
-          "ipv4": 1113981279
-        },
-        {
-          "ipv4": 1089054559
-        },
-        {
-          "ipv4": -1896108705
-        },
-        {
-          "ipv4": 1089058911
-        }
-      ],
-      "timestamp": 1763722137,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "firebaseremoteconfig.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1896152737
-        },
-        {
-          "ipv4": -1379738529
-        },
-        {
-          "ipv4": -1379738273
-        },
-        {
-          "ipv4": -1379738017
-        },
-        {
-          "ipv4": -1379776161
-        },
-        {
-          "ipv4": 1249758559
-        },
-        {
-          "ipv4": -782898849
-        },
-        {
-          "ipv4": 1823542879
-        },
-        {
-          "ipv4": 1249739615
-        },
-        {
-          "ipv4": 1089053791
-        },
-        {
-          "ipv4": 1089054047
-        },
-        {
-          "ipv4": -1896180129
-        },
-        {
-          "ipv4": 1089053279
-        },
-        {
-          "ipv4": 1089053023
-        }
-      ],
-      "timestamp": 1763725065,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "prodregistryv2.org": {
-      "compressedIps": [
-        {
-          "ipv4": 578846720
-        }
-      ],
-      "timestamp": 1763722827,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "analytics.us.tiktok.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1600489872
-        },
-        {
-          "ipv4": 1600489874
-        },
-        {
-          "ipv4": 1600489878
-        },
-        {
-          "ipv4": 1600489873
-        },
-        {
-          "ipv4": 1600489875
-        },
-        {
-          "ipv4": 1600489881
-        },
-        {
-          "ipv4": 1600489879
-        },
-        {
-          "ipv4": 1600489876
-        },
-        {
-          "ipv4": 1600489880
-        }
-      ],
-      "timestamp": 1763722825,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "beacons.gcp.gvt2.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1392673698
-        }
-      ],
-      "timestamp": 1763722210,
-      "ttl": 60479,
-      "isNegative": false
-    },
-    "api.telegram.org": {
-      "compressedIps": [
-        {
-          "ipv4": -1785026596
-        }
-      ],
-      "timestamp": 1763721510,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "stol.halibiram.online": {
-      "compressedIps": [
-        {
-          "ipv4": 599709468
-        }
-      ],
-      "timestamp": 1763726494,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "instagram.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1187193938
-        }
-      ],
-      "timestamp": 1763726495,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "jM2BgAABAAEAAAAACWluc3RhZ3JhbQNjb20AAAEAAcAMAAEAAQAAAC0ABLk8264="
-    },
-    "google.com": {
-      "compressedIps": [
-        {
-          "ipv4": -667232466
-        },
-        {
-          "ipv4": -1896199186
-        },
-        {
-          "ipv4": -1896172914
-        },
-        {
-          "ipv4": -667232946
-        },
-        {
-          "ipv4": -1896172690
-        },
-        {
-          "ipv4": -1395059538
-        },
-        {
-          "ipv4": -1896142898
-        },
-        {
-          "ipv4": -1896172722
-        },
-        {
-          "ipv4": -667232594
-        }
-      ],
-      "timestamp": 1763726495,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "jM2BgAABAAoAAAAAA3d3dwd5b3V0dWJlA2NvbQAAAQABwAwABQABAAAArgAWCnlvdXR1YmUtdWkBbAZnb29nbGXAGMAtAAEAAQAAAK4ABNg61y7ALQABAAEAAACuAASO+kvuwC0AAQABAAAArgAEjvqyjsAtAAEAAQAAAK4ABNg61U7ALQABAAEAAACuAASO+rNuwC0AAQABAAAArgAErNkUrsAtAAEAAQAAAK4ABI77J87ALQABAAEAAACuAASO+rNOwC0AAQABAAAArgAE2DrWrg=="
-    },
-    "www.instagram.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1896172732
-        }
-      ],
-      "timestamp": 1763726495,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "jM6BgAABAAEAAAAAA3d3dwZnb29nbGUDY29tAAABAAHADAABAAEAAAB7AASO+rNE"
-    },
-    "facebook.com": {
-      "compressedIps": [
-        {
-          "ipv4": 965769217
-        }
-      ],
-      "timestamp": 1763726495,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "jM2BgAABAAIAAAAAA3d3dwhmYWNlYm9vawNjb20AAAEAAcAMAAUAAQAADeUAEQlzdGFyLW1pbmkEYzEwcsAQwC4AAQABAAAAEQAEOZB4AQ=="
-    },
-    "cdn.instagram.com": {
-      "compressedIps": [],
-      "timestamp": 1763726495,
-      "ttl": 300,
-      "isNegative": true,
-      "rawResponse": "jn6BgwABAAAAAQAAA2NkbglpbnN0YWdyYW0DY29tAAABAAHAEAAGAAEAAA4QACoBYQJuc8AQA2RucwhmYWNlYm9va8Aa+s6wDAAAOEAAAAcIAAk6gAAADhA="
-    },
-    "cdn.facebook.com": {
-      "compressedIps": [],
-      "timestamp": 1763726495,
-      "ttl": 300,
-      "isNegative": true,
-      "rawResponse": "joaBgwABAAAAAQAAA2NkbghmYWNlYm9vawNjb20AAAEAAcAQAAYAAQAADhAAIQFhAm5zwBADZG5zwBD6zrAMAAA4QAAABwgACTqAAAABLA=="
-    },
-    "api.instagram.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1823543145
-        },
-        {
-          "ipv4": 1823543143
-        },
-        {
-          "ipv4": 1823543187
-        },
-        {
-          "ipv4": 1823543139
-        },
-        {
-          "ipv4": 1823543146
-        },
-        {
-          "ipv4": 1823543144
-        }
-      ],
-      "timestamp": 1763726495,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "jveBgAABAAcAAAAAA2FwaQZnb29nbGUDY29tAAABAAHADAAFAAEAAABZAAgDYXBpAWzAEMAsAAEAAQAAAFkABGyxD2nALAABAAEAAABZAARssQ9nwCwAAQABAAAAWQAEbLEPk8AsAAEAAQAAAFkABGyxD2PALAABAAEAAABZAARssQ9qwCwAAQABAAAAWQAEbLEPaA=="
-    },
-    "c.whatsapp.net": {
-      "compressedIps": [
-        {
-          "ipv4": -1404960541
-        },
-        {
-          "ipv4": -1566602011
-        }
-      ],
-      "timestamp": 1763722120,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "github.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1940752125
-        }
-      ],
-      "timestamp": 1763676569,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "fonts.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1249740127
-        }
-      ],
-      "timestamp": 1763722140,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "fonts.gstatic.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1896108706
-        }
-      ],
-      "timestamp": 1763722140,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "scontent-cdg4-3.cdninstagram.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1555660737
-        }
-      ],
-      "timestamp": 1763722253,
-      "ttl": 60479,
-      "isNegative": false
-    },
-    "x.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1404960541
-        }
-      ],
-      "timestamp": 1763726497,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "l+qBgAABAAEAAAAAAXgDY29tAAABAAHADAABAAEAAACoAASsQgDj"
-    },
-    "googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1395059548
-        }
-      ],
-      "timestamp": 1763726497,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "l+mBgAABAAEAAAAACmdvb2dsZWFwaXMDY29tAAABAAHADAABAAEAAAByAASs2RSk"
-    },
-    "www.amazon.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1896142898
-        }
-      ],
-      "timestamp": 1763726497,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "l+qBgAABAAEAAAAABXlvdXR1AmJlAAABAAHADAABAAEAAAEYAASO+yfO"
-    },
-    "amazon.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1649912394
-        },
-        {
-          "ipv4": 1649582521
-        },
-        {
-          "ipv4": 1649912391
-        }
-      ],
-      "timestamp": 1763726497,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "l+qBgAABAAMAAAAABmFtYXpvbgNjb20AAAEAAcAMAAEAAQAAAlAABGJXqkrADAABAAEAAAJQAARiUqG5wAwAAQABAAACUAAEYleqRw=="
-    },
-    "youtu.be": {
-      "compressedIps": [
-        {
-          "ipv4": 887001952
-        }
-      ],
-      "timestamp": 1763726497,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "l+qBgAABAAMAAAAAA3d3dwZhbWF6b24DY29tAAABAAHADAAFAAEAAAa\/ABgCdHASNDdjZjJjOGM5LWZyb250aWVywBDALAAFAAEAAAAxAB8OZDNhZzRodWtraDYyeW4KY2xvdWRmcm9udANuZXQAwFAAAQABAAAAMQAENN6TYA=="
-    },
-    "www.twitter.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1566602011
-        }
-      ],
-      "timestamp": 1763726497,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "l+uBgAABAAEAAAAAB3R3aXR0ZXIDY29tAAABAAHADAABAAEAAAAYAASin4zl"
-    },
-    "githubusercontent.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1745913317
-        },
-        {
-          "ipv4": 1745913061
-        }
-      ],
-      "timestamp": 1763726497,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "l+yBgAABAAIAAAAACmNsb3VkZmxhcmUDY29tAAABAAHADAABAAEAAAC+AARoEIXlwAwAAQABAAAAvgAEaBCE5Q=="
-    },
-    "stackoverflow.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1395059549
-        }
-      ],
-      "timestamp": 1763726497,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "l+mBgAABAAEAAAAAB2dzdGF0aWMDY29tAAABAAHADAABAAEAAACkAASs2RSj"
-    },
-    "cdn.jsdelivr.net": {
-      "compressedIps": [
-        {
-          "ipv4": -1395059549
-        }
-      ],
-      "timestamp": 1763726498,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "mGeBgAABAAEAAAAAB2dzdGF0aWMDY29tAAABAAHADAABAAEAAACkAASs2RSj"
-    },
-    "discord.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1745913317
-        },
-        {
-          "ipv4": 1745913061
-        }
-      ],
-      "timestamp": 1763726498,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "mGiBgAABAAIAAAAACmNsb3VkZmxhcmUDY29tAAABAAHADAABAAEAAAC+AARoEIXlwAwAAQABAAAAvgAEaBCE5Q=="
-    },
-    "cloudflare.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1745913061
-        },
-        {
-          "ipv4": 1745913317
-        }
-      ],
-      "timestamp": 1763726498,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "mN6BgAABAAIAAAAACmNsb3VkZmxhcmUDY29tAAABAAHADAABAAEAAAC+AARoEITlwAwAAQABAAAAvgAEaBCF5Q=="
-    },
-    "play.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": -655416097
-        },
-        {
-          "ipv4": -655416609
-        },
-        {
-          "ipv4": -655417121
-        },
-        {
-          "ipv4": -655415585
-        }
-      ],
-      "timestamp": 1763722387,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "sf16-ies-music-tt.tiktokcdn.com": {
-      "compressedIps": [],
-      "timestamp": 1763726498,
-      "ttl": 300,
-      "isNegative": true,
-      "rawResponse": "nAuBgwABAAAAAQAAEXNmMTYtaWVzLW11c2ljLXR0CXRpa3Rva2NkbgNjb20AAAEAAcAeAAYAAQAAHCAAOAVhOS02NgRha2FtA25ldAAKaG9zdG1hc3RlcgZha2FtYWnAKF0oTTkAAKjAAAAcIAAJOoAAABwg"
-    },
-    "graph.instagram.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1645163969
-        }
-      ],
-      "timestamp": 1763722303,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "rebus.rustore.ru": {
-      "compressedIps": [
-        {
-          "ipv4": 1507716610
-        },
-        {
-          "ipv4": -1190095783
-        },
-        {
-          "ipv4": -652963012
-        }
-      ],
-      "timestamp": 1763722120,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "pubsub.googleapis.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1823543135
-        },
-        {
-          "ipv4": 1249740127
-        },
-        {
-          "ipv4": -1379775393
-        },
-        {
-          "ipv4": 1089058911
-        },
-        {
-          "ipv4": -1896190369
-        },
-        {
-          "ipv4": 1249724255
-        },
-        {
-          "ipv4": -1896109985
-        },
-        {
-          "ipv4": 1089054559
-        },
-        {
-          "ipv4": 1113981279
-        },
-        {
-          "ipv4": 1249758815
-        },
-        {
-          "ipv4": 1089054303
-        }
-      ],
-      "timestamp": 1763722144,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "i.instagram.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1187194094
-        }
-      ],
-      "timestamp": 1763722243,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "scontent-cdg4-1.cdninstagram.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1187194049
-        }
-      ],
-      "timestamp": 1763722245,
-      "ttl": 60479,
-      "isNegative": false
-    },
-    "scontent-cdg4-2.cdninstagram.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1645163969
-        }
-      ],
-      "timestamp": 1763722245,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "fa.micstatic.com": {
-      "compressedIps": [
-        {
-          "ipv4": 1746016150
-        },
-        {
-          "ipv4": 1746015894
-        }
-      ],
-      "timestamp": 1763722162,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "api.exteragram.app": {
-      "compressedIps": [
-        {
-          "ipv4": -1877016113
-        }
-      ],
-      "timestamp": 1763722837,
-      "ttl": 86400,
-      "isNegative": false
-    },
-    "dns.google.com": {
-      "compressedIps": [
-        {
-          "ipv4": 134743044
-        },
-        {
-          "ipv4": 134744072
-        }
-      ],
-      "timestamp": 1763726582,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "edge-mqtt-fallback.facebook.com": {
-      "compressedIps": [
-        {
-          "ipv4": 965802128
-        }
-      ],
-      "timestamp": 1763726582,
-      "ttl": 172800,
-      "isNegative": false
-    },
-    "test-gateway.instagram.com": {
-      "compressedIps": [
-        {
-          "ipv4": 965799472
-        }
-      ],
-      "timestamp": 1763722243,
-      "ttl": 172800,
-      "isNegative": false
+    "gstatic.com": {
+      "ips": [
+        "172.217.20.163"
+      ],
+      "timestamp": 1764241276,
+      "ttl": 295
+    },
+    "www.youtube.com": {
+      "ips": [
+        "142.250.75.238",
+        "216.58.214.174",
+        "142.250.179.110",
+        "172.217.20.174",
+        "142.250.178.142",
+        "172.217.18.206",
+        "142.250.179.78",
+        "142.251.39.206",
+        "216.58.214.78"
+      ],
+      "timestamp": 1764241280,
+      "ttl": 280
     },
     "www.google.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1187193938
-        }
+      "ips": [
+        "142.250.178.132"
       ],
-      "timestamp": 1763726495,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "jM6BgAABAAIAAAAAA3d3dwlpbnN0YWdyYW0DY29tAAABAAHADAAFAAEAAA3yABcPei1wNDItaW5zdGFncmFtBGMxMHLAEMAvAAEAAQAAAB4ABLk8264="
+      "timestamp": 1764241276,
+      "ttl": 267
     },
-    "mqtt-ig-p4.facebook.com": {
-      "compressedIps": [
-        {
-          "ipv4": 965799620
-        }
+    "amazon.com": {
+      "ips": [
+        "98.87.170.74",
+        "98.87.170.71",
+        "98.82.161.185"
       ],
-      "timestamp": 1763722243,
-      "ttl": 172800,
-      "isNegative": false
+      "timestamp": 1764241276,
+      "ttl": 832
+    },
+    "google.com": {
+      "ips": [
+        "74.125.71.139",
+        "74.125.71.100",
+        "74.125.71.138",
+        "74.125.71.101",
+        "74.125.71.102",
+        "74.125.71.113"
+      ],
+      "timestamp": 1764241276,
+      "ttl": 300
+    },
+    "microsoft.com": {
+      "ips": [
+        "13.107.226.67",
+        "13.107.253.67"
+      ],
+      "timestamp": 1764241279,
+      "ttl": 433
+    },
+    "twitter.com": {
+      "ips": [
+        "162.159.140.229"
+      ],
+      "timestamp": 1764241279,
+      "ttl": 291
+    },
+    "dns.google": {
+      "ips": [
+        "8.8.8.8",
+        "8.8.4.4"
+      ],
+      "timestamp": 1764241279,
+      "ttl": 677
+    },
+    "icloud.com": {
+      "ips": [
+        "17.253.144.10"
+      ],
+      "timestamp": 1764241280,
+      "ttl": 371
+    },
+    "api.facebook.com": {
+      "ips": [
+        "163.70.128.13"
+      ],
+      "timestamp": 1764241282,
+      "ttl": 172800
+    },
+    "api.google.com": {
+      "ips": [
+        "74.125.206.103",
+        "74.125.206.147",
+        "74.125.206.99",
+        "74.125.206.105",
+        "74.125.206.106",
+        "74.125.206.104"
+      ],
+      "timestamp": 1764241282,
+      "ttl": 172800
+    },
+    "nflxvideo.net": {
+      "ips": [
+        "18.236.7.30",
+        "107.20.175.192",
+        "34.252.74.1"
+      ],
+      "timestamp": 1764241295,
+      "ttl": 281
+    },
+    "googletagmanager.com": {
+      "ips": [
+        "142.250.178.136"
+      ],
+      "timestamp": 1764241295,
+      "ttl": 271
+    },
+    "discord.com": {
+      "ips": [
+        "162.159.136.232",
+        "162.159.128.233",
+        "162.159.135.232",
+        "162.159.138.232",
+        "162.159.137.232"
+      ],
+      "timestamp": 1764241295,
+      "ttl": 258
+    },
+    "doubleclick.net": {
+      "ips": [
+        "142.251.39.206"
+      ],
+      "timestamp": 1764241295,
+      "ttl": 300
+    },
+    "linkedin.com": {
+      "ips": [
+        "150.171.22.12"
+      ],
+      "timestamp": 1764241295,
+      "ttl": 290
+    },
+    "cdnjs.cloudflare.com": {
+      "ips": [
+        "104.17.25.14",
+        "104.17.24.14"
+      ],
+      "timestamp": 1764241295,
+      "ttl": 291
+    },
+    "facebook.com": {
+      "ips": [
+        "163.70.128.35"
+      ],
+      "timestamp": 1764241485,
+      "ttl": 57
+    },
+    "x.com": {
+      "ips": [
+        "162.159.140.229"
+      ],
+      "timestamp": 1764241485,
+      "ttl": 201
+    },
+    "www.instagram.com": {
+      "ips": [
+        "163.70.128.174"
+      ],
+      "timestamp": 1764241485,
+      "ttl": 52
+    },
+    "youtube.com": {
+      "ips": [
+        "216.58.213.78"
+      ],
+      "timestamp": 1764241485,
+      "ttl": 139
     },
     "www.facebook.com": {
-      "compressedIps": [
-        {
-          "ipv4": 965769217
-        }
+      "ips": [
+        "185.60.219.35"
       ],
-      "timestamp": 1763726495,
-      "ttl": 3600,
-      "isNegative": false,
-      "rawResponse": "jM2BgAABAAEAAAAACGZhY2Vib29rA2NvbQAAAQABwAwAAQABAAAANwAEOZB4AQ=="
-    },
-    "edge-mqtt.facebook.com": {
-      "compressedIps": [
-        {
-          "ipv4": -1555660737
-        }
-      ],
-      "timestamp": 1763722243,
-      "ttl": 172800,
-      "isNegative": false
+      "timestamp": 1764241485,
+      "ttl": 52
     },
     "graph.facebook.com": {
-      "compressedIps": [
-        {
-          "ipv4": 965799565
-        }
+      "ips": [
+        "157.240.195.17"
       ],
-      "timestamp": 1763722130,
-      "ttl": 172800,
-      "isNegative": false
+      "timestamp": 1764241485,
+      "ttl": 49
     },
-    "scontent-cdg4-1.xx.fbcdn.net": {
-      "compressedIps": [
-        {
-          "ipv4": -1187194110
-        }
+    "www.twitter.com": {
+      "ips": [
+        "172.66.0.227"
       ],
-      "timestamp": 1763722618,
-      "ttl": 86400,
-      "isNegative": false
+      "timestamp": 1764241485,
+      "ttl": 68
     },
-    "z-m-gateway.facebook.com": {
-      "compressedIps": [
-        {
-          "ipv4": 965799427
-        }
+    "youtu.be": {
+      "ips": [
+        "142.250.74.238"
       ],
-      "timestamp": 1763722611,
-      "ttl": 172800,
-      "isNegative": false
+      "timestamp": 1764241485,
+      "ttl": 57
     },
-    "scontent-cdg4-3.xx.fbcdn.net": {
-      "compressedIps": [
-        {
-          "ipv4": -1555660777
-        }
+    "instagram.com": {
+      "ips": [
+        "185.60.219.174"
       ],
-      "timestamp": 1763726593,
-      "ttl": 86400,
-      "isNegative": false
+      "timestamp": 1764241485,
+      "ttl": 60
+    },
+    "stackoverflow.com": {
+      "ips": [
+        "198.252.206.1"
+      ],
+      "timestamp": 1764241485,
+      "ttl": 300
+    },
+    "www.apple.com": {
+      "ips": [
+        "23.58.192.249"
+      ],
+      "timestamp": 1764241485,
+      "ttl": 20
+    },
+    "apple.com": {
+      "ips": [
+        "17.253.144.10"
+      ],
+      "timestamp": 1764241485,
+      "ttl": 783
+    },
+    "github.com": {
+      "ips": [
+        "140.82.121.3"
+      ],
+      "timestamp": 1764241485,
+      "ttl": 38
+    },
+    "www.microsoft.com": {
+      "ips": [
+        "23.58.193.226"
+      ],
+      "timestamp": 1764241485,
+      "ttl": 20
+    },
+    "cloudflare.com": {
+      "ips": [
+        "104.16.132.229",
+        "104.16.133.229"
+      ],
+      "timestamp": 1764241485,
+      "ttl": 127
+    },
+    "www.amazon.com": {
+      "ips": [
+        "52.222.147.96"
+      ],
+      "timestamp": 1764241485,
+      "ttl": 2
+    },
+    "googleapis.com": {
+      "ips": [
+        "142.251.39.196"
+      ],
+      "timestamp": 1764241485,
+      "ttl": 34
+    },
+    "static.facebook.com": {
+      "ips": [
+        "185.60.219.3"
+      ],
+      "timestamp": 1764241491,
+      "ttl": 60
+    },
+    "api.instagram.com": {
+      "ips": [
+        "163.70.128.63"
+      ],
+      "timestamp": 1764241491,
+      "ttl": 60
+    },
+    "www.reddit.com": {
+      "ips": [
+        "151.101.1.140",
+        "151.101.65.140",
+        "151.101.193.140",
+        "151.101.129.140"
+      ],
+      "timestamp": 1764241494,
+      "ttl": 54
+    },
+    "netflix.com": {
+      "ips": [
+        "54.170.196.176",
+        "52.214.181.141",
+        "54.246.79.9"
+      ],
+      "timestamp": 1764241494,
+      "ttl": 60
+    },
+    "fonts.gstatic.com": {
+      "ips": [
+        "216.58.214.163"
+      ],
+      "timestamp": 1764241495,
+      "ttl": 128
+    },
+    "cdn.jsdelivr.net": {
+      "ips": [
+        "104.16.175.226",
+        "104.16.174.226"
+      ],
+      "timestamp": 1764241495,
+      "ttl": 169
+    },
+    "fonts.googleapis.com": {
+      "ips": [
+        "108.177.15.95"
+      ],
+      "timestamp": 1764241495,
+      "ttl": 158
+    },
+    "tiktok.com": {
+      "ips": [
+        "23.72.248.204",
+        "23.72.248.205",
+        "23.72.248.206",
+        "23.72.248.214",
+        "23.72.248.218",
+        "23.72.248.215",
+        "23.72.248.217",
+        "23.72.248.202"
+      ],
+      "timestamp": 1764241495,
+      "ttl": 2
+    },
+    "discordapp.com": {
+      "ips": [
+        "162.159.135.233",
+        "162.159.133.233",
+        "162.159.130.233",
+        "162.159.129.233",
+        "162.159.134.233"
+      ],
+      "timestamp": 1764241495,
+      "ttl": 54
+    },
+    "google-analytics.com": {
+      "ips": [
+        "142.251.39.196"
+      ],
+      "timestamp": 1764241495,
+      "ttl": 234
+    },
+    "reddit.com": {
+      "ips": [
+        "151.101.193.140",
+        "151.101.1.140",
+        "151.101.129.140",
+        "151.101.65.140"
+      ],
+      "timestamp": 1764241494,
+      "ttl": 251
+    },
+    "spotify.com": {
+      "ips": [
+        "35.186.224.24"
+      ],
+      "timestamp": 1764241495,
+      "ttl": 133
+    },
+    "googlesyndication.com": {
+      "ips": [
+        "142.250.179.100"
+      ],
+      "timestamp": 1764241495,
+      "ttl": 300
+    },
+    "www.linkedin.com": {
+      "ips": [
+        "172.64.146.215",
+        "104.18.41.41"
+      ],
+      "timestamp": 1764241494,
+      "ttl": 86
+    },
+    "www.tiktok.com": {
+      "ips": [
+        "23.33.90.83",
+        "23.33.90.80",
+        "23.33.90.81",
+        "23.33.90.78",
+        "23.33.90.77",
+        "23.33.90.82",
+        "23.33.90.79",
+        "23.33.90.85",
+        "23.33.90.84"
+      ],
+      "timestamp": 1764241495,
+      "ttl": 8
+    },
+    "musical.ly": {
+      "ips": [
+        "127.0.0.1"
+      ],
+      "timestamp": 1764241500,
+      "ttl": 600
+    },
+    "tiktokads.com": {
+      "ips": [
+        "173.254.88.148"
+      ],
+      "timestamp": 1764241500,
+      "ttl": 14400
+    },
+    "bytedance.com": {
+      "ips": [
+        "122.14.229.102",
+        "122.14.229.7"
+      ],
+      "timestamp": 1764241500,
+      "ttl": 291
+    },
+    "tiktokv.com": {
+      "ips": [
+        "2.21.143.82",
+        "2.21.143.70",
+        "2.21.143.81",
+        "2.21.143.74",
+        "2.21.143.73",
+        "2.21.143.79",
+        "2.21.143.68",
+        "2.21.143.78",
+        "2.21.143.72"
+      ],
+      "timestamp": 1764241500,
+      "ttl": 1
     }
   }
 }

@@ -5,8 +5,7 @@ import android.os.PowerManager
 import com.hyperxray.an.data.source.LogFileManager
 import com.hyperxray.an.feature.dashboard.ConnectionState
 import com.hyperxray.an.prefs.Preferences
-import com.hyperxray.an.service.TProxyService
-import com.hyperxray.an.service.managers.HevSocksManager
+import com.hyperxray.an.service.utils.TProxyUtils
 import com.hyperxray.an.service.managers.ServiceNotificationManager
 import com.hyperxray.an.service.managers.TrafficStatsHandler
 import com.hyperxray.an.service.managers.TunInterfaceManager
@@ -14,7 +13,6 @@ import com.hyperxray.an.service.managers.XrayCoreManager
 import com.hyperxray.an.service.managers.XrayLogHandler
 import com.hyperxray.an.service.xray.XrayConfig
 import com.hyperxray.an.service.xray.XrayRunner
-import com.hyperxray.an.telemetry.TProxyAiOptimizer
 import com.hyperxray.an.viewmodel.CoreStatsState
 import com.hyperxray.an.core.network.dns.SystemDnsCacheServer
 import com.hyperxray.an.notification.TelegramNotificationManager
@@ -34,7 +32,6 @@ class ServiceSessionState {
     lateinit var prefs: Preferences
     lateinit var tunInterfaceManager: TunInterfaceManager
     lateinit var xrayCoreManager: XrayCoreManager
-    lateinit var hevSocksManager: HevSocksManager
     lateinit var notificationManager: ServiceNotificationManager
     lateinit var logHandler: XrayLogHandler
     lateinit var trafficStatsHandler: TrafficStatsHandler
@@ -80,8 +77,6 @@ class ServiceSessionState {
     // Current configuration
     var currentConfig: XrayConfig? = null
     
-    // AI-powered TProxy optimizer
-    var tproxyAiOptimizer: TProxyAiOptimizer? = null
     var coreStatsState: CoreStatsState? = null
     var coreStatsClient: CoreStatsClient? = null
     
@@ -101,11 +96,11 @@ class ServiceSessionState {
     
     // UDP monitoring
     var udpMonitoringJob: Job? = null
-    var lastUdpStats: TProxyService.UdpStats? = null
+    var lastUdpStats: TProxyUtils.UdpStats? = null
     var lastUdpStatsTime: Long = 0L
     
     // Current UDP stats
-    val udpStats = TProxyService.UdpStats(
+    val udpStats = TProxyUtils.UdpStats(
         txPackets = 0L,
         txBytes = 0L,
         rxPackets = 0L,

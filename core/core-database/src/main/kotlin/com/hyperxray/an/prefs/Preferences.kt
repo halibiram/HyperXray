@@ -203,7 +203,7 @@ class Preferences(context: Context) {
     val taskStackSize: Int
         get() = 81920
 
-    // hev-socks5-tunnel Maximum Performance Settings
+    // VPN Tunnel Maximum Performance Settings
     var tunnelMtuCustom: Int
         get() = getPrefData("TunnelMtuCustom").first?.toIntOrNull() ?: 1500
         set(value) {

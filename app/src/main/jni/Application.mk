@@ -13,9 +13,23 @@
 # limitations under the License.
 #
 
+# Target ABIs
+APP_ABI := arm64-v8a armeabi-v7a x86_64
+
+# Platform
+APP_PLATFORM := android-26
+
+# STL
+APP_STL := c++_static
+
+# Optimization
 APP_OPTIM := release
-APP_PLATFORM := android-21
-APP_ABI := arm64-v8a x86_64
+
+# C flags
 APP_CFLAGS := -O3 -DPKGNAME=com/hyperxray/an
+
+# C++ flags
 APP_CPPFLAGS := -O3 -std=c++11
+
+# Toolchain
 NDK_TOOLCHAIN_VERSION := clang

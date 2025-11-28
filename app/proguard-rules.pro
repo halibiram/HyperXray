@@ -120,18 +120,15 @@
     native <methods>;
 }
 
-# TProxyService loads native library "hev-socks5-tunnel" and has native methods
-# Native code calls all TProxy native methods, so they must be kept
--keep class com.hyperxray.an.service.TProxyService {
+
+# HyperVpnService loads native library "hyperxray" and has native methods
+# Go native library calls these JNI methods, so they must be kept
+-keep class com.hyperxray.an.vpn.HyperVpnService {
     native <methods>;
     static <methods>;
-    static void TProxyStartService(java.lang.String, int);
-    static void TProxyStopService();
-    static long[] TProxyGetStats();
-    static boolean TProxyNotifyUdpError(int);
-    static boolean TProxyNotifyUdpRecoveryComplete();
-    static boolean TProxyNotifyImminentUdpCleanup();
+    static void <clinit>();
 }
+-keep class com.hyperxray.an.vpn.HyperVpnHelper { *; }
 
 # Keep native library loading methods
 -keepclassmembers class * {

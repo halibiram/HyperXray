@@ -51,15 +51,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.hyperxray.an.feature.dashboard.components.AnimatedStatCard
-import com.hyperxray.an.feature.dashboard.components.ConnectionQualityCard
-import com.hyperxray.an.feature.dashboard.components.ConnectionStatusCard
 import com.hyperxray.an.feature.dashboard.components.DnsCacheCard
-import com.hyperxray.an.feature.dashboard.components.InstanceStatusCard
 import com.hyperxray.an.feature.dashboard.components.ModernStatCard
 import com.hyperxray.an.feature.dashboard.components.PerformanceIndicator
-import com.hyperxray.an.feature.dashboard.components.QuickStatsCard
 import com.hyperxray.an.feature.dashboard.components.StatRow
 import com.hyperxray.an.feature.dashboard.components.FuturisticTrafficChart
+import com.hyperxray.an.feature.dashboard.components.HyperVpnControlCard
 
 import com.hyperxray.an.feature.dashboard.formatBytes
 import com.hyperxray.an.feature.dashboard.formatNumber
@@ -77,16 +74,13 @@ import java.util.Locale
 @Composable
 fun DashboardScreen(
     viewModel: DashboardViewModel,
-    resources: DashboardResources,
-    onSwitchVpnService: () -> Unit = {}
+    resources: DashboardResources
 ) {
     val coreStats by viewModel.coreStatsState.collectAsState()
     val telemetryState by viewModel.telemetryState.collectAsState()
     val dnsCacheStats by viewModel.dnsCacheStats.collectAsState()
     val isServiceEnabled by viewModel.isServiceEnabled.collectAsState()
-    val controlMenuClickable by viewModel.controlMenuClickable.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
-    val instancesStatus by viewModel.instancesStatus.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val isRecentlyConnected = remember { mutableStateOf(false) }
@@ -358,48 +352,26 @@ fun DashboardScreen(
                 }
             }
         }
-        // Connection Status Hero Card
-        item(key = "connection_status") {
-            ConnectionStatusCard(
-                connectionState = connectionState,
-                isClickable = controlMenuClickable,
-                onToggleConnection = onSwitchVpnService,
-                uptime = coreStats.uptime,
-                playIconRes = resources.drawablePlay,
-                pauseIconRes = resources.drawablePause,
-                uplinkThroughput = coreStats.uplinkThroughput,
-                downlinkThroughput = coreStats.downlinkThroughput
+        // HyperVpnService Control Card
+        item(key = "hyper_vpn_control") {
+            val hyperVpnState by (viewModel.hyperVpnState ?: kotlinx.coroutines.flow.MutableStateFlow(
+                com.hyperxray.an.core.network.vpn.HyperVpnStateManager.VpnState.Disconnected
+            )).collectAsState()
+            val hyperVpnStats by (viewModel.hyperVpnStats ?: kotlinx.coroutines.flow.MutableStateFlow(
+                com.hyperxray.an.core.network.vpn.HyperVpnStateManager.TunnelStats()
+            )).collectAsState()
+            val hyperVpnError by (viewModel.hyperVpnError ?: kotlinx.coroutines.flow.MutableStateFlow<String?>(null)).collectAsState()
+            
+            HyperVpnControlCard(
+                state = hyperVpnState,
+                stats = hyperVpnStats,
+                error = hyperVpnError,
+                onStartClick = { viewModel.startHyperVpn() },
+                onStopClick = { viewModel.stopHyperVpn() },
+                onClearError = { viewModel.clearHyperVpnError() }
             )
         }
 
-        // Instance Status Card - Show Xray-core instance statuses
-        item(key = "instance_status") {
-            AnimatedVisibility(
-                visible = instancesStatus.isNotEmpty(),
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                InstanceStatusCard(
-                    instancesStatus = instancesStatus
-                )
-            }
-        }
-
-        // Quick Stats Summary - Enhanced with better spacing
-        item(key = "quick_stats") {
-            AnimatedVisibility(
-                visible = isServiceEnabled,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                QuickStatsCard(
-                    uplink = coreStats.uplink,
-                    downlink = coreStats.downlink,
-                    uplinkThroughput = coreStats.uplinkThroughput,
-                    downlinkThroughput = coreStats.downlinkThroughput
-                )
-            }
-        }
         
         // Summary Stats Row - Enhanced with Modern Glass Cards
         item(key = "summary_stats") {
@@ -586,21 +558,6 @@ fun DashboardScreen(
                             color = if (memoryUsage > 0.8f) errorColor else connectionActiveColor
                         )
                     }
-                )
-            }
-        }
-        
-        // Connection Quality Card - Only show when connected and telemetry available
-        item(key = "connection_quality") {
-            AnimatedVisibility(
-                visible = isServiceEnabled && telemetryState != null,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                ConnectionQualityCard(
-                    rtt = telemetryState!!.rttP95,
-                    packetLoss = telemetryState!!.avgLoss,
-                    handshakeTime = telemetryState!!.avgHandshakeTime
                 )
             }
         }

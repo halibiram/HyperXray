@@ -3,6 +3,7 @@ package com.hyperxray.an.service.handlers
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.IntentFilter
+import android.os.Build
 import android.util.Log
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -62,7 +63,12 @@ class ServiceBroadcastHandler(private val context: Context) {
      */
     fun registerReceiver(receiver: BroadcastReceiver, filter: IntentFilter) {
         try {
-            context.registerReceiver(receiver, filter)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                context.registerReceiver(receiver, filter)
+            }
             registeredReceivers.add(receiver to filter)
             Log.d(TAG, "Registered receiver: ${receiver.javaClass.simpleName}")
         } catch (e: Exception) {
@@ -88,6 +94,8 @@ class ServiceBroadcastHandler(private val context: Context) {
         }
     }
 }
+
+
 
 
 

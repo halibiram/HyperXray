@@ -9,8 +9,8 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
-import com.hyperxray.an.service.TProxyService
 import com.hyperxray.an.viewmodel.MainViewModel
+import com.hyperxray.an.vpn.HyperVpnService
 import kotlinx.coroutines.launch
 
 data class MainScreenLaunchers(
@@ -53,11 +53,15 @@ fun rememberMainScreenLaunchers(mainViewModel: MainViewModel): MainScreenLaunche
         ActivityResultContracts.StartActivityForResult()
     ) { result: ActivityResult ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
+            Log.i("MainScreenLaunchers", "VPN permission granted, starting service...")
             mainViewModel.setControlMenuClickable(true)
             // Start connection process to trigger connection status card
             // This ensures dashboard connection status card works properly with auto start
             mainViewModel.startConnectionProcess()
+            // Also directly start service to ensure it starts immediately
+            mainViewModel.startVpnService(HyperVpnService.ACTION_CONNECT)
         } else {
+            Log.w("MainScreenLaunchers", "VPN permission denied by user")
             mainViewModel.setControlMenuClickable(true)
         }
     }

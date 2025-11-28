@@ -24,7 +24,7 @@ import com.hyperxray.an.common.ROUTE_LOG
 import com.hyperxray.an.common.ROUTE_UTILS
 import com.hyperxray.an.common.ROUTE_SETTINGS
 import com.hyperxray.an.common.ROUTE_STATS
-import com.hyperxray.an.service.TProxyService
+import com.hyperxray.an.vpn.HyperVpnService
 import com.hyperxray.an.ui.screens.ConfigScreen
 import com.hyperxray.an.ui.screens.LogScreen
 import com.hyperxray.an.ui.screens.UtilsScreen
@@ -90,7 +90,7 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.popExitTransition(
 
 private fun createReloadConfigCallback(mainViewModel: MainViewModel): () -> Unit = {
     Log.d(TAG, "Reload config requested from UI.")
-    mainViewModel.startTProxyService(TProxyService.ACTION_RELOAD_CONFIG)
+    mainViewModel.startVpnService(HyperVpnService.ACTION_RELOAD_CONFIG)
 }
 
 private fun createEditConfigCallback(mainViewModel: MainViewModel): (File) -> Unit = { file ->
@@ -127,7 +127,6 @@ fun BottomNavHost(
         ) {
             DashboardScreen(
                 viewModel = mainViewModel.dashboardViewModel,
-                onSwitchVpnService = onSwitchVpnService,
                 resources = object : com.hyperxray.an.feature.dashboard.DashboardResources {
                     override val drawablePlay: Int = com.hyperxray.an.R.drawable.play
                     override val drawablePause: Int = com.hyperxray.an.R.drawable.pause

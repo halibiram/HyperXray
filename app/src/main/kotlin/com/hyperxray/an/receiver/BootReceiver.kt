@@ -6,7 +6,7 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import com.hyperxray.an.prefs.Preferences
-import com.hyperxray.an.service.TProxyService
+import com.hyperxray.an.vpn.HyperVpnService
 
 class BootReceiver : BroadcastReceiver() {
 
@@ -16,16 +16,18 @@ class BootReceiver : BroadcastReceiver() {
             val prefs = Preferences(context)
             // Force true for testing if needed, or rely on pref
             if (prefs.autoStart || intent.action == "com.hyperxray.an.TEST_BOOT") {
-                Log.d(TAG, "Auto start enabled, starting TProxyService")
-                startTProxyService(context)
+                Log.d(TAG, "Auto start enabled, starting HyperVpnService")
+                startVpnService(context)
             } else {
                 Log.d(TAG, "Auto start disabled")
             }
         }
     }
 
-    private fun startTProxyService(context: Context) {
-        val intent = Intent(context, TProxyService::class.java)
+    private fun startVpnService(context: Context) {
+        val intent = Intent(context, HyperVpnService::class.java).apply {
+            action = HyperVpnService.ACTION_START
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.startForegroundService(intent)
         } else {
@@ -37,4 +39,3 @@ class BootReceiver : BroadcastReceiver() {
         private const val TAG = "BootReceiver"
     }
 }
-

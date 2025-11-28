@@ -4,7 +4,7 @@ import android.app.ActivityManager
 import android.content.Context
 import com.hyperxray.an.feature.telegram.domain.usecase.GetDiagnosticTestUseCase
 import com.hyperxray.an.prefs.Preferences
-import com.hyperxray.an.service.TProxyService
+import com.hyperxray.an.vpn.HyperVpnService
 import com.hyperxray.an.xray.runtime.stats.CoreStatsClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -20,7 +20,7 @@ class GetDiagnosticTestUseCaseImpl(
             val diagnosticResults = mutableListOf<DiagnosticResult>()
             
             // Test 1: VPN Service Status
-            val vpnRunning = isVpnServiceRunning(context, TProxyService::class.java)
+            val vpnRunning = isVpnServiceRunning(context, HyperVpnService::class.java)
             diagnosticResults.add(
                 DiagnosticResult(
                     name = "VPN Service",

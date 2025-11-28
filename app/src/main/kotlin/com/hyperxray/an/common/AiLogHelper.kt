@@ -6,7 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.hyperxray.an.data.source.LogFileManager
-import com.hyperxray.an.service.TProxyService
+import com.hyperxray.an.vpn.HyperVpnService
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -29,10 +29,10 @@ object AiLogHelper {
                     Log.e("AiLogHelper", "Context is null, cannot broadcast logs")
                     return@Runnable
                 }
-                val logUpdateIntent = Intent(TProxyService.ACTION_LOG_UPDATE)
+                val logUpdateIntent = Intent(HyperVpnService.ACTION_LOG_UPDATE)
                 logUpdateIntent.setPackage(ctx.packageName)
                 logUpdateIntent.putStringArrayListExtra(
-                    TProxyService.EXTRA_LOG_DATA, ArrayList(logBroadcastBuffer)
+                    "log_data", ArrayList(logBroadcastBuffer)
                 )
                 ctx.sendBroadcast(logUpdateIntent)
                 logBroadcastBuffer.clear()

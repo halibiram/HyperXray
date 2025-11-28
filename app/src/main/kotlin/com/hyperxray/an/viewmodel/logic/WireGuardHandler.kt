@@ -91,8 +91,8 @@ class WireGuardHandler(
     }
 
     /**
-     * Parse WARP (WireGuard) settings from config JSON.
-     * Checks for WireGuard outbound and proxySettings in main outbound.
+     * Parse WireGuard over Xray settings from config JSON.
+     * Checks for WireGuard outbound and routing rules.
      */
     fun parseWarpSettings(jsonObject: JSONObject) {
         try {
@@ -121,21 +121,24 @@ class WireGuardHandler(
                 return
             }
 
-            // Check if main outbound has proxySettings pointing to warp-out
-            var mainOutboundHasProxy = false
-            for (i in 0 until outbounds.length()) {
-                val outbound = outbounds.getJSONObject(i)
-                val protocol = outbound.optString("protocol", "")
-                if (protocol == "vless" || protocol == "vmess" || protocol == "trojan" || protocol == "shadowsocks") {
-                    val proxySettings = outbound.optJSONObject("proxySettings")
-                    if (proxySettings != null && proxySettings.optString("tag") == "warp-out") {
-                        mainOutboundHasProxy = true
-                        break
+            // Check if routing rules exist for WireGuard outbound
+            var hasWireGuardRoutingRule = false
+            val routingObject = jsonObject.optJSONObject("routing")
+            if (routingObject != null) {
+                val rulesArray = routingObject.optJSONArray("rules")
+                if (rulesArray != null) {
+                    for (i in 0 until rulesArray.length()) {
+                        val rule = rulesArray.getJSONObject(i)
+                        val outboundTag = rule.optString("outboundTag", "")
+                        if (outboundTag == "warp-out") {
+                            hasWireGuardRoutingRule = true
+                            break
+                        }
                     }
                 }
             }
 
-            if (!mainOutboundHasProxy) {
+            if (!hasWireGuardRoutingRule) {
                 _enableWarp.value = false
                 return
             }
@@ -184,8 +187,8 @@ class WireGuardHandler(
     }
 
     /**
-     * Update WARP (WireGuard) settings in config JSON.
-     * Adds or removes WireGuard outbound and updates proxySettings in main outbound.
+     * Update WireGuard over Xray settings in config JSON.
+     * Always uses standalone WireGuard outbound with routing rules (WireGuard over Xray mode).
      */
     fun updateWarpSettings(
         configJson: JSONObject,
@@ -331,23 +334,9 @@ class WireGuardHandler(
                 settings.put("address", addressArray)
                 warpOutbound.put("settings", settings)
 
-                // Update main outbound to use proxySettings
-                var mainOutboundUpdated = false
-                for (i in 0 until outbounds.length()) {
-                    val outbound = outbounds.getJSONObject(i)
-                    val protocol = outbound.optString("protocol", "")
-                    if (protocol == "vless" || protocol == "vmess" || protocol == "trojan" || protocol == "shadowsocks") {
-                        val proxySettings = JSONObject()
-                        proxySettings.put("tag", "warp-out")
-                        outbound.put("proxySettings", proxySettings)
-                        mainOutboundUpdated = true
-                        break
-                    }
-                }
-
-                if (!mainOutboundUpdated) {
-                    Log.w(TAG, "No main proxy outbound found to add proxySettings")
-                }
+                // WireGuard over Xray mode: Always use routing rules (standalone mode)
+                Log.i(TAG, "🔧 WireGuard over Xray: Creating standalone WireGuard outbound with routing rules")
+                ensureWireGuardRoutingRules(configJson, "warp-out")
 
                 // Update JSON array
                 if (configJson.has("outbounds")) {
@@ -362,10 +351,10 @@ class WireGuardHandler(
                 _warpLocalAddress.value = finalLocalAddress
                 _enableWarp.value = true
 
-                Log.i(TAG, "✅ WARP configuration updated successfully")
+                Log.i(TAG, "✅ WireGuard over Xray configuration updated successfully")
                 Result.success(configJson.toString(2))
             } else {
-                // Remove WireGuard outbound
+                // Remove WireGuard outbound and routing rules
                 val newOutbounds = JSONArray()
                 for (i in 0 until outbounds.length()) {
                     val outbound = outbounds.getJSONObject(i)
@@ -373,12 +362,11 @@ class WireGuardHandler(
                         outbound.optString("tag") == "warp-out") {
                         continue
                     }
-                    val protocol = outbound.optString("protocol", "")
-                    if (protocol == "vless" || protocol == "vmess" || protocol == "trojan" || protocol == "shadowsocks") {
-                        outbound.remove("proxySettings")
-                    }
                     newOutbounds.put(outbound)
                 }
+                
+                // Remove WireGuard routing rules
+                removeWireGuardRoutingRules(configJson, "warp-out")
 
                 if (configJson.has("outbounds")) {
                     configJson.put("outbounds", newOutbounds)
@@ -397,6 +385,86 @@ class WireGuardHandler(
             }
             Log.e(TAG, errorMessage, e)
             Result.failure(Exception(errorMessage, e))
+        }
+    }
+
+    /**
+     * Remove WireGuard routing rules from config.
+     */
+    private fun removeWireGuardRoutingRules(configJson: JSONObject, wireguardTag: String) {
+        try {
+            val routingObject = configJson.optJSONObject("routing") ?: return
+            val rulesArray = routingObject.optJSONArray("rules") ?: return
+            
+            val newRulesArray = JSONArray()
+            for (i in 0 until rulesArray.length()) {
+                val rule = rulesArray.getJSONObject(i)
+                val outboundTag = rule.optString("outboundTag", "")
+                if (outboundTag != wireguardTag) {
+                    newRulesArray.put(rule)
+                }
+            }
+            
+            if (newRulesArray.length() != rulesArray.length()) {
+                routingObject.put("rules", newRulesArray)
+                configJson.put("routing", routingObject)
+                Log.i(TAG, "✅ Removed WireGuard routing rules")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to remove WireGuard routing rules: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Ensure WireGuard outbound has proper routing rules for standalone mode.
+     * Creates routing rules to route all traffic through WireGuard outbound.
+     */
+    private fun ensureWireGuardRoutingRules(configJson: JSONObject, wireguardTag: String) {
+        try {
+            // Get or create routing object
+            var routingObject = configJson.optJSONObject("routing")
+            if (routingObject == null) {
+                routingObject = JSONObject()
+                configJson.put("routing", routingObject)
+            }
+
+            // Get or create rules array
+            var rulesArray = routingObject.optJSONArray("rules")
+            if (rulesArray == null) {
+                rulesArray = JSONArray()
+                routingObject.put("rules", rulesArray)
+            }
+
+            // Check if WireGuard routing rule already exists
+            var hasWireGuardRule = false
+            for (i in 0 until rulesArray.length()) {
+                val rule = rulesArray.getJSONObject(i)
+                val outboundTag = rule.optString("outboundTag", "")
+                if (outboundTag == wireguardTag) {
+                    hasWireGuardRule = true
+                    break
+                }
+            }
+
+            // Add WireGuard routing rule if not exists
+            if (!hasWireGuardRule) {
+                val wireguardRule = JSONObject()
+                wireguardRule.put("type", "field")
+                wireguardRule.put("outboundTag", wireguardTag)
+                
+                // Insert at index 0 (highest priority) to route all traffic through WireGuard
+                val newRulesArray = JSONArray()
+                newRulesArray.put(wireguardRule)
+                for (i in 0 until rulesArray.length()) {
+                    newRulesArray.put(rulesArray.get(i))
+                }
+                routingObject.put("rules", newRulesArray)
+                configJson.put("routing", routingObject)
+                
+                Log.i(TAG, "✅ Added WireGuard routing rule: All traffic → $wireguardTag")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to add WireGuard routing rules: ${e.message}", e)
         }
     }
 

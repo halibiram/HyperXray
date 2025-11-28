@@ -5,7 +5,7 @@ import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.hyperxray.an.service.TProxyService
+import com.hyperxray.an.vpn.HyperVpnService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -57,10 +57,10 @@ class AiLogCapture(
     private val broadcastLogsRunnable = Runnable {
         synchronized(logBroadcastBuffer) {
             if (logBroadcastBuffer.size >= BROADCAST_BUFFER_SIZE_THRESHOLD || logBroadcastBuffer.isNotEmpty()) {
-                val logUpdateIntent = Intent(TProxyService.ACTION_LOG_UPDATE)
+                val logUpdateIntent = Intent("com.hyperxray.an.LOG_UPDATE")
                 logUpdateIntent.setPackage(context.packageName)
                 logUpdateIntent.putStringArrayListExtra(
-                    TProxyService.EXTRA_LOG_DATA, ArrayList(logBroadcastBuffer)
+                    "log_data", ArrayList(logBroadcastBuffer)
                 )
                 context.sendBroadcast(logUpdateIntent)
                 logBroadcastBuffer.clear()

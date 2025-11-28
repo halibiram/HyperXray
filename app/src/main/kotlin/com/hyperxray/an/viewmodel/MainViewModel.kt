@@ -16,7 +16,6 @@ import androidx.lifecycle.application
 import androidx.lifecycle.viewModelScope
 import com.hyperxray.an.BuildConfig
 import com.hyperxray.an.R
-import com.hyperxray.an.common.AiLogHelper
 import com.hyperxray.an.common.ROUTE_AI_INSIGHTS
 import com.hyperxray.an.common.ROUTE_APP_LIST
 import com.hyperxray.an.common.formatBytes
@@ -34,9 +33,11 @@ import com.hyperxray.an.core.network.ConnectivityTester
 import com.hyperxray.an.core.network.ConnectivityTestConfig
 import com.hyperxray.an.core.network.ConnectivityTestResult
 import com.hyperxray.an.prefs.Preferences
-import com.hyperxray.an.service.TProxyService
+import com.hyperxray.an.vpn.HyperVpnService
 import com.hyperxray.an.telemetry.TelemetryStore
 import com.hyperxray.an.telemetry.AggregatedTelemetry
+import com.hyperxray.an.vpn.HyperVpnHelper
+import com.hyperxray.an.core.network.vpn.HyperVpnStateManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -47,6 +48,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
@@ -80,7 +83,7 @@ sealed class MainViewUiEvent {
 
 /**
  * Main ViewModel managing app state, connection control, config management, and settings.
- * Coordinates between UI and TProxyService, handles stats collection, and manages preferences.
+ * Coordinates between UI and HyperVpnService, handles stats collection, and manages preferences.
  */
 class MainViewModel(
     application: Application,
@@ -99,10 +102,8 @@ class MainViewModel(
 
     var reloadView: (() -> Unit)? = null
 
-    // Use nullable types to prevent UninitializedPropertyAccessException
-    // These are initialized when navigation occurs (navigateToAppList, editConfig)
-    var appListViewModel: AppListViewModel? = null
-    var configEditViewModel: ConfigEditViewModel? = null
+    lateinit var appListViewModel: AppListViewModel
+    lateinit var configEditViewModel: ConfigEditViewModel
     
     // Cached dashboard adapter instance
     private var _dashboardAdapter: MainViewModelDashboardAdapter? = null
@@ -111,8 +112,7 @@ class MainViewModel(
         if (_dashboardAdapter == null) {
             _dashboardAdapter = MainViewModelDashboardAdapter(this)
         }
-        // Safe: we just checked and created if null
-        return requireNotNull(_dashboardAdapter) { "Dashboard adapter should not be null after creation" }
+        return _dashboardAdapter!!
     }
 
     // Settings state is now managed by SettingsRepository
@@ -133,16 +133,16 @@ class MainViewModel(
     // Connection state is now managed by VpnConnectionUseCase (initialized in init block)
     lateinit var connectionState: StateFlow<com.hyperxray.an.feature.dashboard.ConnectionState>
 
-    // Instance status tracking (updated via broadcast from TProxyService)
-    private val _instancesStatus = MutableStateFlow<Map<Int, com.hyperxray.an.xray.runtime.XrayRuntimeStatus>>(emptyMap())
-    val instancesStatus: StateFlow<Map<Int, com.hyperxray.an.xray.runtime.XrayRuntimeStatus>> = _instancesStatus.asStateFlow()
-
-    // SOCKS5 readiness tracking
-    private val _socks5Ready = MutableStateFlow(false)
-    val socks5Ready: StateFlow<Boolean> = _socks5Ready.asStateFlow()
-
     // VPN Connection Use Case - created in init block after StateFlows are declared
     private lateinit var vpnConnectionUseCase: VpnConnectionUseCase
+    
+    // HyperVpnService state manager
+    private val hyperVpnStateManager = HyperVpnStateManager(application)
+    
+    // HyperVpnService state flows
+    val hyperVpnState: StateFlow<HyperVpnStateManager.VpnState> = hyperVpnStateManager.state
+    val hyperVpnStats: StateFlow<HyperVpnStateManager.TunnelStats> = hyperVpnStateManager.stats
+    val hyperVpnError: StateFlow<String?> = hyperVpnStateManager.error
 
     private val _uiEvent = Channel<MainViewUiEvent>(Channel.BUFFERED)
     val uiEvent = _uiEvent.receiveAsFlow()
@@ -195,25 +195,9 @@ class MainViewModel(
         Log.d(TAG, "MainViewModel initialized.")
         
         // Initialize XrayStatsManager - needs viewModelScope which is only available here
-        // Support multi-instance stats collection
-        // Use instancesStatus StateFlow to get active instance ports (updated from service via broadcast)
         xrayStatsManager = XrayStatsManager(
             scope = viewModelScope,
-            apiPortProvider = { prefs.apiPort },
-            activeInstancesProvider = {
-                // Extract active instance ports from instancesStatus StateFlow
-                // This works across process boundaries (service -> UI via broadcast)
-                _instancesStatus.value
-                    .filter { (_, status) -> status is com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Running }
-                    .mapNotNull { (index, status) ->
-                        if (status is com.hyperxray.an.xray.runtime.XrayRuntimeStatus.Running) {
-                            index to status.apiPort
-                        } else {
-                            null
-                        }
-                    }
-                    .toMap()
-            }
+            apiPortProvider = { prefs.apiPort }
         )
         
         // Initialize coreStatsState after XrayStatsManager is created
@@ -226,15 +210,38 @@ class MainViewModel(
             xrayStatsManager = xrayStatsManager,
             settingsRepository = settingsRepository,
             isServiceEnabled = _isServiceEnabled.asStateFlow(),
-            socks5Ready = _socks5Ready.asStateFlow(),
-            instancesStatus = _instancesStatus.asStateFlow(),
             selectedConfigFile = selectedConfigFile,
             onStartService = { intent -> _uiEvent.trySend(MainViewUiEvent.StartService(intent)) },
             onStopService = { intent -> _uiEvent.trySend(MainViewUiEvent.StartService(intent)) } // Note: StopService uses same event type but different intent action
         )
         
-        // Initialize connectionState after VpnConnectionUseCase is created
-        connectionState = vpnConnectionUseCase.connectionState
+        // Start observing HyperVpnService
+        hyperVpnStateManager.startObserving()
+        
+        // Map HyperVpnStateManager state to connectionState for dashboard
+        // This ensures dashboard reflects the actual VPN service state
+        connectionState = hyperVpnState.map { vpnState ->
+            when (vpnState) {
+                is HyperVpnStateManager.VpnState.Connected -> com.hyperxray.an.feature.dashboard.ConnectionState.Connected
+                is HyperVpnStateManager.VpnState.Connecting -> com.hyperxray.an.feature.dashboard.ConnectionState.Connecting(
+                    stage = com.hyperxray.an.feature.dashboard.ConnectionStage.ESTABLISHING,
+                    progress = vpnState.progress
+                )
+                is HyperVpnStateManager.VpnState.Disconnecting -> com.hyperxray.an.feature.dashboard.ConnectionState.Disconnecting(
+                    stage = com.hyperxray.an.feature.dashboard.DisconnectionStage.STOPPING_VPN,
+                    progress = vpnState.progress
+                )
+                is HyperVpnStateManager.VpnState.Error -> com.hyperxray.an.feature.dashboard.ConnectionState.Failed(
+                    error = vpnState.message,
+                    retryCountdownSeconds = if (vpnState.retryable) null else null
+                )
+                is HyperVpnStateManager.VpnState.Disconnected -> com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+            }
+        }.stateIn(
+            scope = viewModelScope,
+            started = kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000),
+            initialValue = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
+        )
         
         // Start observing service events
         serviceEventObserver.startObserving(application)
@@ -261,11 +268,6 @@ class MainViewModel(
                         // CRITICAL: Complete disconnection process when service stops
                         // This ensures StatusCard shows proper disconnection stages
                         // Note: VpnConnectionUseCase handles disconnection state transitions internally
-                        // We just need to ensure the use case is aware of the service stop
-                        
-                        // Reset instance status and SOCKS5 readiness
-                        _instancesStatus.value = emptyMap()
-                        _socks5Ready.value = false
                         
                         // Stop stats monitoring when service stops
                         xrayStatsManager.stopMonitoring()
@@ -277,19 +279,9 @@ class MainViewModel(
                         setServiceEnabled(false)
                         setControlMenuClickable(true)
                     }
-                    is ServiceEvent.Socks5Ready -> {
-                        Log.d(TAG, "SOCKS5 readiness update: ${event.isReady}")
-                        _socks5Ready.value = event.isReady
-                        
-                        // Note: Connection state is now managed by VpnConnectionUseCase
-                        // The use case will handle state transitions based on service and SOCKS5 readiness
-                    }
-                    is ServiceEvent.InstanceStatusUpdate -> {
-                        Log.d(TAG, "Instance status update: count=${event.instanceCount}, hasRunning=${event.hasRunning}")
-                        _instancesStatus.value = event.instancesStatus
-                        
-                        // Note: Connection state is now managed by VpnConnectionUseCase
-                        // The use case will handle state transitions based on service and instance status
+                    else -> {
+                        // Handle any other events (e.g., log updates)
+                        Log.d(TAG, "Service event received: $event")
                     }
                 }
             }
@@ -300,23 +292,14 @@ class MainViewModel(
             connectionState.collect { state ->
                 when (state) {
                     is com.hyperxray.an.feature.dashboard.ConnectionState.Connected -> {
-                        // Start monitoring - stats will be reset automatically in startMonitoring()
                         startMonitoring()
-                    }
-                    is com.hyperxray.an.feature.dashboard.ConnectionState.Connecting -> {
-                        // Clear telemetry state when starting new connection
-                        // Stats will be reset when startMonitoring() is called
-                        Log.d(TAG, "New connection starting, clearing telemetry state")
-                        _telemetryState.value = null
                     }
                     is com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected,
                     is com.hyperxray.an.feature.dashboard.ConnectionState.Failed -> {
                         stopMonitoring()
-                        // Clear telemetry state on disconnection
-                        _telemetryState.value = null
                     }
                     else -> {
-                        // Disconnecting state - no action needed
+                        // Connecting or Disconnecting states - no action needed
                     }
                 }
             }
@@ -324,7 +307,7 @@ class MainViewModel(
         
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                _isServiceEnabled.value = isServiceRunning(application, TProxyService::class.java)
+                _isServiceEnabled.value = isServiceRunning(application, HyperVpnService::class.java)
 
                 updateSettingsState()
                 loadKernelVersion()
@@ -354,6 +337,52 @@ class MainViewModel(
         xrayStatsManager.cleanup()
         // Cleanup repository resources
         configRepository.cleanup()
+        // Cleanup HyperVpnService observer
+        hyperVpnStateManager.stopObserving()
+    }
+    
+    /**
+     * Start HyperVpnService with WARP
+     */
+    fun startHyperVpn() {
+        viewModelScope.launch {
+            try {
+                HyperVpnHelper.startVpnWithWarp(application)
+                _uiEvent.trySend(MainViewUiEvent.ShowSnackbar("Starting HyperVpn..."))
+            } catch (e: Exception) {
+                Log.e(TAG, "Error starting HyperVpn: ${e.message}", e)
+                _uiEvent.trySend(MainViewUiEvent.ShowSnackbar("Failed to start HyperVpn: ${e.message}"))
+            }
+        }
+    }
+    
+    /**
+     * Stop HyperVpnService
+     */
+    fun stopHyperVpn() {
+        viewModelScope.launch {
+            try {
+                HyperVpnHelper.stopVpn(application)
+                _uiEvent.trySend(MainViewUiEvent.ShowSnackbar("Stopping HyperVpn..."))
+            } catch (e: Exception) {
+                Log.e(TAG, "Error stopping HyperVpn: ${e.message}", e)
+                _uiEvent.trySend(MainViewUiEvent.ShowSnackbar("Failed to stop HyperVpn: ${e.message}"))
+            }
+        }
+    }
+    
+    /**
+     * Check if HyperVpnService is running
+     */
+    fun isHyperVpnRunning(): Boolean {
+        return hyperVpnStateManager.isServiceRunning()
+    }
+    
+    /**
+     * Clear HyperVpnService error
+     */
+    fun clearHyperVpnError() {
+        hyperVpnStateManager.clearError()
     }
 
     private fun updateSettingsState() {
@@ -373,61 +402,11 @@ class MainViewModel(
     }
 
     private fun loadKernelVersion() {
-        val libraryDir = TProxyService.getNativeLibraryDir(application)
-        val xrayPath = "$libraryDir/libxray.so"
-        try {
-            // Check if libxray.so exists
-            val xrayFile = File(xrayPath)
-            if (!xrayFile.exists()) {
-                Log.w(TAG, "libxray.so not found at $xrayPath")
-                // Note: kernelVersion is not part of SettingsState managed by repository
-                // This is a read-only info field, so we skip updating it
-                return
-            }
-            
-            // Try to execute with linker (Android way)
-            val process = Runtime.getRuntime().exec(arrayOf("/system/bin/linker64", xrayPath, "-version"))
-            try {
-                BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
-                    val firstLine = reader.readLine()
-                    
-                    if (firstLine != null && firstLine.isNotEmpty()) {
-                        settingsRepository.updateKernelVersion(firstLine)
-                    } else {
-                        // Fallback: show that file exists but version couldn't be read
-                        settingsRepository.updateKernelVersion("Available (BoringSSL)")
-                    }
-                }
-            } finally {
-                // Ensure all process streams are closed
-                try {
-                    process.inputStream?.close()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error closing process input stream", e)
-                }
-                try {
-                    process.errorStream?.close()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error closing process error stream", e)
-                }
-                try {
-                    process.outputStream?.close()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error closing process output stream", e)
-                }
-                // Destroy the process
-                process.destroy()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to get xray version", e)
-            // Check if file exists at least
-            val xrayFile = File(xrayPath)
-            if (xrayFile.exists()) {
-                settingsRepository.updateKernelVersion("Available (BoringSSL)")
-            } else {
-                settingsRepository.updateKernelVersion("N/A")
-            }
-        }
+        // DEPRECATED: Xray-core is embedded in libhyperxray.so, not available as separate libxray.so
+        Log.d(TAG, "loadKernelVersion() skipped - Xray-core is embedded in libhyperxray.so")
+        // Note: kernelVersion is not part of SettingsState managed by repository
+        // This is a read-only info field, so we skip updating it
+        settingsRepository.updateKernelVersion("Embedded in libhyperxray.so")
     }
 
     fun setControlMenuClickable(isClickable: Boolean) {
@@ -479,38 +458,13 @@ class MainViewModel(
     }
 
     suspend fun createConfigFile(): String? {
-        Log.d(TAG, "createConfigFile() called")
-        AiLogHelper.i(TAG, "📝 CONFIG CREATE: Starting config file creation")
-        try {
-            AiLogHelper.d(TAG, "📝 CONFIG CREATE: Calling configRepository.createConfigFile()")
-            val filePath = configRepository.createConfigFile(application.assets)
-            if (filePath == null) {
-                Log.e(TAG, "createConfigFile() failed: filePath is null")
-                AiLogHelper.e(TAG, "❌ CONFIG CREATE FAILED: filePath is null")
-                _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(application.getString(R.string.create_config_failed)))
-            } else {
-                Log.d(TAG, "createConfigFile() succeeded: $filePath")
-                AiLogHelper.i(TAG, "✅ CONFIG CREATE SUCCESS: File created at $filePath")
-                // Small delay to ensure file is fully written to disk
-                AiLogHelper.d(TAG, "⏳ CONFIG CREATE: Waiting 100ms for file write to complete...")
-                delay(100)
-                Log.d(TAG, "Calling loadConfigs() to refresh config list...")
-                AiLogHelper.d(TAG, "🔄 CONFIG CREATE: Calling loadConfigs() to refresh config list...")
-                configRepository.loadConfigs()
-                Log.d(TAG, "loadConfigs() completed. Current config files count: ${configFiles.value.size}")
-                Log.d(TAG, "Selected config file: ${selectedConfigFile.value?.name}")
-                AiLogHelper.i(TAG, "✅ CONFIG CREATE: loadConfigs() completed. Config files count: ${configFiles.value.size}, Selected: ${selectedConfigFile.value?.name}")
-                // Trigger UI refresh to ensure list is updated
-                _uiEvent.trySend(MainViewUiEvent.RefreshConfigList)
-                AiLogHelper.d(TAG, "🔄 CONFIG CREATE: RefreshConfigList event sent to UI")
-            }
-            return filePath
-        } catch (e: Exception) {
-            Log.e(TAG, "createConfigFile() threw exception", e)
-            AiLogHelper.e(TAG, "❌ CONFIG CREATE EXCEPTION: ${e.message}", e)
+        val filePath = configRepository.createConfigFile(application.assets)
+        if (filePath == null) {
             _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(application.getString(R.string.create_config_failed)))
-            return null
+        } else {
+            configRepository.loadConfigs()
         }
+        return filePath
     }
 
     /**
@@ -563,38 +517,13 @@ class MainViewModel(
     }
 
     suspend fun importConfigFromClipboard(): String? {
-        Log.d(TAG, "importConfigFromClipboard() called")
-        AiLogHelper.i(TAG, "📋 CONFIG IMPORT: Starting config import from clipboard")
-        try {
-            AiLogHelper.d(TAG, "📋 CONFIG IMPORT: Calling configRepository.importConfigFromClipboard()")
-            val filePath = configRepository.importConfigFromClipboard()
-            if (filePath == null) {
-                Log.e(TAG, "importConfigFromClipboard() failed: filePath is null")
-                AiLogHelper.e(TAG, "❌ CONFIG IMPORT FAILED: filePath is null (clipboard may be empty or invalid)")
-                _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(application.getString(R.string.import_failed)))
-            } else {
-                Log.d(TAG, "importConfigFromClipboard() succeeded: $filePath")
-                AiLogHelper.i(TAG, "✅ CONFIG IMPORT SUCCESS: File imported at $filePath")
-                // Small delay to ensure file is fully written to disk
-                AiLogHelper.d(TAG, "⏳ CONFIG IMPORT: Waiting 100ms for file write to complete...")
-                delay(100)
-                Log.d(TAG, "Calling loadConfigs() to refresh config list...")
-                AiLogHelper.d(TAG, "🔄 CONFIG IMPORT: Calling loadConfigs() to refresh config list...")
-                configRepository.loadConfigs()
-                Log.d(TAG, "loadConfigs() completed. Current config files count: ${configFiles.value.size}")
-                Log.d(TAG, "Selected config file: ${selectedConfigFile.value?.name}")
-                AiLogHelper.i(TAG, "✅ CONFIG IMPORT: loadConfigs() completed. Config files count: ${configFiles.value.size}, Selected: ${selectedConfigFile.value?.name}")
-                // Trigger UI refresh to ensure list is updated
-                _uiEvent.trySend(MainViewUiEvent.RefreshConfigList)
-                AiLogHelper.d(TAG, "🔄 CONFIG IMPORT: RefreshConfigList event sent to UI")
-            }
-            return filePath
-        } catch (e: Exception) {
-            Log.e(TAG, "importConfigFromClipboard() threw exception", e)
-            AiLogHelper.e(TAG, "❌ CONFIG IMPORT EXCEPTION: ${e.message}", e)
+        val filePath = configRepository.importConfigFromClipboard()
+        if (filePath == null) {
             _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(application.getString(R.string.import_failed)))
-            return null
+        } else {
+            configRepository.loadConfigs()
         }
+        return filePath
     }
 
     suspend fun handleSharedContent(content: String) {
@@ -829,7 +758,7 @@ class MainViewModel(
         _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(application.getString(R.string.export_failed)))
     }
 
-    fun startTProxyService(action: String) {
+    fun startVpnService(action: String) {
         viewModelScope.launch {
             if (selectedConfigFile.value == null) {
                 _uiEvent.trySend(MainViewUiEvent.ShowSnackbar(application.getString(R.string.not_select_config)))
@@ -837,14 +766,16 @@ class MainViewModel(
                 setControlMenuClickable(true)
                 return@launch
             }
-            val intent = Intent(application, TProxyService::class.java).setAction(action)
+            val intent = Intent(application, HyperVpnService::class.java).setAction(action)
             _uiEvent.trySend(MainViewUiEvent.StartService(intent))
         }
     }
+    
+    // Backward compatibility alias
+    fun startTProxyService(action: String) = startVpnService(action)
 
     fun editConfig(filePath: String) {
         viewModelScope.launch {
-            // Always create new instance for each edit operation
             configEditViewModel = ConfigEditViewModel(application, filePath, prefs)
             _uiEvent.trySend(MainViewUiEvent.Navigate(ROUTE_CONFIG_EDIT))
         }
@@ -866,18 +797,21 @@ class MainViewModel(
         }
     }
 
-    fun stopTProxyService() {
+    fun stopVpnService() {
         viewModelScope.launch {
             // Start disconnection process to show proper state transitions
             vpnConnectionUseCase.disconnect()
             
             val intent = Intent(
                 application,
-                TProxyService::class.java
-            ).setAction(TProxyService.ACTION_DISCONNECT)
+                HyperVpnService::class.java
+            ).setAction(HyperVpnService.ACTION_DISCONNECT)
             _uiEvent.trySend(MainViewUiEvent.StartService(intent))
         }
     }
+    
+    // Backward compatibility alias
+    fun stopTProxyService() = stopVpnService()
 
     fun prepareAndStartVpn(vpnPrepareLauncher: ActivityResultLauncher<Intent>) {
         viewModelScope.launch {
@@ -889,9 +823,11 @@ class MainViewModel(
             }
             val vpnIntent = VpnService.prepare(application)
             if (vpnIntent != null) {
+                Log.d(TAG, "VPN permission needed, launching system dialog...")
                 vpnPrepareLauncher.launch(vpnIntent)
             } else {
-                startTProxyService(TProxyService.ACTION_CONNECT)
+                Log.d(TAG, "VPN permission already granted, starting service...")
+                startVpnService(HyperVpnService.ACTION_CONNECT)
             }
         }
     }
@@ -923,10 +859,7 @@ class MainViewModel(
 
     fun navigateToAppList() {
         viewModelScope.launch {
-            // Initialize if not already initialized
-            if (appListViewModel == null) {
-                appListViewModel = AppListViewModel(application)
-            }
+            appListViewModel = AppListViewModel(application)
             _uiEvent.trySend(MainViewUiEvent.Navigate(ROUTE_APP_LIST))
         }
     }

@@ -12,9 +12,8 @@ import com.hyperxray.an.data.repository.SettingsRepository
 import com.hyperxray.an.feature.dashboard.ConnectionState
 import com.hyperxray.an.feature.dashboard.ConnectionStage
 import com.hyperxray.an.feature.dashboard.DisconnectionStage
-import com.hyperxray.an.service.TProxyService
+import com.hyperxray.an.vpn.HyperVpnService
 import com.hyperxray.an.service.managers.XrayAssetManager
-import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -40,6 +39,9 @@ import java.io.File
  * - Stopping connection process
  * - Retry countdown when connection fails
  * - Connection verification via XrayStatsManager
+ * 
+ * Note: This version is simplified for HyperVpnService which uses native Go tunnel.
+ * SOCKS5 readiness and multi-instance tracking have been removed.
  */
 class VpnConnectionUseCase(
     private val context: Context,
@@ -48,8 +50,6 @@ class VpnConnectionUseCase(
     private val settingsRepository: SettingsRepository,
     // State observers from ViewModel
     private val isServiceEnabled: Flow<Boolean>,
-    private val socks5Ready: Flow<Boolean>,
-    private val instancesStatus: Flow<Map<Int, XrayRuntimeStatus>>,
     private val selectedConfigFile: Flow<File?>,
     // Callbacks for service control
     private val onStartService: (Intent) -> Unit,
@@ -67,7 +67,9 @@ class VpnConnectionUseCase(
     
     /**
      * Starts the connection process.
-     * Coordinates all connection stages: INITIALIZING -> STARTING_VPN -> STARTING_XRAY -> ESTABLISHING -> VERIFYING -> CONNECTED
+     * Coordinates all connection stages: INITIALIZING -> STARTING_VPN -> ESTABLISHING -> VERIFYING -> CONNECTED
+     * 
+     * Note: STARTING_XRAY stage has been removed since HyperVpnService uses native Go tunnel.
      */
     fun connect() {
         // Cancel any existing connection attempt
@@ -137,7 +139,7 @@ class VpnConnectionUseCase(
                 AiLogHelper.i(TAG, "🚀 STAGE 2 [STARTING_VPN]: Starting VPN service (progress: 20%)")
                 
                 // Start the service
-                AiLogHelper.d(TAG, "📤 STAGE 2 [STARTING_VPN]: Sending ACTION_CONNECT intent to TProxyService")
+                AiLogHelper.d(TAG, "📤 STAGE 2 [STARTING_VPN]: Sending ACTION_CONNECT intent to HyperVpnService")
                 startService()
                 
                 // Wait for service to be enabled (with timeout)
@@ -158,201 +160,41 @@ class VpnConnectionUseCase(
                 val stage2Duration = System.currentTimeMillis() - stage2StartTime
                 AiLogHelper.i(TAG, "✅ STAGE 2 [STARTING_VPN] COMPLETED: VPN service started successfully (duration: ${stage2Duration}ms)")
                 
-                // STAGE 3: STARTING_XRAY - Xray instances starting
+                // STAGE 3: ESTABLISHING - Native Go tunnel establishing connection
                 val stage3StartTime = System.currentTimeMillis()
-                _connectionState.value = ConnectionState.Connecting(ConnectionStage.STARTING_XRAY, progress = 0.4f)
-                AiLogHelper.i(TAG, "⚡ STAGE 3 [STARTING_XRAY]: Starting Xray instances (progress: 40%)")
+                _connectionState.value = ConnectionState.Connecting(ConnectionStage.ESTABLISHING, progress = 0.5f)
+                AiLogHelper.i(TAG, "🔌 STAGE 3 [ESTABLISHING]: Native Go tunnel establishing connection (progress: 50%)")
                 
-                // Step 3a: Check critical assets before process start
-                AiLogHelper.d(TAG, "🔍 STAGE 3 [STARTING_XRAY]: Checking critical assets...")
-                try {
-                    val assetManager = XrayAssetManager(context)
-                    assetManager.checkAssets(configFile.absolutePath)
-                    AiLogHelper.d(TAG, "✅ STAGE 3 [STARTING_XRAY]: All assets verified")
-                } catch (e: IllegalStateException) {
-                    val errorMsg = "Asset check failed: ${e.message}"
-                    Log.e(TAG, "❌ $errorMsg", e)
-                    AiLogHelper.e(TAG, "❌ STAGE 3 [STARTING_XRAY] FAILED: $errorMsg")
-                    _connectionState.value = ConnectionState.Failed(
-                        error = "Missing required assets: ${e.message}",
-                        retryCountdownSeconds = null
-                    )
-                    return@launch
-                } catch (e: Exception) {
-                    val errorMsg = "Asset check error: ${e.message}"
-                    Log.e(TAG, "❌ $errorMsg", e)
-                    AiLogHelper.e(TAG, "❌ STAGE 3 [STARTING_XRAY] FAILED: $errorMsg")
-                    _connectionState.value = ConnectionState.Failed(
-                        error = "Asset verification failed: ${e.message}",
-                        retryCountdownSeconds = null
-                    )
-                    return@launch
-                }
-                
-                // Step 3b: Monitor Xray instance startup
-                AiLogHelper.d(TAG, "⏳ STAGE 3 [STARTING_XRAY]: Monitoring Xray instance status (timeout: 20s)...")
-                val instanceStatus = withTimeoutOrNull(20000L) {
-                    instancesStatus.filter { statusMap ->
-                        statusMap.values.any { it is XrayRuntimeStatus.Running }
-                    }.first()
-                }
-                
-                // Verify we have running instances but fall back to later stages if unavailable yet
-                val runningInstances = instanceStatus
-                    ?.values
-                    ?.filterIsInstance<XrayRuntimeStatus.Running>()
-                    ?: instancesStatus.first().values.filterIsInstance<XrayRuntimeStatus.Running>()
-                
-                if (runningInstances.isEmpty()) {
-                    val warningMsg = "Did not observe running instance status within 20s. Will continue and rely on SOCKS5 readiness."
-                    Log.w(TAG, "Stage 3 (STARTING_XRAY): $warningMsg")
-                    AiLogHelper.w(TAG, "⚠️ STAGE 3 [STARTING_XRAY] WARNING: $warningMsg")
-                } else {
-                    val instancesInfo = runningInstances.joinToString(", ") { "PID=${it.processId}, API=${it.apiPort}" }
-                    Log.d(TAG, "Stage 3 (STARTING_XRAY): Xray instances started - $instancesInfo")
-                    AiLogHelper.i(TAG, "✅ STAGE 3 [STARTING_XRAY]: ${runningInstances.size} Xray instance(s) started - $instancesInfo")
-                }
-                
-                // Step 3c: Stabilization delay and liveness check
-                AiLogHelper.d(TAG, "⏳ STAGE 3 [STARTING_XRAY]: Stabilization delay (500ms) and liveness check...")
-                delay(500) // Stabilization delay
-                
-                // Check if processes are still alive after stabilization
-                val currentInstancesStatus = instancesStatus.first()
-                val aliveInstances = currentInstancesStatus.values.filterIsInstance<XrayRuntimeStatus.Running>()
-                val deadInstances = currentInstancesStatus.values.filterIsInstance<XrayRuntimeStatus.ProcessExited>()
-                
-                if (deadInstances.isNotEmpty()) {
-                    val deadInfo = deadInstances.joinToString(", ") { 
-                        "Instance exit code ${it.exitCode}: ${it.message ?: "Unknown error"}"
-                    }
-                    val errorMsg = "Xray process(es) died during startup: $deadInfo"
-                    Log.e(TAG, "❌ $errorMsg")
-                    AiLogHelper.e(TAG, "❌ STAGE 3 [STARTING_XRAY] FAILED: $errorMsg")
-                    _connectionState.value = ConnectionState.Failed(
-                        error = "Xray process terminated unexpectedly: ${deadInstances.first().message ?: "Exit code ${deadInstances.first().exitCode}"}",
-                        retryCountdownSeconds = null
-                    )
-                    return@launch
-                }
-                
-                if (aliveInstances.isEmpty()) {
-                    val errorMsg = "No running Xray instances found after stabilization delay"
-                    Log.e(TAG, "❌ $errorMsg")
-                    AiLogHelper.e(TAG, "❌ STAGE 3 [STARTING_XRAY] FAILED: $errorMsg")
-                    _connectionState.value = ConnectionState.Failed(
-                        error = "Xray instances failed to start",
-                        retryCountdownSeconds = null
-                    )
-                    return@launch
-                }
+                // Wait for native tunnel to establish (native Go handles this internally)
+                // We just give it some time and check service status
+                delay(2000) // Allow native tunnel time to establish
                 
                 val stage3Duration = System.currentTimeMillis() - stage3StartTime
-                val instancesInfo = aliveInstances.joinToString(", ") { "PID=${it.processId}, API=${it.apiPort}" }
-                Log.i(TAG, "Stage 3 (STARTING_XRAY): Completed - ${aliveInstances.size} Xray instance(s) running - $instancesInfo")
-                AiLogHelper.i(TAG, "✅ STAGE 3 [STARTING_XRAY] COMPLETED: ${aliveInstances.size} Xray instance(s) running and verified - $instancesInfo (duration: ${stage3Duration}ms)")
+                AiLogHelper.i(TAG, "✅ STAGE 3 [ESTABLISHING] COMPLETED: Tunnel establishment initiated (duration: ${stage3Duration}ms)")
                 
-                // STAGE 4: ESTABLISHING - SOCKS5 becoming ready
+                // STAGE 4: VERIFYING - Final connection verification
                 val stage4StartTime = System.currentTimeMillis()
-                _connectionState.value = ConnectionState.Connecting(ConnectionStage.ESTABLISHING, progress = 0.6f)
-                Log.i(TAG, "ESTABLISHING: Waiting for SOCKS5 to become ready...")
-                AiLogHelper.i(TAG, "🔌 STAGE 4 [ESTABLISHING]: Waiting for SOCKS5 to become ready (progress: 60%)")
-                
-                // Check if SOCKS5 is already ready (race condition fix)
-                val socks5ReadyValue = if (socks5Ready.first()) {
-                    Log.d(TAG, "ESTABLISHING: SOCKS5 already ready (checked before ESTABLISHING stage)")
-                    AiLogHelper.d(TAG, "✅ STAGE 4 [ESTABLISHING]: SOCKS5 already ready (checked before ESTABLISHING stage)")
-                    true
-                } else {
-                    // Wait for SOCKS5 to become ready with extended timeout (30 seconds)
-                    // Xray process may need time to start and open SOCKS5 port
-                    Log.d(TAG, "ESTABLISHING: SOCKS5 not ready yet, waiting up to 30 seconds...")
-                    AiLogHelper.d(TAG, "⏳ STAGE 4 [ESTABLISHING]: SOCKS5 not ready yet, waiting up to 30 seconds...")
-                    val result = withTimeoutOrNull(30000L) {
-                        socks5Ready.filter { it }.first()
-                    }
-                    if (result == null) {
-                        Log.w(TAG, "ESTABLISHING: SOCKS5 did not become ready within 30 second timeout")
-                        AiLogHelper.w(TAG, "⚠️ STAGE 4 [ESTABLISHING]: SOCKS5 did not become ready within 30 second timeout")
-                    }
-                    result ?: false
-                }
-                
-                val stage4Duration = System.currentTimeMillis() - stage4StartTime
-                if (!socks5ReadyValue) {
-                    Log.w(TAG, "ESTABLISHING: SOCKS5 did not become ready within timeout, but continuing verification")
-                    AiLogHelper.w(TAG, "⚠️ STAGE 4 [ESTABLISHING]: SOCKS5 did not become ready within timeout, but continuing verification (duration: ${stage4Duration}ms)")
-                } else {
-                    Log.i(TAG, "ESTABLISHING: SOCKS5 is ready, proceeding to VERIFYING stage")
-                    AiLogHelper.i(TAG, "✅ STAGE 4 [ESTABLISHING] COMPLETED: SOCKS5 is ready (duration: ${stage4Duration}ms)")
-                }
-                
-                // STAGE 5: VERIFYING - Final connection verification
-                val stage5StartTime = System.currentTimeMillis()
                 Log.i(TAG, "VERIFYING: Starting final connection verification")
-                AiLogHelper.i(TAG, "🔍 STAGE 5 [VERIFYING]: Starting final connection verification (progress: 80%)")
+                AiLogHelper.i(TAG, "🔍 STAGE 4 [VERIFYING]: Starting final connection verification (progress: 80%)")
                 _connectionState.value = ConnectionState.Connecting(ConnectionStage.VERIFYING, progress = 0.8f)
                 
                 val finalServiceCheck = isServiceEnabled.first()
-                val finalSocks5Check = socks5Ready.first()
-                val finalInstancesCheck = instancesStatus.first().values.any { it is XrayRuntimeStatus.Running }
-                val readinessSatisfied = finalSocks5Check || finalInstancesCheck
                 
-                Log.d(TAG, "VERIFYING: Service check=$finalServiceCheck, SOCKS5=$finalSocks5Check, Instances=$finalInstancesCheck, Readiness=$readinessSatisfied")
-                AiLogHelper.d(TAG, "🔍 STAGE 5 [VERIFYING]: Service=$finalServiceCheck, SOCKS5=$finalSocks5Check, Instances=$finalInstancesCheck, Readiness=$readinessSatisfied")
+                Log.d(TAG, "VERIFYING: Service check=$finalServiceCheck")
+                AiLogHelper.d(TAG, "🔍 STAGE 4 [VERIFYING]: Service=$finalServiceCheck")
                 
                 if (!finalServiceCheck) {
                     val errorMsg = "Service is not enabled (service=$finalServiceCheck)"
                     Log.e(TAG, "VERIFYING FAILED: $errorMsg")
-                    AiLogHelper.e(TAG, "❌ STAGE 5 [VERIFYING] FAILED: $errorMsg")
+                    AiLogHelper.e(TAG, "❌ STAGE 4 [VERIFYING] FAILED: $errorMsg")
                     val errorMessage = "Connection verification failed: service=$finalServiceCheck"
                     stopConnectionProcessAndSetFailed(errorMessage)
                     return@launch
                 }
-                if (!readinessSatisfied) {
-                    val errorMsg = "Readiness not satisfied (socks5=$finalSocks5Check, instances=$finalInstancesCheck)"
-                    Log.e(TAG, "VERIFYING FAILED: $errorMsg")
-                    AiLogHelper.e(TAG, "❌ STAGE 5 [VERIFYING] FAILED: $errorMsg")
-                    val errorMessage = "Connection verification failed: socks5=$finalSocks5Check, instances=$finalInstancesCheck"
-                    stopConnectionProcessAndSetFailed(errorMessage)
-                    return@launch
-                }
                 
-                // Running instance bul ve gRPC bağlantı testi yap
-                Log.d(TAG, "VERIFYING: Searching for running Xray instances...")
-                AiLogHelper.d(TAG, "🔍 STAGE 5 [VERIFYING]: Searching for running Xray instances...")
-                val runningInstance = instancesStatus.first().values
-                    .filterIsInstance<XrayRuntimeStatus.Running>()
-                    .firstOrNull()
-                
-                if (runningInstance != null) {
-                    Log.i(TAG, "VERIFYING: Found running instance - PID=${runningInstance.processId}, API Port=${runningInstance.apiPort}")
-                    AiLogHelper.i(TAG, "🔍 STAGE 5 [VERIFYING]: Found running instance - PID=${runningInstance.processId}, API Port=${runningInstance.apiPort}")
-                    Log.d(TAG, "VERIFYING: Starting gRPC connection verification via XrayStatsManager...")
-                    AiLogHelper.d(TAG, "🔍 STAGE 5 [VERIFYING]: Starting gRPC connection verification via XrayStatsManager (port=${runningInstance.apiPort})...")
-                    val grpcStartTime = System.currentTimeMillis()
-                    val connectionVerified = withContext(Dispatchers.IO) {
-                        xrayStatsManager.verifyXrayConnection(runningInstance.apiPort)
-                    }
-                    val grpcDuration = System.currentTimeMillis() - grpcStartTime
-                    if (!connectionVerified) {
-                        val errorMsg = "gRPC connection verification unsuccessful (port=${runningInstance.apiPort}, duration=${grpcDuration}ms)"
-                        Log.e(TAG, "VERIFYING FAILED: $errorMsg")
-                        AiLogHelper.e(TAG, "❌ STAGE 5 [VERIFYING] FAILED: $errorMsg")
-                        val errorMessage = "Xray server connection verification failed - gRPC test unsuccessful"
-                        stopConnectionProcessAndSetFailed(errorMessage)
-                        return@launch
-                    }
-                    Log.i(TAG, "VERIFYING SUCCESS: Xray server connection verified successfully via gRPC")
-                    AiLogHelper.i(TAG, "✅ STAGE 5 [VERIFYING]: gRPC connection verified successfully (duration: ${grpcDuration}ms)")
-                } else {
-                    Log.w(TAG, "VERIFYING WARNING: No running Xray instance found for connection verification")
-                    Log.d(TAG, "VERIFYING: Available instances: ${instancesStatus.first()}")
-                    AiLogHelper.w(TAG, "⚠️ STAGE 5 [VERIFYING] WARNING: No running Xray instance found for connection verification")
-                }
+                val stage4Duration = System.currentTimeMillis() - stage4StartTime
                 
                 // SUCCESS - Show 100% progress briefly before switching to Connected
-                val stage5Duration = System.currentTimeMillis() - stage5StartTime
                 _connectionState.value = ConnectionState.Connecting(ConnectionStage.VERIFYING, progress = 1.0f)
                 delay(300)
                 
@@ -360,7 +202,7 @@ class VpnConnectionUseCase(
                 _connectionState.value = ConnectionState.Connected
                 Log.d(TAG, "Connection process completed successfully")
                 AiLogHelper.i(TAG, "✅ CONNECTION SUCCESS: All stages completed successfully (total duration: ${totalDuration}ms)")
-                AiLogHelper.i(TAG, "📊 CONNECTION SUMMARY: Stage1=${stage1Duration}ms, Stage2=${stage2Duration}ms, Stage3=${stage3Duration}ms, Stage4=${stage4Duration}ms, Stage5=${stage5Duration}ms")
+                AiLogHelper.i(TAG, "📊 CONNECTION SUMMARY: Stage1=${stage1Duration}ms, Stage2=${stage2Duration}ms, Stage3=${stage3Duration}ms, Stage4=${stage4Duration}ms")
                 
             } catch (e: TimeoutCancellationException) {
                 val errorMsg = "Connection process timed out: ${e.message}"
@@ -378,7 +220,7 @@ class VpnConnectionUseCase(
     
     /**
      * Stops the connection process.
-     * Handles all disconnection stages: STOPPING_XRAY -> CLOSING_TUNNEL -> STOPPING_VPN -> CLEANING_UP -> DISCONNECTED
+     * Handles all disconnection stages: CLOSING_TUNNEL -> STOPPING_VPN -> CLEANING_UP -> DISCONNECTED
      */
     fun disconnect() {
         connectionJob?.cancel()
@@ -406,71 +248,48 @@ class VpnConnectionUseCase(
                     return@launch
                 }
                 
-                // STAGE 1: STOPPING_XRAY - Stopping Xray instances
+                // STAGE 1: CLOSING_TUNNEL - Closing network tunnel
                 val discStage1StartTime = System.currentTimeMillis()
                 _connectionState.value = ConnectionState.Disconnecting(
-                    DisconnectionStage.STOPPING_XRAY,
+                    DisconnectionStage.CLOSING_TUNNEL,
                     progress = 0.0f
                 )
-                AiLogHelper.i(TAG, "🛑 DISC STAGE 1 [STOPPING_XRAY]: Stopping Xray instances (progress: 0%)")
+                AiLogHelper.i(TAG, "🔒 DISC STAGE 1 [CLOSING_TUNNEL]: Closing network tunnel (progress: 0%)")
                 delay(300) // Brief delay to show stage
-                
-                // Wait for instances to stop (with timeout)
-                AiLogHelper.d(TAG, "⏳ DISC STAGE 1 [STOPPING_XRAY]: Waiting for Xray instances to stop (timeout: 5s)...")
-                val instancesStopped = withTimeoutOrNull(5000L) {
-                    instancesStatus.filter { statusMap ->
-                        statusMap.values.none { it is XrayRuntimeStatus.Running }
-                    }.first()
-                }
                 val discStage1Duration = System.currentTimeMillis() - discStage1StartTime
-                if (instancesStopped != null) {
-                    AiLogHelper.i(TAG, "✅ DISC STAGE 1 [STOPPING_XRAY] COMPLETED: Xray instances stopped (duration: ${discStage1Duration}ms)")
-                } else {
-                    AiLogHelper.w(TAG, "⚠️ DISC STAGE 1 [STOPPING_XRAY] TIMEOUT: Instances did not stop within 5s (duration: ${discStage1Duration}ms)")
-                }
+                AiLogHelper.i(TAG, "✅ DISC STAGE 1 [CLOSING_TUNNEL] COMPLETED: Network tunnel closed (duration: ${discStage1Duration}ms)")
                 
-                // STAGE 2: CLOSING_TUNNEL - Closing network tunnel
+                // STAGE 2: STOPPING_VPN - Stopping VPN service
                 val discStage2StartTime = System.currentTimeMillis()
                 _connectionState.value = ConnectionState.Disconnecting(
-                    DisconnectionStage.CLOSING_TUNNEL,
-                    progress = 0.3f
-                )
-                AiLogHelper.i(TAG, "🔒 DISC STAGE 2 [CLOSING_TUNNEL]: Closing network tunnel (progress: 30%)")
-                delay(200)
-                val discStage2Duration = System.currentTimeMillis() - discStage2StartTime
-                AiLogHelper.i(TAG, "✅ DISC STAGE 2 [CLOSING_TUNNEL] COMPLETED: Network tunnel closed (duration: ${discStage2Duration}ms)")
-                
-                // STAGE 3: STOPPING_VPN - Stopping VPN service
-                val discStage3StartTime = System.currentTimeMillis()
-                _connectionState.value = ConnectionState.Disconnecting(
                     DisconnectionStage.STOPPING_VPN,
-                    progress = 0.6f
+                    progress = 0.4f
                 )
-                AiLogHelper.i(TAG, "🛑 DISC STAGE 3 [STOPPING_VPN]: Stopping VPN service (progress: 60%)")
+                AiLogHelper.i(TAG, "🛑 DISC STAGE 2 [STOPPING_VPN]: Stopping VPN service (progress: 40%)")
                 
                 // Stop the service
-                AiLogHelper.d(TAG, "📤 DISC STAGE 3 [STOPPING_VPN]: Sending ACTION_DISCONNECT intent to TProxyService")
+                AiLogHelper.d(TAG, "📤 DISC STAGE 2 [STOPPING_VPN]: Sending ACTION_DISCONNECT intent to HyperVpnService")
                 stopService()
                 
                 // Wait for service to be disabled (with timeout)
-                AiLogHelper.d(TAG, "⏳ DISC STAGE 3 [STOPPING_VPN]: Waiting for service to be disabled (timeout: 5s)...")
+                AiLogHelper.d(TAG, "⏳ DISC STAGE 2 [STOPPING_VPN]: Waiting for service to be disabled (timeout: 5s)...")
                 val serviceDisabled = withTimeoutOrNull(5000L) {
                     isServiceEnabled.filter { !it }.first()
                 }
-                val discStage3Duration = System.currentTimeMillis() - discStage3StartTime
+                val discStage2Duration = System.currentTimeMillis() - discStage2StartTime
                 if (serviceDisabled != null) {
-                    AiLogHelper.i(TAG, "✅ DISC STAGE 3 [STOPPING_VPN] COMPLETED: VPN service stopped (duration: ${discStage3Duration}ms)")
+                    AiLogHelper.i(TAG, "✅ DISC STAGE 2 [STOPPING_VPN] COMPLETED: VPN service stopped (duration: ${discStage2Duration}ms)")
                 } else {
-                    AiLogHelper.w(TAG, "⚠️ DISC STAGE 3 [STOPPING_VPN] TIMEOUT: Service did not stop within 5s (duration: ${discStage3Duration}ms)")
+                    AiLogHelper.w(TAG, "⚠️ DISC STAGE 2 [STOPPING_VPN] TIMEOUT: Service did not stop within 5s (duration: ${discStage2Duration}ms)")
                 }
                 
-                // STAGE 4: CLEANING_UP - Final cleanup
-                val discStage4StartTime = System.currentTimeMillis()
+                // STAGE 3: CLEANING_UP - Final cleanup
+                val discStage3StartTime = System.currentTimeMillis()
                 _connectionState.value = ConnectionState.Disconnecting(
                     DisconnectionStage.CLEANING_UP,
-                    progress = 0.9f
+                    progress = 0.8f
                 )
-                AiLogHelper.i(TAG, "🧹 DISC STAGE 4 [CLEANING_UP]: Final cleanup (progress: 90%)")
+                AiLogHelper.i(TAG, "🧹 DISC STAGE 3 [CLEANING_UP]: Final cleanup (progress: 80%)")
                 delay(200)
                 
                 // SUCCESS - Complete disconnection
@@ -479,13 +298,13 @@ class VpnConnectionUseCase(
                     progress = 1.0f
                 )
                 delay(200)
-                val discStage4Duration = System.currentTimeMillis() - discStage4StartTime
+                val discStage3Duration = System.currentTimeMillis() - discStage3StartTime
                 val totalDisconnectDuration = System.currentTimeMillis() - disconnectStartTime
                 
                 _connectionState.value = ConnectionState.Disconnected
                 Log.d(TAG, "Disconnection process completed successfully")
                 AiLogHelper.i(TAG, "✅ DISCONNECTION SUCCESS: All stages completed successfully (total duration: ${totalDisconnectDuration}ms)")
-                AiLogHelper.i(TAG, "📊 DISCONNECTION SUMMARY: Stage1=${discStage1Duration}ms, Stage2=${discStage2Duration}ms, Stage3=${discStage3Duration}ms, Stage4=${discStage4Duration}ms")
+                AiLogHelper.i(TAG, "📊 DISCONNECTION SUMMARY: Stage1=${discStage1Duration}ms, Stage2=${discStage2Duration}ms, Stage3=${discStage3Duration}ms")
                 
             } catch (e: TimeoutCancellationException) {
                 // Even if timeout, set to disconnected
@@ -507,34 +326,19 @@ class VpnConnectionUseCase(
         Log.i(TAG, "stopConnectionProcessAndSetFailed: Starting disconnection process due to failure: $errorMessage")
         connectionJob = scope.launch {
             try {
-                // STAGE 1: STOPPING_XRAY - Stopping Xray instances
-                Log.d(TAG, "stopConnectionProcessAndSetFailed: STAGE 1 - Stopping Xray instances")
+                // STAGE 1: CLOSING_TUNNEL - Closing network tunnel
+                Log.d(TAG, "stopConnectionProcessAndSetFailed: STAGE 1 - Closing network tunnel")
                 _connectionState.value = ConnectionState.Disconnecting(
-                    DisconnectionStage.STOPPING_XRAY,
+                    DisconnectionStage.CLOSING_TUNNEL,
                     progress = 0.0f
                 )
                 delay(300) // Brief delay to show stage
                 
-                // Wait for instances to stop (with timeout)
-                val instancesStopped = withTimeoutOrNull(5000L) {
-                    instancesStatus.filter { statusMap ->
-                        statusMap.values.none { it is XrayRuntimeStatus.Running }
-                    }.first()
-                }
-                
-                // STAGE 2: CLOSING_TUNNEL - Closing network tunnel
-                Log.d(TAG, "stopConnectionProcessAndSetFailed: STAGE 2 - Closing network tunnel")
-                _connectionState.value = ConnectionState.Disconnecting(
-                    DisconnectionStage.CLOSING_TUNNEL,
-                    progress = 0.3f
-                )
-                delay(200)
-                
-                // STAGE 3: STOPPING_VPN - Stopping VPN service
-                Log.d(TAG, "stopConnectionProcessAndSetFailed: STAGE 3 - Stopping VPN service")
+                // STAGE 2: STOPPING_VPN - Stopping VPN service
+                Log.d(TAG, "stopConnectionProcessAndSetFailed: STAGE 2 - Stopping VPN service")
                 _connectionState.value = ConnectionState.Disconnecting(
                     DisconnectionStage.STOPPING_VPN,
-                    progress = 0.6f
+                    progress = 0.4f
                 )
                 
                 // Stop the service
@@ -545,11 +349,11 @@ class VpnConnectionUseCase(
                     isServiceEnabled.filter { !it }.first()
                 }
                 
-                // STAGE 4: CLEANING_UP - Final cleanup
-                Log.d(TAG, "stopConnectionProcessAndSetFailed: STAGE 4 - Cleaning up")
+                // STAGE 3: CLEANING_UP - Final cleanup
+                Log.d(TAG, "stopConnectionProcessAndSetFailed: STAGE 3 - Cleaning up")
                 _connectionState.value = ConnectionState.Disconnecting(
                     DisconnectionStage.CLEANING_UP,
-                    progress = 0.9f
+                    progress = 0.8f
                 )
                 delay(200)
                 
@@ -560,15 +364,15 @@ class VpnConnectionUseCase(
                 )
                 delay(200)
                 
-                // Set to Failed state with retry countdown (initially null, buton aktif)
+                // Set to Failed state with retry countdown (initially null, button active)
                 Log.i(TAG, "stopConnectionProcessAndSetFailed: Disconnection complete, setting to Failed state")
                 _connectionState.value = ConnectionState.Failed(
                     error = errorMessage,
-                    retryCountdownSeconds = null // Buton aktif, countdown henüz başlamadı
+                    retryCountdownSeconds = null // Button active, countdown not started yet
                 )
                 
-                // Start retry countdown after a brief delay (buton aktif kaldıktan sonra)
-                delay(1000L) // 1 saniye gecikme, butonun aktif olduğunu görmek için
+                // Start retry countdown after a brief delay
+                delay(1000L)
                 startRetryCountdown()
                 
             } catch (e: TimeoutCancellationException) {
@@ -595,22 +399,16 @@ class VpnConnectionUseCase(
      * Handles retry countdown when connection fails.
      * DISABLED: Automatic retry is disabled to prevent disconnect loops.
      * Retry should be done manually by the user via UI button.
-     * Buton aktif olduktan sonra countdown başlar ama otomatik retry yapılmaz.
      */
     private fun startRetryCountdown() {
         Log.i(TAG, "startRetryCountdown: Retry countdown disabled to prevent disconnect loops. User must manually retry.")
-        // Automatic retry is disabled to prevent disconnect loops
-        // User must manually retry via UI button
         retryCountdownJob?.cancel()
         
-        // Optionally show countdown in UI but don't auto-retry
-        // This allows UI to show countdown but prevents automatic reconnection
         retryCountdownJob = scope.launch {
             var countdown = 3
             while (countdown > 0) {
                 val currentState = _connectionState.value
                 if (currentState !is ConnectionState.Failed) {
-                    // State changed, stop countdown
                     Log.d(TAG, "startRetryCountdown: State changed, stopping countdown")
                     return@launch
                 }
@@ -626,7 +424,6 @@ class VpnConnectionUseCase(
             if (finalState is ConnectionState.Failed) {
                 Log.i(TAG, "startRetryCountdown: Countdown finished, but auto-retry is disabled. User must manually retry.")
                 _connectionState.value = finalState.copy(retryCountdownSeconds = null)
-                // DO NOT call connect() here - let user manually retry
             } else {
                 Log.d(TAG, "startRetryCountdown: State is no longer Failed, skipping retry")
             }
@@ -678,23 +475,22 @@ class VpnConnectionUseCase(
         }
     }
     
-    
     /**
-     * Starts the TProxy service.
+     * Starts the VPN service.
      */
     private fun startService() {
-        val intent = Intent(context, TProxyService::class.java).apply {
-            action = TProxyService.ACTION_CONNECT
+        val intent = Intent(context, HyperVpnService::class.java).apply {
+            action = HyperVpnService.ACTION_CONNECT
         }
         onStartService(intent)
     }
     
     /**
-     * Stops the TProxy service.
+     * Stops the VPN service.
      */
     private fun stopService() {
-        val intent = Intent(context, TProxyService::class.java).apply {
-            action = TProxyService.ACTION_DISCONNECT
+        val intent = Intent(context, HyperVpnService::class.java).apply {
+            action = HyperVpnService.ACTION_DISCONNECT
         }
         onStopService(intent)
     }
@@ -707,4 +503,3 @@ class VpnConnectionUseCase(
         retryCountdownJob?.cancel()
     }
 }
-

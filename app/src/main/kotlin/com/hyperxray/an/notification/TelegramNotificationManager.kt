@@ -199,6 +199,48 @@ class TelegramNotificationManager private constructor(context: Context) {
     }
 
     /**
+     * Send service started notification
+     */
+    suspend fun notifyServiceStarted() {
+        withContext(Dispatchers.IO) {
+            val config = getConfig() ?: return@withContext
+
+            val message = "🚀 *Service Started*\n\nVPN service has been started successfully."
+
+            val notification = TelegramNotification(
+                type = NotificationType.VpnStatus,
+                message = message
+            )
+
+            sendNotificationUseCase(notification, config).fold(
+                onSuccess = { Log.d(TAG, "Service started notification sent") },
+                onFailure = { error -> Log.e(TAG, "Failed to send service started notification", error) }
+            )
+        }
+    }
+
+    /**
+     * Send service stopped notification
+     */
+    suspend fun notifyServiceStopped() {
+        withContext(Dispatchers.IO) {
+            val config = getConfig() ?: return@withContext
+
+            val message = "🛑 *Service Stopped*\n\nVPN service has been stopped."
+
+            val notification = TelegramNotification(
+                type = NotificationType.VpnStatus,
+                message = message
+            )
+
+            sendNotificationUseCase(notification, config).fold(
+                onSuccess = { Log.d(TAG, "Service stopped notification sent") },
+                onFailure = { error -> Log.e(TAG, "Failed to send service stopped notification", error) }
+            )
+        }
+    }
+
+    /**
      * Start command polling to process bot commands
      */
     private fun startCommandPolling() {

@@ -10,18 +10,19 @@ import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.util.Log
+import com.hyperxray.an.vpn.HyperVpnService
 
 /**
  * Quick Settings tile service for quick VPN connection toggle.
- * Listens to TProxyService broadcasts to update tile state.
+ * Listens to HyperVpnService broadcasts to update tile state.
  */
 class QuickTileService : TileService() {
 
     private val broadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
-                TProxyService.ACTION_START -> updateTileState(true)
-                TProxyService.ACTION_STOP -> updateTileState(false)
+                HyperVpnService.ACTION_START -> updateTileState(true)
+                HyperVpnService.ACTION_STOP -> updateTileState(false)
             }
         }
     }
@@ -36,8 +37,8 @@ class QuickTileService : TileService() {
         Log.d(TAG, "QuickTileService started listening.")
 
         IntentFilter().apply {
-            addAction(TProxyService.ACTION_START)
-            addAction(TProxyService.ACTION_STOP)
+            addAction(HyperVpnService.ACTION_START)
+            addAction(HyperVpnService.ACTION_STOP)
         }.also { filter ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 registerReceiver(broadcastReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -49,7 +50,7 @@ class QuickTileService : TileService() {
             }
         }
 
-        updateTileState(isVpnServiceRunning(this, TProxyService::class.java))
+        updateTileState(isVpnServiceRunning(this, HyperVpnService::class.java))
     }
 
     override fun onStopListening() {
@@ -72,9 +73,9 @@ class QuickTileService : TileService() {
                     Log.e(TAG, "QuickTileService VPN not ready.")
                     return
                 }
-                startTProxyService(TProxyService.ACTION_START)
+                startVpnService(HyperVpnService.ACTION_START)
             } else {
-                startTProxyService(TProxyService.ACTION_DISCONNECT)
+                startVpnService(HyperVpnService.ACTION_DISCONNECT)
             }
         }
     }
@@ -99,8 +100,8 @@ class QuickTileService : TileService() {
         }
     }
 
-    private fun startTProxyService(action: String) {
-        Intent(this, TProxyService::class.java).apply {
+    private fun startVpnService(action: String) {
+        Intent(this, HyperVpnService::class.java).apply {
             this.action = action
         }.also { intent ->
             startService(intent)

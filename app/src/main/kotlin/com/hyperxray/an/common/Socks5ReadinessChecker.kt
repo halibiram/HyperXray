@@ -7,7 +7,7 @@ import android.content.IntentFilter
 import android.os.Build
 import android.util.Log
 import com.hyperxray.an.prefs.Preferences
-import com.hyperxray.an.service.TProxyService
+import com.hyperxray.an.vpn.HyperVpnService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -164,7 +164,7 @@ object Socks5ReadinessChecker {
      * @param receiver BroadcastReceiver to register
      */
     fun registerReadinessReceiver(context: Context, receiver: BroadcastReceiver) {
-        val filter = IntentFilter(TProxyService.ACTION_SOCKS5_READY)
+        val filter = IntentFilter("com.hyperxray.an.SOCKS5_READY")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {

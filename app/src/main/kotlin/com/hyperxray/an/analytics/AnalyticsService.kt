@@ -6,9 +6,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.util.Log
-import com.hyperxray.an.common.Socks5ReadinessChecker
 import com.hyperxray.an.prefs.Preferences
-import com.hyperxray.an.service.TProxyService
+import com.hyperxray.an.vpn.HyperVpnService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,32 +15,28 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.net.Socket
-import java.net.SocketTimeoutException
 
 /**
- * Example AnalyticsService that demonstrates proper SOCKS5 readiness handling.
+ * Analytics service that demonstrates proper VPN service event handling.
  * 
  * This service:
- * 1. Waits for SOCKS5 to be ready before connecting
- * 2. Listens for SOCKS5 readiness broadcasts
- * 3. Automatically reconnects when SOCKS5 restarts
- * 4. Handles connection failures gracefully
+ * 1. Listens for VPN service start/stop broadcasts
+ * 2. Handles connection lifecycle events
+ * 3. Collects analytics data when VPN is connected
  * 
- * IMPORTANT: Any service that needs to connect to the local SOCKS5 proxy
- * (127.0.0.1:10808) MUST wait for SOCKS5 readiness before attempting to connect.
+ * Note: This service has been simplified for the HyperVpnService architecture.
+ * SOCKS5 readiness handling has been removed as HyperVpnService uses native Go tunnel.
  */
 class AnalyticsService(private val context: Context) {
     private val TAG = "AnalyticsService"
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     
     private var isRunning = false
-    private var socks5Socket: Socket? = null
-    private var readinessReceiver: BroadcastReceiver? = null
+    private var isVpnConnected = false
+    private var serviceEventReceiver: BroadcastReceiver? = null
     
     /**
      * Start the analytics service.
-     * This will wait for SOCKS5 to be ready before connecting.
      */
     fun start() {
         if (isRunning) {
@@ -52,12 +47,12 @@ class AnalyticsService(private val context: Context) {
         isRunning = true
         Log.d(TAG, "Starting AnalyticsService")
         
-        // Register receiver to listen for SOCKS5 readiness events
-        registerReadinessReceiver()
+        // Register receiver to listen for VPN service events
+        registerServiceEventReceiver()
         
-        // Check if SOCKS5 is already ready, or wait for it
+        // Start analytics collection if VPN is already connected
         serviceScope.launch {
-            connectToSocks5()
+            startAnalyticsCollection()
         }
     }
     
@@ -73,197 +68,109 @@ class AnalyticsService(private val context: Context) {
         Log.d(TAG, "Stopping AnalyticsService")
         
         // Unregister receiver
-        unregisterReadinessReceiver()
-        
-        // Close socket connection
-        closeSocket()
+        unregisterServiceEventReceiver()
         
         // Cancel coroutine scope
         serviceScope.cancel()
     }
     
     /**
-     * Connect to SOCKS5 proxy, waiting for readiness if necessary.
+     * Start collecting analytics data.
      */
-    private suspend fun connectToSocks5() {
+    private suspend fun startAnalyticsCollection() {
         val prefs = Preferences(context)
-        val socksAddress = prefs.socksAddress
-        val socksPort = prefs.socksPort
         
         try {
-            // CRITICAL: Wait for SOCKS5 to be ready before connecting
-            // This prevents SocketTimeoutException when SOCKS5 hasn't started yet
-            Log.d(TAG, "Waiting for SOCKS5 to be ready on $socksAddress:$socksPort")
+            Log.d(TAG, "Starting analytics collection")
             
-            val isReady = Socks5ReadinessChecker.waitUntilSocksReady(
-                context = context,
-                address = socksAddress,
-                port = socksPort,
-                maxWaitTimeMs = 30000L, // Wait up to 30 seconds
-                retryIntervalMs = 500L // Check every 500ms
-            )
-            
-            if (!isReady) {
-                Log.e(TAG, "SOCKS5 did not become ready within timeout, cannot connect")
-                return
-            }
-            
-            // SOCKS5 is ready, attempt connection
-            Log.d(TAG, "SOCKS5 is ready, connecting to $socksAddress:$socksPort")
-            
-            val socket = Socket()
-            socket.soTimeout = 10000 // 10 second timeout
-            socket.connect(
-                java.net.InetSocketAddress(socksAddress, socksPort),
-                10000 // 10 second connection timeout
-            )
-            
-            socks5Socket = socket
-            Log.i(TAG, "✅ Successfully connected to SOCKS5 proxy on $socksAddress:$socksPort")
-            
-            // Now you can use the socket for SOCKS5 communication
-            // Example: send analytics data through the proxy
-            sendAnalyticsData(socket)
-            
-        } catch (e: SocketTimeoutException) {
-            Log.e(TAG, "SocketTimeoutException: failed to connect to /$socksAddress (port $socksPort) after 10000ms")
-            Log.e(TAG, "This should not happen if SOCKS5 readiness check passed. SOCKS5 may have stopped.")
-            
-            // Attempt to reconnect after a delay
-            if (isRunning) {
-                delay(5000) // Wait 5 seconds before retry
-                if (isRunning) {
-                    Log.d(TAG, "Retrying connection to SOCKS5...")
-                    connectToSocks5()
+            // Placeholder: Keep collecting data while service is running
+            while (serviceScope.isActive && isRunning) {
+                if (isVpnConnected) {
+                    // Collect analytics data when VPN is connected
+                    collectAnalyticsData()
                 }
+                delay(60000) // Collect data every 60 seconds
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error connecting to SOCKS5: ${e.message}", e)
-            
-            // Attempt to reconnect after a delay
-            if (isRunning) {
-                delay(5000) // Wait 5 seconds before retry
-                if (isRunning) {
-                    Log.d(TAG, "Retrying connection to SOCKS5...")
-                    connectToSocks5()
-                }
-            }
+            Log.e(TAG, "Error in analytics collection: ${e.message}", e)
         }
     }
     
     /**
-     * Send analytics data through SOCKS5 proxy.
+     * Collect analytics data.
      * This is a placeholder - implement your actual analytics logic here.
      */
-    private suspend fun sendAnalyticsData(socket: Socket) {
+    private suspend fun collectAnalyticsData() {
         try {
-            // Example: Send analytics data through SOCKS5
-            // In a real implementation, you would:
-            // 1. Perform SOCKS5 handshake
-            // 2. Send your analytics data
-            // 3. Handle responses
+            Log.d(TAG, "Collecting analytics data...")
             
-            Log.d(TAG, "Sending analytics data through SOCKS5...")
+            // Example analytics data collection:
+            // - Connection duration
+            // - Data transfer statistics
+            // - Error counts
+            // - Performance metrics
             
-            // Placeholder: Keep connection alive and monitor for disconnects
-            while (serviceScope.isActive && isRunning) {
-                delay(10000) // Check every 10 seconds
-                
-                // Verify socket is still connected
-                if (socket.isClosed || !socket.isConnected) {
-                    Log.w(TAG, "SOCKS5 socket disconnected, reconnecting...")
-                    closeSocket()
-                    connectToSocks5()
-                    break
-                }
-            }
         } catch (e: Exception) {
-            Log.e(TAG, "Error sending analytics data: ${e.message}", e)
-            closeSocket()
-            
-            // Attempt to reconnect
-            if (isRunning) {
-                delay(5000)
-                if (isRunning) {
-                    connectToSocks5()
-                }
-            }
+            Log.e(TAG, "Error collecting analytics data: ${e.message}", e)
         }
     }
     
     /**
-     * Close the SOCKS5 socket connection.
+     * Register BroadcastReceiver to listen for VPN service events.
      */
-    private fun closeSocket() {
-        try {
-            socks5Socket?.close()
-            socks5Socket = null
-            Log.d(TAG, "SOCKS5 socket closed")
-        } catch (e: Exception) {
-            Log.w(TAG, "Error closing socket: ${e.message}")
-        }
-    }
-    
-    /**
-     * Register BroadcastReceiver to listen for SOCKS5 readiness events.
-     */
-    private fun registerReadinessReceiver() {
-        if (readinessReceiver != null) {
+    private fun registerServiceEventReceiver() {
+        if (serviceEventReceiver != null) {
             return // Already registered
         }
         
-        readinessReceiver = object : BroadcastReceiver() {
+        serviceEventReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 when (intent.action) {
-                    TProxyService.ACTION_SOCKS5_READY -> {
-                        val socksAddress = intent.getStringExtra("socks_address") ?: "127.0.0.1"
-                        val socksPort = intent.getIntExtra("socks_port", 10808)
-                        Log.d(TAG, "Received SOCKS5 ready broadcast: $socksAddress:$socksPort")
-                        
-                        // If socket is not connected or disconnected, reconnect
-                        if (socks5Socket == null || socks5Socket?.isClosed == true || 
-                            socks5Socket?.isConnected == false) {
-                            serviceScope.launch {
-                                connectToSocks5()
-                            }
-                        }
+                    HyperVpnService.ACTION_START -> {
+                        Log.d(TAG, "Received VPN started broadcast")
+                        isVpnConnected = true
                     }
-                    TProxyService.ACTION_STOP -> {
-                        Log.d(TAG, "Received service stop broadcast, closing SOCKS5 connection")
-                        closeSocket()
+                    HyperVpnService.ACTION_STOP -> {
+                        Log.d(TAG, "Received VPN stopped broadcast")
+                        isVpnConnected = false
+                    }
+                    HyperVpnService.ACTION_ERROR -> {
+                        val errorMessage = intent.getStringExtra(HyperVpnService.EXTRA_ERROR_MESSAGE) ?: "Unknown error"
+                        Log.e(TAG, "Received VPN error broadcast: $errorMessage")
+                        isVpnConnected = false
                     }
                 }
             }
         }
         
         val filter = IntentFilter().apply {
-            addAction(TProxyService.ACTION_SOCKS5_READY)
-            addAction(TProxyService.ACTION_STOP)
+            addAction(HyperVpnService.ACTION_START)
+            addAction(HyperVpnService.ACTION_STOP)
+            addAction(HyperVpnService.ACTION_ERROR)
         }
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(readinessReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            context.registerReceiver(serviceEventReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
             @Suppress("UnspecifiedRegisterReceiverFlag")
-            context.registerReceiver(readinessReceiver, filter)
+            context.registerReceiver(serviceEventReceiver, filter)
         }
         
-        Log.d(TAG, "Registered SOCKS5 readiness receiver")
+        Log.d(TAG, "Registered VPN service event receiver")
     }
     
     /**
      * Unregister BroadcastReceiver.
      */
-    private fun unregisterReadinessReceiver() {
-        readinessReceiver?.let { receiver ->
+    private fun unregisterServiceEventReceiver() {
+        serviceEventReceiver?.let { receiver ->
             try {
                 context.unregisterReceiver(receiver)
-                readinessReceiver = null
-                Log.d(TAG, "Unregistered SOCKS5 readiness receiver")
+                serviceEventReceiver = null
+                Log.d(TAG, "Unregistered VPN service event receiver")
             } catch (e: Exception) {
                 Log.w(TAG, "Error unregistering receiver: ${e.message}")
             }
         }
     }
 }
-

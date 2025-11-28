@@ -93,9 +93,19 @@ interface DashboardViewModel {
     val connectionState: StateFlow<ConnectionState>
     val instancesStatus: StateFlow<Map<Int, XrayRuntimeStatus>>
     
+    // HyperVpnService state (optional - may be null if not available)
+    val hyperVpnState: StateFlow<com.hyperxray.an.core.network.vpn.HyperVpnStateManager.VpnState>?
+    val hyperVpnStats: StateFlow<com.hyperxray.an.core.network.vpn.HyperVpnStateManager.TunnelStats>?
+    val hyperVpnError: StateFlow<String?>?
+    
     fun updateCoreStats()
     fun updateTelemetryStats()
     fun updateDnsCacheStats()
     fun clearDnsCache()
+    
+    // HyperVpnService control functions (optional)
+    fun startHyperVpn() {}
+    fun stopHyperVpn() {}
+    fun clearHyperVpnError() {}
 }
 

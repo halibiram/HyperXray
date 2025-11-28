@@ -2,16 +2,30 @@ plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
     id 'org.jetbrains.kotlin.plugin.compose' version "${kotlin_version}"
-    // Protobuf plugin removed - proto generation is done in xray-runtime-service module
-    // id 'com.google.protobuf' version '0.9.4'
+    id 'com.google.protobuf' version '0.9.4'
     id 'org.jetbrains.kotlin.plugin.serialization' version "${kotlin_version}"
     id 'kotlin-kapt'
     id 'androidx.baselineprofile' version '1.3.2'
 }
 
-// Protobuf plugin removed from app module - proto files are generated in xray-runtime-service module
+// Protobuf configuration removed - proto files are generated in xray-runtime-service module
 // The command.proto file remains in app/src/main/proto for xray-runtime-service to reference
-// This removes the circular dependency issue with feature-telegram
+protobuf {
+    protoc {
+        artifact = 'com.google.protobuf:protoc:3.25.1'
+    }
+    plugins {
+        grpc {
+            artifact = 'io.grpc:protoc-gen-grpc-java:1.65.0'
+        }
+    }
+    // Disable proto generation in app module - classes come from xray-runtime-service
+    generateProtoTasks {
+        all().configureEach { task ->
+            task.enabled = false
+        }
+    }
+}
 
 def versionProps = new Properties()
 file("$rootDir/version.properties").withInputStream { versionProps.load(it) }
@@ -76,65 +90,173 @@ task downloadGeoFiles {
     }
 }
 
-// Check and provide instructions for Xray-core binary
-def xrayVersion = versionProps.XRAY_CORE_VERSION ?: 'v25.10.15'
-def xrayArm64Path = new File("$projectDir/src/main/jniLibs/arm64-v8a/libxray.so")
-def xrayX86Path = new File("$projectDir/src/main/jniLibs/x86_64/libxray.so")
+// Xray-core is embedded in libhyperxray.so, no separate libxray.so needed
 
-task checkXrayCore {
+// Native Go library paths
+def nativeGoDir = new File("$rootDir/native")
+def hyperXrayArm64Path = new File("$projectDir/src/main/jniLibs/arm64-v8a/libhyperxray.so")
+def hyperXrayArm32Path = new File("$projectDir/src/main/jniLibs/armeabi-v7a/libhyperxray.so")
+def hyperXrayX86Path = new File("$projectDir/src/main/jniLibs/x86_64/libhyperxray.so")
+def goVersion = versionProps.GO_VERSION ?: '1.25.3'
+def ndkVersion = versionProps.NDK_VERSION ?: '28.2.13676358'
+
+// Xray-core is embedded in libhyperxray.so, no separate check needed
+
+// Build native Go library (libhyperxray.so)
+task buildNativeGo {
     group = 'build'
-    description = 'Check if Xray-core binaries are present and provide instructions if missing'
+    description = 'Build native Go library (libhyperxray.so) for Android'
+    
+    def ndkHome = System.getenv('ANDROID_NDK_HOME') ?: System.getenv('ANDROID_NDK_ROOT')
+    if (!ndkHome) {
+        // Try to find NDK in Android SDK
+        def sdkHome = System.getenv('ANDROID_HOME') ?: System.getenv('ANDROID_SDK_ROOT')
+        if (!sdkHome) {
+            // Try Windows default location
+            def localAppData = System.getenv('LOCALAPPDATA')
+            if (localAppData) {
+                sdkHome = new File(localAppData, "Android/Sdk").absolutePath
+            }
+        }
+        if (sdkHome) {
+            def ndkVersionStr = versionProps.NDK_VERSION ?: '28.2.13676358'
+            def ndkDir = new File(sdkHome, "ndk/${ndkVersionStr}")
+            if (ndkDir.exists()) {
+                ndkHome = ndkDir.absolutePath
+                println "✅ Found NDK at: ${ndkHome}"
+            }
+        }
+    }
+    
+    if (!ndkHome) {
+        doLast {
+            println "⚠️  ANDROID_NDK_HOME not set. Skipping native Go build."
+            println "   Set ANDROID_NDK_HOME environment variable or install NDK ${ndkVersion}"
+            println "   Native Go library will not be built."
+        }
+        return
+    }
+    
+    def goCmd = System.getenv('GO') ?: 'go'
     
     doLast {
-        def missing = []
-        if (!xrayArm64Path.exists()) {
-            missing.add("arm64-v8a")
-        }
-        if (!xrayX86Path.exists()) {
-            missing.add("x86_64")
+        println "Building native Go library (libhyperxray.so)..."
+        println "  NDK Home: ${ndkHome}"
+        println "  Go command: ${goCmd}"
+        println "  Native Go directory: ${nativeGoDir.absolutePath}"
+        
+        if (!nativeGoDir.exists()) {
+            throw new GradleException("Native Go directory not found: ${nativeGoDir.absolutePath}")
         }
         
-        if (missing.isEmpty()) {
-            println "✓ Xray-core binaries found for all architectures"
-            println "  - arm64-v8a: ${xrayArm64Path.exists() ? '✓' : '✗'}"
-            println "  - x86_64: ${xrayX86Path.exists() ? '✓' : '✗'}"
-        } else {
-            println "⚠ Xray-core binaries missing for: ${missing.join(', ')}"
-            println ""
-            println "To include Xray-core, you need to build it from source:"
-            println ""
-            println "1. Install Go ${versionProps.GO_VERSION ?: '1.25.3'}+ and Android NDK ${versionProps.NDK_VERSION ?: '28.2.13676358'}"
-            println "2. Clone Xray-core:"
-            println "   git clone https://github.com/XTLS/Xray-core.git"
-            println "   cd Xray-core"
-            println "   git checkout ${xrayVersion}"
-            println ""
-            println "3. Build for Android:"
-            println "   # For arm64-v8a:"
-            println "   export GOOS=android GOARCH=arm64 CGO_ENABLED=1"
-            println "   export CC=\$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
-            println "   go build -o xray -trimpath -buildvcs=false -ldflags=\"-s -w -buildid=\" -v ./main"
-            println "   cp xray ${xrayArm64Path.absolutePath}"
-            println ""
-            println "   # For x86_64:"
-            println "   export GOOS=android GOARCH=amd64 CGO_ENABLED=1"
-            println "   export CC=\$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android24-clang"
-            println "   go build -o xray -trimpath -buildvcs=false -ldflags=\"-s -w -buildid=\" -v ./main"
-            println "   cp xray ${xrayX86Path.absolutePath}"
-            println ""
-            println "Alternatively, see .github/workflows/build.yml for automated build process."
-            println ""
-            println "Required paths:"
-            println "  - ${xrayArm64Path.absolutePath}"
-            println "  - ${xrayX86Path.absolutePath}"
+        // Get host prebuilt directory name
+        def hostPrebuilt = getHostPrebuilt()
+        
+        // Build for each ABI
+        def abis = [
+            [abi: 'arm64-v8a', arch: 'arm64', cc: "${ndkHome}/toolchains/llvm/prebuilt/${hostPrebuilt}/bin/aarch64-linux-android24-clang"],
+            [abi: 'armeabi-v7a', arch: 'arm', cc: "${ndkHome}/toolchains/llvm/prebuilt/${hostPrebuilt}/bin/armv7a-linux-androideabi24-clang"],
+            [abi: 'x86_64', arch: 'amd64', cc: "${ndkHome}/toolchains/llvm/prebuilt/${hostPrebuilt}/bin/x86_64-linux-android24-clang"]
+        ]
+        
+        abis.each { abiConfig ->
+            def abi = abiConfig.abi
+            def arch = abiConfig.arch
+            def cc = abiConfig.cc
+            def outputPath = new File("$projectDir/src/main/jniLibs/${abi}/libhyperxray.so")
+            
+            println "  Building for ${abi} (${arch})..."
+            
+            // Create output directory
+            outputPath.parentFile.mkdirs()
+            
+            // Check if this is a debug build
+            def isDebug = gradle.startParameter.taskNames.any { 
+                it.contains('Debug') || it.contains('debug') 
+            } || System.getProperty('buildType', '').equalsIgnoreCase('debug')
+            
+            // Build command - debug build includes symbols, release strips them
+            def ldflags = isDebug ? 
+                '-buildid=' :  // Debug: keep symbols for debugging
+                '-s -w -buildid='  // Release: strip symbols
+            
+            def buildCmd = [
+                goCmd.toString(),
+                'build',
+                '-buildmode=c-shared',
+                '-o', outputPath.absolutePath.toString(),
+                '-trimpath',
+                '-buildvcs=false',
+                "-ldflags=${ldflags}".toString(),
+                '-v',
+                'github.com/hyperxray/native'
+            ] as String[]
+            
+            if (isDebug) {
+                println "    🔧 Debug build: Keeping debug symbols"
+            } else {
+                println "    🔧 Release build: Stripping symbols"
+            }
+            
+            // Execute build
+            def procBuilder = new ProcessBuilder(buildCmd)
+                .directory(nativeGoDir)
+                .redirectErrorStream(true)
+            
+            // Set environment before starting process
+            def procEnv = procBuilder.environment()
+            procEnv.put("GOOS", "android")
+            procEnv.put("GOARCH", arch.toString())
+            procEnv.put("CGO_ENABLED", "1")
+            procEnv.put("CC", cc.toString())
+            
+            def proc = procBuilder.start()
+            
+            // Wait for completion
+            def output = new StringBuilder()
+            proc.inputStream.eachLine { line ->
+                output.append(line).append('\n')
+                println "    ${line}"
+            }
+            
+            def exitCode = proc.waitFor()
+            
+            if (exitCode != 0) {
+                println "    ❌ Build failed for ${abi}"
+                println "    Output: ${output.toString()}"
+                throw new GradleException("Failed to build native Go library for ${abi}")
+            } else {
+                if (outputPath.exists()) {
+                    println "    ✅ Built: ${outputPath.absolutePath} (${outputPath.length()} bytes)"
+                } else {
+                    throw new GradleException("Build succeeded but output file not found: ${outputPath.absolutePath}")
+                }
+            }
         }
+        
+        println "✅ Native Go library build completed successfully"
     }
 }
 
-// Make checkXrayCore run before build tasks
-tasks.whenTaskAdded { task ->
-    if (task.name.startsWith('assemble') || task.name.startsWith('install')) {
-        task.dependsOn checkXrayCore
+// Helper function to get host prebuilt directory name
+def getHostPrebuilt() {
+    def os = System.getProperty('os.name').toLowerCase()
+    def arch = System.getProperty('os.arch').toLowerCase()
+    
+    if (os.contains('win')) {
+        return 'windows-x86_64'
+    } else if (os.contains('mac')) {
+        if (arch.contains('aarch64') || arch.contains('arm64')) {
+            return 'darwin-arm64'
+        } else {
+            return 'darwin-x86_64'
+        }
+    } else {
+        if (arch.contains('aarch64') || arch.contains('arm64')) {
+            return 'linux-arm64'
+        } else {
+            return 'linux-x86_64'
+        }
     }
 }
 
@@ -467,80 +589,10 @@ task generateHyperXrayPolicyModel {
     }
 }
 
-// Fix symlink include files for Windows compatibility
-task fixIncludeFiles {
-    group = 'build'
-    description = 'Fix symlink include files for Windows build compatibility'
-    
-    doLast {
-        println "Fixing include files for Windows compatibility..."
-        
-        // Fix hev-task-system include files
-        def hevTaskSystemInclude = file("${projectDir}/src/main/jni/hev-socks5-tunnel/third-part/hev-task-system/include")
-        if (hevTaskSystemInclude.exists()) {
-            hevTaskSystemInclude.listFiles().each { includeFile ->
-                if (includeFile.isFile() && includeFile.name.endsWith('.h')) {
-                    def lines = includeFile.readLines()
-                    if (lines.size() > 0) {
-                        def firstLine = lines[0]
-                        if (firstLine && firstLine.startsWith('../src/')) {
-                            def targetPath = file("${hevTaskSystemInclude.parent}/src/${firstLine.substring(7)}")
-                            if (targetPath.exists()) {
-                                includeFile.write(targetPath.text)
-                                println "Fixed: ${includeFile.name}"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Fix yaml include files
-        def yamlInclude = file("${projectDir}/src/main/jni/hev-socks5-tunnel/third-part/yaml/include")
-        if (yamlInclude.exists()) {
-            yamlInclude.listFiles().each { includeFile ->
-                if (includeFile.isFile() && includeFile.name.endsWith('.h')) {
-                    def lines = includeFile.readLines()
-                    if (lines.size() > 0) {
-                        def firstLine = lines[0]
-                        if (firstLine && firstLine.startsWith('../src/')) {
-                            def targetPath = file("${yamlInclude.parent}/src/${firstLine.substring(7)}")
-                            if (targetPath.exists()) {
-                                includeFile.write(targetPath.text)
-                                println "Fixed: ${includeFile.name}"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Fix hev-socks5-tunnel core include files
-        def coreInclude = file("${projectDir}/src/main/jni/hev-socks5-tunnel/src/core/include")
-        if (coreInclude.exists()) {
-            coreInclude.listFiles().each { includeFile ->
-                if (includeFile.isFile() && includeFile.name.endsWith('.h')) {
-                    def lines = includeFile.readLines()
-                    if (lines.size() > 0) {
-                        def firstLine = lines[0]
-                        if (firstLine && firstLine.startsWith('../src/')) {
-                            def targetPath = file("${coreInclude.parent}/src/${firstLine.substring(7)}")
-                            if (targetPath.exists()) {
-                                includeFile.write(targetPath.text)
-                                println "Fixed: ${includeFile.name}"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        println "Include files fixed successfully"
-    }
-}
 
-// Download geo files before processing assets
+// Build native Go library before processing assets
 android.applicationVariants.all { variant ->
+    variant.mergeAssetsProvider.get().dependsOn buildNativeGo
     variant.mergeAssetsProvider.get().dependsOn downloadGeoFiles
     // Model training disabled during build - use existing models in assets/
     // To train model manually, run: ./gradlew trainOnnxModel
@@ -548,50 +600,7 @@ android.applicationVariants.all { variant ->
     // variant.mergeAssetsProvider.get().dependsOn generateHyperXrayPolicyModel
 }
 
-// Copy xray-wrapper executable to jniLibs as .so file (Android only packages .so files)
-afterEvaluate {
-    // Copy from build output to jniLibs after NDK build, rename to .so extension
-    tasks.matching { it.name.startsWith("externalNativeBuild") && !it.name.contains("Clean") }.configureEach { task ->
-        task.finalizedBy {
-            tasks.create("copyXrayWrapper${task.name.capitalize()}") {
-                doLast {
-                    // Skip if build directory doesn't exist (e.g., during clean)
-                    if (!file("${project.buildDir}/intermediates/cxx").exists()) {
-                        return
-                    }
-                    
-                    ["arm64-v8a", "x86_64"].each { abi ->
-                        // Find wrapper in any cxx build directory
-                        def wrapperSource = null
-                        def cxxDir = file("${project.buildDir}/intermediates/cxx")
-                        if (cxxDir.exists()) {
-                            cxxDir.eachDirRecurse { dir ->
-                                def wrapperFile = new File(dir, "obj/local/${abi}/xray-wrapper")
-                                if (wrapperFile.exists()) {
-                                    wrapperSource = wrapperFile
-                                    return true
-                                }
-                            }
-                        }
-
-                        if (wrapperSource && wrapperSource.exists()) {
-                            // Copy as libxray-wrapper.so so Android packages it
-                            def wrapperDest = file("${projectDir}/src/main/jniLibs/${abi}/libxray-wrapper.so")
-                            wrapperDest.parentFile.mkdirs()
-                            project.copy {
-                                from wrapperSource
-                                into wrapperDest.parentFile
-                                rename { "libxray-wrapper.so" }
-                                fileMode 0755
-                            }
-                            println "Copied xray-wrapper from ${wrapperSource} to ${wrapperDest}"
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+// xray-wrapper removed - Xray-core is embedded in libhyperxray.so
 
 android {
     namespace "com.hyperxray.an"
@@ -602,10 +611,12 @@ android {
         versionCode versionProps.APP_VERSION_CODE.toInteger()
         versionName versionProps.APP_VERSION_NAME
         ndk {
-            abiFilters "arm64-v8a", "x86_64"
+            abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
         }
         externalNativeBuild {
             ndkBuild {
+                arguments "APP_PLATFORM=android-26"
+                arguments "NDK_APPLICATION_MK=src/main/jni/Application.mk"
                 arguments "APP_CFLAGS+=-DPKGNAME=com/hyperxray/an/service -ffile-prefix-map=${rootDir}=."
                 arguments "APP_LDFLAGS+=-Wl,--build-id=none"
             }
@@ -668,12 +679,6 @@ android {
         }
     }
     
-    // Fix include files before NDK build (Windows compatibility)
-    tasks.whenTaskAdded { task ->
-        if (task.name.startsWith('externalNativeBuild') && !task.name.contains('Clean')) {
-            task.dependsOn fixIncludeFiles
-        }
-    }
 
 
     packagingOptions {
@@ -688,7 +693,7 @@ android {
         // Disables dependency metadata when building Android App Bundles.
         includeInBundle = false
     }
-    ndkVersion versionProps.NDK_VERSION
+    ndkVersion = versionProps.NDK_VERSION ?: '28.2.13676358'
     
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -734,6 +739,8 @@ android {
                 srcDirs 'src/main/kotlin'
                 // Proto classes are generated in xray-runtime-service module, not here
             }
+            // Go library location
+            jniLibs.srcDirs("src/main/jniLibs")
         }
     }
     lint {
@@ -756,62 +763,6 @@ configurations.all {
     }
 }
 
-// Configure kapt to exclude feature-telegram from processing to break circular dependency
-configurations {
-    kaptDebug {
-        exclude group: 'com.hyperxray.an', module: 'feature-telegram'
-    }
-    kaptRelease {
-        exclude group: 'com.hyperxray.an', module: 'feature-telegram'
-    }
-}
-
-// Break circular dependency by removing feature-telegram bundle task dependencies from kapt
-afterEvaluate {
-    // Remove feature-telegram bundle task dependencies from kaptGenerateStubs tasks
-    tasks.matching { it.name == 'kaptGenerateStubsDebugKotlin' || it.name == 'kaptGenerateStubsReleaseKotlin' }.configureEach { task ->
-        // Get all dependencies and filter out feature-telegram bundle tasks
-        def allDeps = new ArrayList(task.dependsOn)
-        allDeps.removeAll { dep ->
-            if (dep instanceof Task) {
-                def taskPath = dep.path ?: (dep.toString())
-                taskPath.contains(':feature:feature-telegram') && 
-                (taskPath.contains('bundleLibCompileToJar') || 
-                 taskPath.contains('bundleLibRuntimeToJar') || 
-                 taskPath.contains('createFullJar'))
-            } else if (dep instanceof String) {
-                dep.contains(':feature:feature-telegram') && 
-                (dep.contains('bundleLibCompileToJar') || 
-                 dep.contains('bundleLibRuntimeToJar') || 
-                 dep.contains('createFullJar'))
-            } else {
-                false
-            }
-        }
-        task.dependsOn = allDeps
-    }
-    
-    // Also remove feature-telegram bundle tasks from compileDebugKotlin dependencies
-    // tasks.matching { it.name == 'compileDebugKotlin' || it.name == 'compileReleaseKotlin' }.configureEach { task ->
-    //     def allDeps = new ArrayList(task.dependsOn)
-    //     allDeps.removeAll { dep ->
-    //         if (dep instanceof Task) {
-    //             def taskPath = dep.path ?: (dep.toString())
-    //             taskPath.contains(':feature:feature-telegram') && 
-    //             (taskPath.contains('bundleLibCompileToJar') || 
-    //              taskPath.contains('bundleLibRuntimeToJar'))
-    //         } else if (dep instanceof String) {
-    //             dep.contains(':feature:feature-telegram') && 
-    //             (dep.contains('bundleLibCompileToJar') || 
-    //              dep.contains('bundleLibRuntimeToJar'))
-    //         } else {
-    //             false
-    //         }
-    //     }
-    //     task.dependsOn = allDeps
-    // }
-}
-
 dependencies {
     implementation "io.grpc:grpc-okhttp:1.74.0"
     implementation "io.grpc:grpc-protobuf:1.74.0"
@@ -830,8 +781,8 @@ dependencies {
     implementation 'androidx.compose.ui:ui-tooling-preview-android'
     implementation 'androidx.activity:activity-compose'
     implementation 'androidx.compose.runtime:runtime-livedata'
-    implementation 'androidx.compose.material:material-icons-extended'
     implementation 'androidx.navigation:navigation-compose-android:2.9.3'
+    implementation 'androidx.compose.material:material-icons-extended'
 
     implementation 'com.github.nanihadesuka:LazyColumnScrollbar:2.2.0'
     implementation 'sh.calvin.reorderable:reorderable:2.5.1'
@@ -842,8 +793,7 @@ dependencies {
     implementation 'org.chromium.net:cronet-embedded:119.6045.31'
     
     // Conscrypt: Google's Conscrypt security provider for better TLS performance
-    // Updated to 2.5.3 (latest available) to minimize hidden API access issues on Android 9+
-    implementation 'org.conscrypt:conscrypt-android:2.5.3'
+    implementation 'org.conscrypt:conscrypt-android:2.5.2'
     
     // ONNX Runtime Mobile: Already present, keeping for AI/ML inference
     implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.20.0'
@@ -860,12 +810,13 @@ dependencies {
     // TLS SNI Optimizer v5 dependencies
     implementation 'androidx.work:work-runtime-ktx:2.9.0'
     
-    // WireGuard Curve25519 key generation (BouncyCastle)
+    // BouncyCastle for cryptography (WarpUtils)
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
+    implementation 'org.bouncycastle:bcpkix-jdk18on:1.78.1'
     
     // Core modules
-    implementation project(':core:core-database')
     implementation project(':core:core-di')
+    implementation project(':core:core-database')
     implementation project(':core:core-network')
     
     // Xray runtime
@@ -881,16 +832,4 @@ dependencies {
     implementation project(':feature:feature-telegram')
     implementation project(':feature:feature-policy-ai')
     implementation project(':feature:feature-warp')
-    
-    // Test dependencies
-    testImplementation 'junit:junit:4.13.2'
-    testImplementation 'org.mockito:mockito-core:5.11.0'
-    testImplementation 'org.mockito.kotlin:mockito-kotlin:5.2.1'
-    testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.0'
-    testImplementation 'io.mockk:mockk:1.13.10'
-    testImplementation 'androidx.test:core:1.5.0'
-    testImplementation 'androidx.test.ext:junit:1.2.1'
-    testImplementation 'org.robolectric:robolectric:4.13'
-    testImplementation 'androidx.test:runner:1.5.2'
-    testImplementation 'androidx.test:rules:1.5.0'
 }

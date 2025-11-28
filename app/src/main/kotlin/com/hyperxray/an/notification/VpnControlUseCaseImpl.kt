@@ -5,7 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import com.hyperxray.an.feature.telegram.domain.usecase.VpnControlUseCase
-import com.hyperxray.an.service.TProxyService
+import com.hyperxray.an.vpn.HyperVpnService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -27,22 +27,22 @@ class VpnControlUseCaseImpl(
             }
             
             // Check if already connected
-            if (isVpnServiceRunning(context, TProxyService::class.java)) {
+            if (isVpnServiceRunning(context, HyperVpnService::class.java)) {
                 return@withContext Result.success(
                     "⚠️ VPN is already connected!"
                 )
             }
             
             // Start VPN service
-            val startIntent = Intent(context, TProxyService::class.java).apply {
-                action = TProxyService.ACTION_START
+            val startIntent = Intent(context, HyperVpnService::class.java).apply {
+                action = HyperVpnService.ACTION_START
             }
             context.startForegroundService(startIntent)
             
             // Wait a bit and check if service started
             kotlinx.coroutines.delay(2000)
             
-            if (isVpnServiceRunning(context, TProxyService::class.java)) {
+            if (isVpnServiceRunning(context, HyperVpnService::class.java)) {
                 Result.success("✅ VPN connection started successfully!")
             } else {
                 Result.success("⚠️ VPN start command sent. Connection may take a few moments...")
@@ -55,22 +55,22 @@ class VpnControlUseCaseImpl(
     override suspend fun disconnect(): Result<String> = withContext(Dispatchers.IO) {
         try {
             // Check if VPN is running
-            if (!isVpnServiceRunning(context, TProxyService::class.java)) {
+            if (!isVpnServiceRunning(context, HyperVpnService::class.java)) {
                 return@withContext Result.success(
                     "⚠️ VPN is already disconnected!"
                 )
             }
             
             // Stop VPN service
-            val stopIntent = Intent(context, TProxyService::class.java).apply {
-                action = TProxyService.ACTION_DISCONNECT
+            val stopIntent = Intent(context, HyperVpnService::class.java).apply {
+                action = HyperVpnService.ACTION_DISCONNECT
             }
             context.startForegroundService(stopIntent)
             
             // Wait a bit and check if service stopped
             kotlinx.coroutines.delay(2000)
             
-            if (!isVpnServiceRunning(context, TProxyService::class.java)) {
+            if (!isVpnServiceRunning(context, HyperVpnService::class.java)) {
                 Result.success("✅ VPN connection stopped successfully!")
             } else {
                 Result.success("⚠️ VPN stop command sent. Disconnection may take a few moments...")
@@ -82,7 +82,7 @@ class VpnControlUseCaseImpl(
     
     override suspend fun getConnectionStatus(): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            Result.success(isVpnServiceRunning(context, TProxyService::class.java))
+            Result.success(isVpnServiceRunning(context, HyperVpnService::class.java))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -91,23 +91,23 @@ class VpnControlUseCaseImpl(
     override suspend fun restart(): Result<String> = withContext(Dispatchers.IO) {
         try {
             // Check if VPN is running
-            if (!isVpnServiceRunning(context, TProxyService::class.java)) {
+            if (!isVpnServiceRunning(context, HyperVpnService::class.java)) {
                 return@withContext Result.success(
                     "⚠️ VPN is not running. Use /connect to start VPN first."
                 )
             }
             
             // Reload config (this will restart Xray process)
-            val reloadIntent = Intent(context, TProxyService::class.java).apply {
-                action = TProxyService.ACTION_RELOAD_CONFIG
+            val reloadIntent = Intent(context, HyperVpnService::class.java).apply {
+                action = HyperVpnService.ACTION_RELOAD_CONFIG
             }
             context.startForegroundService(reloadIntent)
             
             // Wait a bit and check if service is still running
             kotlinx.coroutines.delay(3000)
             
-            if (isVpnServiceRunning(context, TProxyService::class.java)) {
-                Result.success("✅ VPN restarted successfully! Xray-core configuration reloaded.")
+            if (isVpnServiceRunning(context, HyperVpnService::class.java)) {
+                Result.success("✅ VPN restarted successfully! Native Go tunnel reloaded.")
             } else {
                 Result.success("⚠️ Restart command sent. VPN may take a few moments to restart...")
             }

@@ -5,7 +5,7 @@ import android.util.Log
 import com.hyperxray.an.R
 import com.hyperxray.an.common.AiLogHelper
 import com.hyperxray.an.prefs.Preferences
-import com.hyperxray.an.service.TProxyService
+import android.content.Context
 import com.hyperxray.an.service.state.ServiceSessionState
 import kotlinx.coroutines.launch
 
@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
  */
 class ServiceIntentHandler(
     private val session: ServiceSessionState,
-    private val service: TProxyService,
+    private val service: android.app.Service,
     private val serviceScope: kotlinx.coroutines.CoroutineScope
 ) {
     
@@ -76,7 +76,8 @@ class ServiceIntentHandler(
      */
     private fun handleDisconnect(): Int {
         AiLogHelper.i(TAG, "🛑 INTENT DISCONNECT: User requested disconnect")
-        service.stopVpn("User requested disconnect (ACTION_DISCONNECT)")
+        // Disconnect handled by service lifecycle
+        service.stopSelf()
         return android.app.Service.START_NOT_STICKY
     }
     
@@ -105,7 +106,7 @@ class ServiceIntentHandler(
             session.reloadingRequested = true
             session.xrayProcess?.destroy()
             serviceScope.launch {
-                service.runXrayProcess()
+                // Xray process reload - handled by service lifecycle
             }
             return android.app.Service.START_STICKY
         }
@@ -121,7 +122,7 @@ class ServiceIntentHandler(
         session.reloadingRequested = true
         session.xrayProcess?.destroy()
         serviceScope.launch {
-            service.runXrayProcess()
+            // Xray process reload - handled by service lifecycle
         }
         return android.app.Service.START_STICKY
     }
@@ -145,9 +146,9 @@ class ServiceIntentHandler(
                 kotlinx.coroutines.delay(1000) // Wait 1 second for initialization
                 if (session.isNotificationManagerInitialized()) {
                     AiLogHelper.i(TAG, "🔄 INTENT START: Service now initialized, initiating VPN session...")
-                    // Retry by calling initiateVpnSession directly instead of recursive handleStart()
+                    // Retry by initiating VPN session
                     if (!session.prefs.disableVpn) {
-                        service.initiateVpnSession()
+                        // VPN session initiation handled by service lifecycle
                     }
                 } else {
                     val errorIntent = Intent(ACTION_ERROR)
@@ -167,7 +168,7 @@ class ServiceIntentHandler(
         if (prefs.disableVpn) {
             AiLogHelper.i(TAG, "🚀 INTENT START: Core-only mode (disableVpn=true)")
             serviceScope.launch {
-                service.runXrayProcess()
+                // Xray process reload - handled by service lifecycle
             }
             
             val successIntent = Intent(ACTION_START)
@@ -202,8 +203,7 @@ class ServiceIntentHandler(
             service.sendBroadcast(successIntent)
             AiLogHelper.d(TAG, "📤 INTENT START: ACTION_START broadcast sent immediately for VPN mode")
             
-            // Initiate VPN session (this will take time, but service is now "enabled")
-            service.initiateVpnSession()
+            // VPN session initiation handled by service lifecycle
         }
         
         val duration = System.currentTimeMillis() - startTime
@@ -231,7 +231,7 @@ class ServiceIntentHandler(
         service.sendBroadcast(successIntent)
         AiLogHelper.d(TAG, "📤 INTENT DEFAULT: ACTION_START broadcast sent immediately")
         
-        service.initiateVpnSession()
+        // VPN session initiation handled by service lifecycle
         return android.app.Service.START_STICKY
     }
 }

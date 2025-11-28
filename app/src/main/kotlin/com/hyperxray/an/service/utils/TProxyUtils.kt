@@ -6,8 +6,6 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
 import android.util.Log
-import com.hyperxray.an.service.TProxyService
-import com.hyperxray.an.service.managers.HevSocksManager
 import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.core.network.dns.SystemDnsCacheServer
 import com.hyperxray.an.ui.screens.log.extractDnsQuery
@@ -37,7 +35,7 @@ import java.lang.Process
 import kotlin.math.abs
 
 /**
- * Utility functions extracted from TProxyService.
+ * Utility functions for VPN service operations.
  * Contains all helper methods that do not directly call Android Lifecycle methods.
  */
 object TProxyUtils {
@@ -80,7 +78,7 @@ object TProxyUtils {
     ) {
         if (broadcastBuffer.isEmpty()) return
         
-        val logUpdateIntent = Intent(TProxyService.ACTION_LOG_UPDATE)
+        val logUpdateIntent = Intent("com.hyperxray.an.LOG_UPDATE")
         logUpdateIntent.setPackage(context.packageName)
         
         reusableBroadcastList.clear()
@@ -88,7 +86,7 @@ object TProxyUtils {
             reusableBroadcastList.ensureCapacity(broadcastBuffer.size)
         }
         reusableBroadcastList.addAll(broadcastBuffer)
-        logUpdateIntent.putStringArrayListExtra(TProxyService.EXTRA_LOG_DATA, reusableBroadcastList)
+        logUpdateIntent.putStringArrayListExtra("log_data", reusableBroadcastList)
         context.sendBroadcast(logUpdateIntent)
         broadcastBuffer.clear()
         Log.d(TAG, "Broadcasted a batch of logs.")
@@ -250,45 +248,11 @@ object TProxyUtils {
     
     /**
      * Creates ProcessBuilder for Xray execution using Android linker.
+     * DEPRECATED: This method is no longer used. Xray-core is embedded in libhyperxray.so.
      */
     fun getProcessBuilder(context: Context, xrayPath: String): ProcessBuilder {
-        val filesDir = context.filesDir
-
-        // Ensure filesDir exists
-        if (!filesDir.exists()) {
-            val created = filesDir.mkdirs()
-            if (!created) {
-                Log.w(TAG, "Failed to create filesDir: ${filesDir.absolutePath}")
-            } else {
-                Log.d(TAG, "Created filesDir: ${filesDir.absolutePath}")
-            }
-        }
-
-        // Check if libxray.so exists
-        val libxrayFile = File(xrayPath)
-        if (!libxrayFile.exists()) {
-            throw IOException("libxray.so not found at: $xrayPath")
-        }
-
-        // Use Android linker to execute libxray.so
-        // For 64-bit: /system/bin/linker64
-        // For 32-bit: /system/bin/linker
-        val linkerPath = if (Build.SUPPORTED_64_BIT_ABIS.isNotEmpty()) {
-            "/system/bin/linker64"
-        } else {
-            "/system/bin/linker"
-        }
-
-        Log.d(TAG, "Using linker: $linkerPath to execute: $xrayPath")
-
-        val command: MutableList<String> = mutableListOf(linkerPath, xrayPath, "run")
-
-        val processBuilder = ProcessBuilder(command)
-        val environment = processBuilder.environment()
-        environment["XRAY_LOCATION_ASSET"] = filesDir.path
-        processBuilder.directory(filesDir)
-        processBuilder.redirectErrorStream(true)
-        return processBuilder
+        Log.w(TAG, "getProcessBuilder() is deprecated - Xray-core is embedded in libhyperxray.so")
+        throw UnsupportedOperationException("libxray.so is no longer used - Xray-core is embedded in libhyperxray.so")
     }
     
     // ============================================================================
@@ -731,47 +695,6 @@ object TProxyUtils {
         return backoffSeconds * 1000L
     }
     
-    /**
-     * Notify native tunnel of UDP error (for coordination).
-     */
-    fun notifyNativeTunnelOfUdpError(): Boolean {
-        return try {
-            val result = com.hyperxray.an.service.TProxyService.TProxyNotifyUdpError(0)
-            if (result) {
-                Log.d(TAG, "Notified native tunnel of UDP error")
-            } else {
-                Log.w(TAG, "Failed to notify native tunnel of UDP error")
-            }
-            result
-        } catch (e: UnsatisfiedLinkError) {
-            Log.d(TAG, "UDP error notification not available in native tunnel: ${e.message}")
-            false
-        } catch (e: Exception) {
-            Log.e(TAG, "Error notifying native tunnel of UDP error: ${e.message}", e)
-            false
-        }
-    }
-    
-    /**
-     * Notify native tunnel that recovery is complete.
-     */
-    fun notifyNativeTunnelOfRecoveryComplete(): Boolean {
-        return try {
-            val result = com.hyperxray.an.service.TProxyService.TProxyNotifyUdpRecoveryComplete()
-            if (result) {
-                Log.d(TAG, "Notified native tunnel of UDP recovery completion")
-            } else {
-                Log.w(TAG, "Failed to notify native tunnel of UDP recovery completion")
-            }
-            result
-        } catch (e: UnsatisfiedLinkError) {
-            Log.d(TAG, "UDP recovery notification not available in native tunnel: ${e.message}")
-            false
-        } catch (e: Exception) {
-            Log.e(TAG, "Error notifying native tunnel of UDP recovery: ${e.message}", e)
-            false
-        }
-    }
     
     /**
      * UDP statistics from native tunnel.
@@ -796,27 +719,6 @@ object TProxyUtils {
         val recommendation: String
     )
     
-    /**
-     * Get UDP statistics from native tunnel.
-     */
-    fun getNativeUdpStats(): UdpStats? {
-        return try {
-            val statsArray = com.hyperxray.an.service.TProxyService.TProxyGetStats()
-            if (statsArray != null && statsArray.size >= 4) {
-                UdpStats(
-                    txPackets = statsArray[0],
-                    txBytes = statsArray[1],
-                    rxPackets = statsArray[2],
-                    rxBytes = statsArray[3]
-                )
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to get native UDP stats: ${e.message}")
-            null
-        }
-    }
     
     /**
      * Analyze UDP connection health from statistics.
@@ -887,26 +789,6 @@ object TProxyUtils {
         return Pair(health, Pair(currentStats, now))
     }
     
-    /**
-     * Notify native tunnel of imminent UDP cleanup.
-     */
-    fun notifyNativeTunnelOfImminentCleanup(): Boolean {
-        return try {
-            val result = com.hyperxray.an.service.TProxyService.TProxyNotifyImminentUdpCleanup()
-            if (result) {
-                Log.d(TAG, "Notified native tunnel of imminent UDP cleanup")
-            } else {
-                Log.w(TAG, "Failed to notify native tunnel of imminent UDP cleanup")
-            }
-            result
-        } catch (e: UnsatisfiedLinkError) {
-            Log.d(TAG, "UDP cleanup notification not available in native tunnel: ${e.message}")
-            false
-        } catch (e: Exception) {
-            Log.e(TAG, "Error notifying native tunnel of imminent UDP cleanup: ${e.message}", e)
-            false
-        }
-    }
     
     /**
      * Start proactive UDP connection monitoring.
@@ -923,13 +805,9 @@ object TProxyUtils {
                     delay(15000L)
                     ensureActive()
                     
-                    val currentStats = getNativeUdpStats()
-                    if (currentStats == null) {
-                        Log.d(TAG, "UDP monitoring: Native stats unavailable")
-                        continue
-                    }
-                    
-                    onMonitoringCycle(currentStats)
+                    // Native UDP stats no longer available (TProxy removed)
+                    Log.d(TAG, "UDP monitoring: Native stats unavailable (TProxy removed)")
+                    continue
                 } catch (e: Exception) {
                     if (isActive) {
                         Log.e(TAG, "Error in UDP monitoring: ${e.message}", e)
@@ -962,7 +840,7 @@ object TProxyUtils {
             Log.d(TAG, "UDP connection near timeout (${health.timeSinceLastActivity / 1000}s idle), " +
                     "preparing for potential cleanup race condition")
             
-            notifyNativeTunnelOfImminentCleanup()
+            // Native tunnel notification removed (TProxy removed)
         }
     }
     
@@ -1015,10 +893,10 @@ object TProxyUtils {
                     Log.e(TAG, "Xray-core is having trouble connecting to SOCKS5 tunnel")
                     Log.e(TAG, "Most recent error: $logEntry")
                     
-                    val errorIntent = Intent(TProxyService.ACTION_ERROR)
+                    val errorIntent = Intent("com.hyperxray.an.ERROR")
                     errorIntent.setPackage(context.packageName)
                     errorIntent.putExtra(
-                        TProxyService.EXTRA_ERROR_MESSAGE,
+                        "error_message",
                         "Connection reset errors detected ($newCount in last minute). " +
                         "Xray-core is having trouble connecting to SOCKS5 tunnel. " +
                         "Attempting automatic recovery..."
@@ -1073,7 +951,7 @@ object TProxyUtils {
             val statusMap = manager.instancesStatus.value
             val hasRunning = statusMap.values.any { it is XrayRuntimeStatus.Running }
             
-            val intent = Intent(TProxyService.ACTION_INSTANCE_STATUS_UPDATE)
+            val intent = Intent("com.hyperxray.an.INSTANCE_STATUS_UPDATE")
             intent.setPackage(context.packageName)
             intent.putExtra("instance_count", statusMap.size)
             intent.putExtra("has_running", hasRunning)
@@ -1432,7 +1310,7 @@ object TProxyUtils {
                         systemDnsCacheServer?.setSocks5Proxy(socksAddress, socksPort)
                         Log.d(TAG, "✅ SOCKS5 UDP proxy set for DNS (after recovery): $socksAddress:$socksPort")
                         
-                        val readyIntent = Intent(TProxyService.ACTION_SOCKS5_READY)
+                        val readyIntent = Intent("com.hyperxray.an.SOCKS5_READY")
                         readyIntent.setPackage(context.packageName)
                         readyIntent.putExtra("socks_address", socksAddress)
                         readyIntent.putExtra("socks_port", socksPort)
@@ -1580,7 +1458,7 @@ object TProxyUtils {
         serviceScope: CoroutineScope,
         stopSelf: () -> Unit
     ) {
-        val stopIntent = Intent(TProxyService.ACTION_STOP)
+        val stopIntent = Intent("com.hyperxray.an.STOP")
         stopIntent.setPackage(context.packageName)
         context.sendBroadcast(stopIntent)
         
@@ -1593,41 +1471,6 @@ object TProxyUtils {
         stopSelf()
     }
 
-    // TProxy Configuration
-    fun getTproxyConf(prefs: Preferences): String {
-        val mtu = prefs.tunnelMtuCustom
-        val taskStack = prefs.taskStackSizeCustom
-        val tcpBuffer = prefs.tcpBufferSize
-        val nofile = prefs.limitNofile
-        val connectTimeout = prefs.connectTimeout
-        val readWriteTimeout = prefs.readWriteTimeout
-        val udpTimeout = 3600000 // 60 minutes in milliseconds
-        
-        var tproxyConf = """misc:
-  task-stack-size: $taskStack
-  tcp-buffer-size: $tcpBuffer
-  connect-timeout: $connectTimeout
-  read-write-timeout: $readWriteTimeout
-  udp-read-write-timeout: $udpTimeout
-  udp-recv-buffer-size: 524288
-  udp-copy-buffer-nums: 10
-  limit-nofile: $nofile
-tunnel:
-  mtu: $mtu
-  multi-queue: ${prefs.tunnelMultiQueue}
-"""
-        tproxyConf += """socks5:
-  port: ${prefs.socksPort}
-  address: '${prefs.socksAddress}'
-  udp: '${if (prefs.udpInTcp) "tcp" else "udp"}'
-  pipeline: ${prefs.socks5Pipeline}
-"""
-        if (prefs.socksUsername.isNotEmpty() && prefs.socksPassword.isNotEmpty()) {
-            tproxyConf += "  username: '" + prefs.socksUsername + "'\n"
-            tproxyConf += "  password: '" + prefs.socksPassword + "'\n"
-        }
-        return tproxyConf
-    }
 
     // ============================================================================
     // Connection Reset Recovery Utilities
@@ -1735,7 +1578,7 @@ tunnel:
         Log.d(TAG, "Attempting UDP error recovery: category=${errorRecord.category}")
         
         try {
-            notifyNativeTunnelOfUdpError()
+            // Native tunnel notification removed (TProxy removed)
             delay(500)
             
             if (xrayProcess == null || !xrayProcess.isAlive) {
@@ -1750,7 +1593,7 @@ tunnel:
             }
             
             onUdpErrorCountReset()
-            notifyNativeTunnelOfRecoveryComplete()
+            // Native tunnel notification removed (TProxy removed)
             
             Log.i(TAG, "✅ UDP recovery steps completed successfully")
             return true

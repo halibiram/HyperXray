@@ -3,7 +3,7 @@ package com.hyperxray.an.service.handlers
 import com.hyperxray.an.data.source.LogFileManager
 import com.hyperxray.an.notification.TelegramNotificationManager
 import com.hyperxray.an.prefs.Preferences
-import com.hyperxray.an.service.TProxyService
+import android.content.Context
 import com.hyperxray.an.service.managers.ServiceNotificationManager
 import com.hyperxray.an.service.managers.TunInterfaceManager
 import com.hyperxray.an.service.managers.XrayCoreManager
@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * directly coupling to TProxyService implementation details.
  */
 data class ServiceSessionState(
-    val service: TProxyService,
+    val service: Context,
     val notificationManager: ServiceNotificationManager,
     val logFileManager: LogFileManager,
     val tunInterfaceManager: TunInterfaceManager,
@@ -29,6 +29,10 @@ data class ServiceSessionState(
     val isStopping: AtomicBoolean,
     val getXrayProcess: () -> Process? // Function to access xrayProcess (may be null)
 )
+
+
+
+
 
 
 

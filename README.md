@@ -15,6 +15,7 @@ It features an **innovative approach**: **directly executing the official Xray-c
 ## 🎨 Brand Identity
 
 The HyperXray logo represents the core values of the application:
+
 - **🛡️ Shield**: Security and protection for your network traffic
 - **⚡ Zap**: High performance and speed
 - **🌊 Waves**: Smooth data flow and connectivity
@@ -22,10 +23,10 @@ The HyperXray logo represents the core values of the application:
 
 ## ✨ Key Features
 
-*   **🛡️ Enhanced Stability**: By running Xray-core as an independent child process, HyperXray avoids JNI complexities, potential memory issues, and app crashes linked to core library failures. This isolation significantly improves reliability.
-*   **⚡ High Performance**: Leverages Xray-core's native speed and integrates [@heiher/hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) for efficient Tun2socks, ensuring low latency and high throughput.
-*   **🎨 User-Friendly**: Offers a clean, intuitive UI with modern design and simplified setup, making it easy for users to configure and manage connections.
-*   **🔒 Security First**: Built with security and privacy as core principles, ensuring your network traffic is protected.
+- **🛡️ Enhanced Stability**: By running Xray-core as an independent child process, HyperXray avoids JNI complexities, potential memory issues, and app crashes linked to core library failures. This isolation significantly improves reliability.
+- **⚡ High Performance**: Leverages Xray-core's native speed for efficient proxy operations, ensuring low latency and high throughput.
+- **🎨 User-Friendly**: Offers a clean, intuitive UI with modern design and simplified setup, making it easy for users to configure and manage connections.
+- **🔒 Security First**: Built with security and privacy as core principles, ensuring your network traffic is protected.
 
 ## Unique Technical Approach
 
@@ -33,9 +34,9 @@ Most Xray-core Android clients use JNI to call a compiled .so library. While eas
 
 **HyperXray's core difference is how it starts and manages the proxy:**
 
-On installation/update, the embedded Xray-core binary (as `libxray.so`) is extracted. When connecting, the app uses standard Android APIs to **run this binary as a separate child process**, not via JNI calls. Communication happens via defined Inter-Process Communication (IPC).
+Xray-core is **embedded directly in `libhyperxray.so`** and runs as part of the native Go library. This design integrates Xray-core functionality directly into the native layer, providing better performance and tighter integration with WireGuard and other native components.
 
-This design preserves the original Xray-core binary's stability and performance while physically isolating the core process from the main app, enhancing reliability and security.
+This approach eliminates the need for separate process management while maintaining the stability and performance of Xray-core.
 
 ## Data Files (`geoip.dat` / `geosite.dat`)
 
@@ -59,30 +60,38 @@ The project **includes a simplified version** with basic rules (`"geoip:private"
     ```
 3.  **📂 Import**: Open the project in Android Studio.
 4.  **📦 Download Dependencies**: Run Gradle tasks to download required dependencies:
+
     ```bash
-    # Update hev-socks5-tunnel submodule
-    ./gradlew updateHevSocks5Tunnel
-    
     # Download geo files (auto-downloaded during build)
     ./gradlew downloadGeoFiles
-    
-    # Check/download Xray-core binaries (may require manual build)
-    ./gradlew downloadXrayCore
+
+    # Xray-core is embedded in libhyperxray.so, no separate download needed
     ```
-5.  **🔨 Integrate Core**: 
-    - If Xray-core binaries were downloaded, they are already in place.
-    - Otherwise, manually place the Xray-core binary (`libxray.so`) for your target architecture in `app/src/main/jniLibs/[architecture directory]`. E.g., `app/src/main/jniLibs/arm64-v8a/libxray.so`.
-    - Note: Xray-core binaries may need to be built from source (see `.github/workflows/build.yml` for reference).
-6.  **🏗️ Build**: Sync Gradle and run the build task. The app will be built with the new logo and branding.
+6.  **🔧 Build Native Go Library** (Optional - for WireGuard over Xray feature):
+
+    ```bash
+    # Windows
+    scripts\build-native.bat
+
+    # Linux/Mac
+    chmod +x scripts/build-native.sh
+    ./scripts/build-native.sh
+    ```
+
+    This builds `libhyperxray.so` for Android architectures (arm64-v8a, x86_64).
+    **Requirements**: Go 1.23+ and Android NDK (set `NDK_HOME` or `ANDROID_NDK_HOME`).
+
+7.  **🏗️ Build**: Sync Gradle and run the build task. The app will be built with the new logo and branding.
 
 ## 🤝 Contributing
 
 Contributions are welcome! You can help by:
-*   🐛 Submitting Bug Reports (Issues)
-*   💡 Suggesting Features
-*   💻 Submitting Code (Pull Requests)
-*   📝 Improving Documentation
-*   🎨 Design and UI improvements
+
+- 🐛 Submitting Bug Reports (Issues)
+- 💡 Suggesting Features
+- 💻 Submitting Code (Pull Requests)
+- 📝 Improving Documentation
+- 🎨 Design and UI improvements
 
 Please read our contributing guidelines and code of conduct before submitting contributions.
 

@@ -1,0 +1,200 @@
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at java.net.PlainSocketImpl.socketConnect(PlainSocketImpl.java:142)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at java.net.AbstractPlainSocketImpl.doConnect(AbstractPlainSocketImpl.java:390)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at java.net.AbstractPlainSocketImpl.connectToAddress(AbstractPlainSocketImpl.java:230)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at java.net.AbstractPlainSocketImpl.connect(AbstractPlainSocketImpl.java:212)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at java.net.SocksSocketImpl.connect(SocksSocketImpl.java:436)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at java.net.Socket.connect(Socket.java:646)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at java.net.Socket.connect(Socket.java:595)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at java.net.Socket.<init>(Socket.java:475)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at java.net.Socket.<init>(Socket.java:275)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at javax.net.DefaultSocketFactory.createSocket(SocketFactory.java:285)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at io.grpc.okhttp.OkHttpClientTransport$3.run(OkHttpClientTransport.java:723)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	... 4 more
+11-27 23:23:28.376 E/CoreStatsClient(21363): Caused by: android.system.ErrnoException: connect failed: ECONNREFUSED (Connection refused)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at libcore.io.Linux.connect(Native Method)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at libcore.io.ForwardingOs.connect(ForwardingOs.java:201)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at libcore.io.BlockGuardOs.connect(BlockGuardOs.java:158)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at libcore.io.ForwardingOs.connect(ForwardingOs.java:201)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at libcore.io.IoBridge.connectErrno(IoBridge.java:201)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	at libcore.io.IoBridge.connect(IoBridge.java:179)
+11-27 23:23:28.376 E/CoreStatsClient(21363): 	... 15 more
+11-27 23:23:29.831 E/sensors-hal( 1788): handle_sns_client_event:58, har: time = 52239290984702 data 5.000000
+11-27 23:23:30.346 E/DisplayModeController( 2003): setDesiredMode : Idle status skip setActiveMode, isDdicIdleMode: 1
+11-27 23:23:30.466 E/JobScheduler( 3688): ResourceBudgetManagerInternal is null
+11-27 23:23:30.813 E/DisplayModeController( 2003): setDesiredMode : Idle status skip setActiveMode, isDdicIdleMode: 1
+11-27 23:23:30.986 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:31.056 E/PERFHAL-CLIENT( 1820): PERFHAL-CLIENT: perf_lock_acq_rel() 496: opcode=1149239296 isMvOpcode=0
+11-27 23:23:31.370 E/AlarmManager( 3688): not align this alarm: Alarm{f7297e3 type 2 origWhen 52296830 whenElapsed 52296830 com.google.android.gms}, reason=0
+11-27 23:23:31.989 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:31.989 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:31.989 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:32.198 E/AlarmManager( 3688): not align this alarm: Alarm{aa405e0 type 3 origWhen 54018224 whenElapsed 54018224 android}, reason=0
+11-27 23:23:32.199 E/AlarmManager( 3688): not align this alarm: Alarm{ce0f099 type 3 origWhen 59400000 whenElapsed 59400000 android}, reason=0
+11-27 23:23:32.216 E/AlarmManager( 3688): not align this alarm: Alarm{149dc36 type 3 origWhen 315412241676 whenElapsed 315412241676 com.google.android.gms}, reason=0
+11-27 23:23:32.218 E/AlarmManager( 3688): not align this alarm: Alarm{54f6737 type 2 origWhen 52271678 whenElapsed 52271678 com.google.android.gms}, reason=0
+11-27 23:23:32.220 E/AlarmManager( 3688): not align this alarm: Alarm{dcf85c2 type 2 origWhen 52481680 whenElapsed 52481680 com.google.android.gms}, reason=0
+11-27 23:23:33.665 E/CountableHandler( 5949): Pending message count is over 200, drop message.msg.what = 105 handler = Handler (com.android.phone.statistics.utils.ModemHydraStat$ModemHydraHandler) {e826771}
+11-27 23:23:33.666 E/CountableHandler( 5949): Pending message count is over 200, drop message.msg.what = 105 handler = Handler (com.android.phone.statistics.utils.ModemHydraStat$ModemHydraHandler) {e826771}
+11-27 23:23:33.992 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:35.361 E/DisplayModeController( 2003): setDesiredMode : Idle status skip setActiveMode, isDdicIdleMode: 1
+11-27 23:23:35.732 E/sensors-hal( 1788): handle_sns_client_event:58, har: time = 52245191794025 data 0.000000
+11-27 23:23:35.814 E/DisplayModeController( 2003): setDesiredMode : Idle status skip setActiveMode, isDdicIdleMode: 1
+11-27 23:23:35.911 E/LOCRIL_SESSION( 1845): operator():200] SubId: 1 Failed to get sim IO with error: 38
+11-27 23:23:35.912 E/LOCRIL_SESSION( 1845): operator():241] SubId: 1 Failed to get sim IMSI with error: 38
+11-27 23:23:35.929 E/SatelliteController( 5949): registerForSatelliteModemStateChanged: mSatelliteSessionController is not initialized yet
+11-27 23:23:35.929 E/SatelliteController( 5949): unregisterForModemStateChanged: mSatelliteSessionController is not initialized yet
+11-27 23:23:35.930 E/SatelliteController( 5949): registerForSatelliteModemStateChanged: mSatelliteSessionController is not initialized yet
+11-27 23:23:35.930 E/SatelliteController( 5949): unregisterForModemStateChanged: mSatelliteSessionController is not initialized yet
+11-27 23:23:35.940 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:35.941 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:36.270 E/PERFHAL-CLIENT( 1820): PERFHAL-CLIENT: perf_lock_acq_rel() 496: opcode=1149239296 isMvOpcode=0
+11-27 23:23:36.732 E/sensors-hal( 1788): handle_sns_client_event:58, har: time = 52246192113973 data 5.000000
+11-27 23:23:36.996 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:37.122 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:37.122 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:37.122 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:40.002 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:40.370 E/DisplayModeController( 2003): setDesiredMode : Idle status skip setActiveMode, isDdicIdleMode: 1
+11-27 23:23:40.448 E/AlarmManager( 3688): not align this alarm: Alarm{dc4895d type 3 origWhen 52697674 whenElapsed 52697674 com.google.android.gms}, reason=0
+11-27 23:23:40.819 E/DisplayModeController( 2003): setDesiredMode : Idle status skip setActiveMode, isDdicIdleMode: 1
+11-27 23:23:41.084 E/PERFHAL-CLIENT( 1820): PERFHAL-CLIENT: perf_lock_acq_rel() 496: opcode=1149239296 isMvOpcode=0
+11-27 23:23:41.423 E/CountableHandler( 5949): Pending message count is over 200, drop message.msg.what = 105 handler = Handler (com.android.phone.statistics.utils.ModemHydraStat$ModemHydraHandler) {e826771}
+11-27 23:23:41.751 E/MiuiDamonService( 3688): getRegionsRes lookup count_map err 1035 9132 2
+11-27 23:23:41.800 E/DisplayModeController( 2003): setDesiredMode : Idle status skip setActiveMode, isDdicIdleMode: 1
+11-27 23:23:42.126 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:42.126 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:42.126 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:42.414 E/CoreStatsClient(21363): getSystemStats failed: UNAVAILABLE - null, channel state: TRANSIENT_FAILURE
+11-27 23:23:42.414 E/CoreStatsClient(21363): io.grpc.StatusRuntimeException: UNAVAILABLE
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at io.grpc.Status.asRuntimeException(Status.java:532)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at io.grpc.stub.ClientCalls$StreamObserverToCallListenerAdapter.onClose(ClientCalls.java:581)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at io.grpc.internal.DelayedClientCall$DelayedListener$3.run(DelayedClientCall.java:489)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at io.grpc.internal.DelayedClientCall$DelayedListener.delayOrExecute(DelayedClientCall.java:453)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at io.grpc.internal.DelayedClientCall$DelayedListener.onClose(DelayedClientCall.java:486)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at io.grpc.internal.ClientCallImpl.closeObserver(ClientCallImpl.java:565)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at io.grpc.internal.ClientCallImpl.access$100(ClientCallImpl.java:72)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl$1StreamClosed.runInternal(ClientCallImpl.java:733)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at io.grpc.internal.ClientCallImpl$ClientStreamListenerImpl$1StreamClosed.runInContext(ClientCallImpl.java:714)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at io.grpc.internal.ContextRunnable.run(ContextRunnable.java:37)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at io.grpc.internal.SerializingExecutor.run(SerializingExecutor.java:133)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1156)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:651)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at java.lang.Thread.run(Thread.java:1119)
+11-27 23:23:42.414 E/CoreStatsClient(21363): Caused by: java.net.ConnectException: failed to connect to /127.0.0.1 (port 65276) from /:: (port 37772): connect failed: ECONNREFUSED (Connection refused)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at libcore.io.IoBridge.connect(IoBridge.java:187)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at java.net.PlainSocketImpl.socketConnect(PlainSocketImpl.java:142)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at java.net.AbstractPlainSocketImpl.doConnect(AbstractPlainSocketImpl.java:390)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at java.net.AbstractPlainSocketImpl.connectToAddress(AbstractPlainSocketImpl.java:230)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at java.net.AbstractPlainSocketImpl.connect(AbstractPlainSocketImpl.java:212)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at java.net.SocksSocketImpl.connect(SocksSocketImpl.java:436)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at java.net.Socket.connect(Socket.java:646)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at java.net.Socket.connect(Socket.java:595)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at java.net.Socket.<init>(Socket.java:475)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at java.net.Socket.<init>(Socket.java:275)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at javax.net.DefaultSocketFactory.createSocket(SocketFactory.java:285)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at io.grpc.okhttp.OkHttpClientTransport$3.run(OkHttpClientTransport.java:723)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	... 4 more
+11-27 23:23:42.414 E/CoreStatsClient(21363): Caused by: android.system.ErrnoException: connect failed: ECONNREFUSED (Connection refused)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at libcore.io.Linux.connect(Native Method)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at libcore.io.ForwardingOs.connect(ForwardingOs.java:201)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at libcore.io.BlockGuardOs.connect(BlockGuardOs.java:158)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at libcore.io.ForwardingOs.connect(ForwardingOs.java:201)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at libcore.io.IoBridge.connectErrno(IoBridge.java:201)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	at libcore.io.IoBridge.connect(IoBridge.java:179)
+11-27 23:23:42.414 E/CoreStatsClient(21363): 	... 15 more
+11-27 23:23:43.009 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:44.684 E/HyperSentinel( 3688): ->pid:6831,processName:"com.qualcomm.qti.workloadclassifier",Rss Memory Size Change 143572kb -> 67364kb
+11-27 23:23:44.685 E/HyperSentinel( 3688): ->pid:6831,processName:"com.qualcomm.qti.workloadclassifier",Rss Memory Size Change 67364kb -> 31956kb
+11-27 23:23:44.686 E/ProcessManager( 3688): error write exception log
+11-27 23:23:45.385 E/DisplayModeController( 2003): setDesiredMode : Idle status skip setActiveMode, isDdicIdleMode: 1
+11-27 23:23:45.857 E/DisplayModeController( 2003): setDesiredMode : Idle status skip setActiveMode, isDdicIdleMode: 1
+11-27 23:23:46.014 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:46.924 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:47.165 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:47.165 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:47.165 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:48.956 E/VkpnsPushProvider:Notifier:LoggingWebSocketListener(31316): Websocket connection failed with failed to connect to rebus.rustore.ru/185.16.148.89 (port 443) from /10.0.0.2 (port 43518) after 60000ms: isConnected failed: ETIMEDOUT (Connection timed out) cause android.system.ErrnoException: isConnected failed: ETIMEDOUT (Connection timed out)
+11-27 23:23:48.957 E/DisplayModeController( 2003): setDesiredMode : Idle status skip setActiveMode, isDdicIdleMode: 1
+11-27 23:23:49.020 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:49.391 E/DisplayModeController( 2003): setDesiredMode : Idle status skip setActiveMode, isDdicIdleMode: 1
+11-27 23:23:49.908 E/PERFHAL-CLIENT( 1820): PERFHAL-CLIENT: perf_lock_acq_rel() 496: opcode=1149239296 isMvOpcode=0
+11-27 23:23:49.967 E/TelephonyEventHandler(11071): Received network blocked action
+11-27 23:23:49.968 E/TelephonyEventHandler(11071): Received network blocked action currentNwType=0
+11-27 23:23:49.970 E/AlarmManager( 3688): not align this alarm: Alarm{9026f01 type 2 origWhen 52800000 whenElapsed 52800000 com.xiaomi.xmsf}, reason=0
+11-27 23:23:49.970 E/TelephonyEventHandler(11071): Received network blocked action
+11-27 23:23:49.971 E/TelephonyEventHandler(11071): Received network blocked action currentNwType=0
+11-27 23:23:49.971 E/TelephonyEventHandler(11071): MSG_START_MOBILE_DIAGNOSTICS arg1=0,mHasMobileDiagnostics=false,sIsInProbeMode=false
+11-27 23:23:49.972 E/TelephonyEventHandler(11071): Mobile Network diagnostic start
+11-27 23:23:49.972 E/TelephonyEventHandler(11071): MSG_START_MOBILE_DIAGNOSTICS arg1=0,mHasMobileDiagnostics=true,sIsInProbeMode=false
+11-27 23:23:49.974 E/MobileNetworkDiagnostics (11071): Mobile Network diagnostics start
+11-27 23:23:49.975 E/IcmpCheck(11071): check  iface=lo
+11-27 23:23:49.975 E/IcmpReader(11071): Start
+11-27 23:23:49.981 E/IcmpReader(11071): Stop, mStart=true
+11-27 23:23:49.981 E/IcmpReader(11071): Exception occur while read socket: 
+11-27 23:23:49.981 E/IcmpReader(11071): java.io.InterruptedIOException: read interrupted by close() on another thread
+11-27 23:23:49.981 E/IcmpReader(11071): 	at libcore.io.Linux.readBytes(Native Method)
+11-27 23:23:49.981 E/IcmpReader(11071): 	at libcore.io.Linux.read(Linux.java:229)
+11-27 23:23:49.981 E/IcmpReader(11071): 	at libcore.io.ForwardingOs.read(ForwardingOs.java:618)
+11-27 23:23:49.981 E/IcmpReader(11071): 	at libcore.io.BlockGuardOs.read(BlockGuardOs.java:325)
+11-27 23:23:49.981 E/IcmpReader(11071): 	at libcore.io.ForwardingOs.read(ForwardingOs.java:618)
+11-27 23:23:49.981 E/IcmpReader(11071): 	at android.system.Os.read(Os.java:577)
+11-27 23:23:49.981 E/IcmpReader(11071): 	at com.miui.daemon.mqsas.wcns.IcmpReader.run(IcmpReader.java:145)
+11-27 23:23:49.981 E/IcmpReader(11071): 	at java.lang.Thread.run(Thread.java:1119)
+11-27 23:23:49.982 E/IcmpCheck(11071): check  iface=lo
+11-27 23:23:49.982 E/IcmpReader(11071): Start
+11-27 23:23:49.983 E/IcmpReader(11071): Stop, mStart=true
+11-27 23:23:49.983 E/IcmpReader(11071): Exception occur while read socket: 
+11-27 23:23:49.983 E/IcmpReader(11071): java.io.InterruptedIOException: read interrupted by close() on another thread
+11-27 23:23:49.983 E/IcmpReader(11071): 	at libcore.io.Linux.readBytes(Native Method)
+11-27 23:23:49.983 E/IcmpReader(11071): 	at libcore.io.Linux.read(Linux.java:229)
+11-27 23:23:49.983 E/IcmpReader(11071): 	at libcore.io.ForwardingOs.read(ForwardingOs.java:618)
+11-27 23:23:49.983 E/IcmpReader(11071): 	at libcore.io.BlockGuardOs.read(BlockGuardOs.java:325)
+11-27 23:23:49.983 E/IcmpReader(11071): 	at libcore.io.ForwardingOs.read(ForwardingOs.java:618)
+11-27 23:23:49.983 E/IcmpReader(11071): 	at android.system.Os.read(Os.java:577)
+11-27 23:23:49.983 E/IcmpReader(11071): 	at com.miui.daemon.mqsas.wcns.IcmpReader.run(IcmpReader.java:145)
+11-27 23:23:49.983 E/IcmpReader(11071): 	at java.lang.Thread.run(Thread.java:1119)
+11-27 23:23:49.983 E/IcmpCheck(11071): check  iface=tun0
+11-27 23:23:49.983 E/IcmpReader(11071): Start
+11-27 23:23:50.394 E/DisplayModeController( 2003): setDesiredMode : Idle status skip setActiveMode, isDdicIdleMode: 1
+11-27 23:23:50.461 E/AlarmManager( 3688): not align this alarm: Alarm{d185232 type 3 origWhen 315412259921 whenElapsed 315412259921 com.google.android.gms}, reason=0
+11-27 23:23:50.826 E/DisplayModeController( 2003): setDesiredMode : Idle status skip setActiveMode, isDdicIdleMode: 1
+11-27 23:23:51.322 E/CountableHandler( 5949): Pending message count is over 200, drop message.msg.what = 105 handler = Handler (com.android.phone.statistics.utils.ModemHydraStat$ModemHydraHandler) {e826771}
+11-27 23:23:51.513 E/PERFHAL-CLIENT( 1820): PERFHAL-CLIENT: perf_lock_acq_rel() 496: opcode=1149239296 isMvOpcode=0
+11-27 23:23:52.026 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:52.286 E/HyperXray-Bridge( 7518): [XrayUDP] Write error: io: read/write on closed pipe
+11-27 23:23:52.286 E/HyperXray-Bridge( 7518): [XrayBind] Send error: io: read/write on closed pipe
+11-27 23:23:52.286 E/HyperXray-Bridge( 7518): [WireGuard] peer(bmXO…fgyo) - Failed to send handshake initiation: io: read/write on closed pipe
+11-27 23:23:52.433 E/LOCRIL_SESSION( 1845): operator():200] SubId: 1 Failed to get sim IO with error: 38
+11-27 23:23:52.434 E/LOCRIL_SESSION( 1845): operator():241] SubId: 1 Failed to get sim IMSI with error: 38
+11-27 23:23:52.436 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:52.437 E/CountableHandler( 5949): Pending message count is over 200, drop message.msg.what = 105 handler = Handler (com.android.phone.statistics.utils.ModemHydraStat$ModemHydraHandler) {e826771}
+11-27 23:23:52.439 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:52.440 E/CountableHandler( 5949): Pending message count is over 200, drop message.msg.what = 105 handler = Handler (com.android.phone.statistics.utils.ModemHydraStat$ModemHydraHandler) {e826771}
+11-27 23:23:52.444 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:52.445 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:52.454 E/SatelliteController( 5949): registerForSatelliteModemStateChanged: mSatelliteSessionController is not initialized yet
+11-27 23:23:52.454 E/SatelliteController( 5949): unregisterForModemStateChanged: mSatelliteSessionController is not initialized yet
+11-27 23:23:52.455 E/SatelliteController( 5949): registerForSatelliteModemStateChanged: mSatelliteSessionController is not initialized yet
+11-27 23:23:52.455 E/SatelliteController( 5949): unregisterForModemStateChanged: mSatelliteSessionController is not initialized yet
+11-27 23:23:52.466 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:52.467 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:52.952 E/AlarmManager( 3688): not align this alarm: Alarm{29e1bcf type 2 origWhen 52292412 whenElapsed 52292412 android}, reason=0
+11-27 23:23:52.953 E/IMiCharge( 3688): MiCharge method 9 val = 364
+11-27 23:23:52.953 E/IMiCharge( 3688): MiCharge method 10 val = 11
+11-27 23:23:54.022 E/DisplayModeController( 2003): setDesiredMode : Idle status skip setActiveMode, isDdicIdleMode: 1
+11-27 23:23:54.792 E/IcmpReader(11071): Stop, mStart=true
+11-27 23:23:54.792 E/IcmpReader(11071): Exception occur while read socket: 
+11-27 23:23:54.792 E/IcmpReader(11071): java.io.InterruptedIOException: read interrupted by close() on another thread
+11-27 23:23:54.792 E/IcmpReader(11071): 	at libcore.io.Linux.readBytes(Native Method)
+11-27 23:23:54.792 E/IcmpReader(11071): 	at libcore.io.Linux.read(Linux.java:229)
+11-27 23:23:54.792 E/IcmpReader(11071): 	at libcore.io.ForwardingOs.read(ForwardingOs.java:618)
+11-27 23:23:54.792 E/IcmpReader(11071): 	at libcore.io.BlockGuardOs.read(BlockGuardOs.java:325)
+11-27 23:23:54.792 E/IcmpReader(11071): 	at libcore.io.ForwardingOs.read(ForwardingOs.java:618)
+11-27 23:23:54.792 E/IcmpReader(11071): 	at android.system.Os.read(Os.java:577)
+11-27 23:23:54.792 E/IcmpReader(11071): 	at com.miui.daemon.mqsas.wcns.IcmpReader.run(IcmpReader.java:143)
+11-27 23:23:54.792 E/IcmpReader(11071): 	at java.lang.Thread.run(Thread.java:1119)
+11-27 23:23:54.794 E/IcmpCheck(11071): check  iface=tun0
+11-27 23:23:54.794 E/IcmpReader(11071): Start
+11-27 23:23:55.033 E/PhoneAdapter( 5949): get ntnphones failed, exception: java.lang.IllegalStateException: not support satellite!
+11-27 23:23:55.406 E/DisplayModeController( 2003): setDesiredMode : Idle status skip setActiveMode, isDdicIdleMode: 1
+11-27 23:23:55.856 E/DisplayModeController( 2003): setDesiredMode : Idle status skip setActiveMode, isDdicIdleMode: 1

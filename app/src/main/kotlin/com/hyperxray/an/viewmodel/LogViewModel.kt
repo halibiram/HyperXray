@@ -13,7 +13,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.hyperxray.an.data.source.AiLogCapture
 import com.hyperxray.an.data.source.LogFileManager
-import com.hyperxray.an.service.TProxyService
 import com.hyperxray.an.ui.screens.log.ConnectionType
 import com.hyperxray.an.ui.screens.log.LogLevel
 import kotlinx.coroutines.Dispatchers
@@ -108,8 +107,8 @@ class LogViewModel(application: Application) :
         
         logUpdateReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                if (TProxyService.ACTION_LOG_UPDATE == intent.action) {
-                    val newLogs = intent.getStringArrayListExtra(TProxyService.EXTRA_LOG_DATA)
+                if ("com.hyperxray.an.LOG_UPDATE" == intent.action) {
+                    val newLogs = intent.getStringArrayListExtra("log_data")
                     if (!newLogs.isNullOrEmpty()) {
                         viewModelScope.launch(Dispatchers.Default) {
                             processNewLogs(newLogs)
@@ -161,7 +160,7 @@ class LogViewModel(application: Application) :
 
     fun registerLogReceiver(context: Context) {
         val receiver = logUpdateReceiver ?: return
-        val filter = IntentFilter(TProxyService.ACTION_LOG_UPDATE)
+        val filter = IntentFilter("com.hyperxray.an.LOG_UPDATE")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
