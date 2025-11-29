@@ -1066,48 +1066,35 @@ class HyperVpnService : VpnService() {
                 // This ensures UI updates instantly, tunnel stops in background
                 broadcastState("disconnected")
                 
-                // Start DNS shutdown asynchronously with timeout (don't block disconnect)
-                val dnsShutdownJob = serviceScope.launch {
-                    try {
-                        withTimeoutOrNull(500L) {
-                            shutdownDnsComponents()
-                        } ?: run {
-                            AiLogHelper.w(TAG, "DNS shutdown timeout (500ms), continuing disconnect")
-                        }
-                    } catch (e: Exception) {
-                        AiLogHelper.e(TAG, "Error in DNS shutdown: ${e.message}")
-                    }
-                }
-                
-                // Stop native tunnel asynchronously (don't block disconnect)
-                // Tunnel stops in background, UI already updated to disconnected
-                val stopTunnelJob = serviceScope.launch {
-                    try {
-                        val result = withTimeoutOrNull(1000L) {
-                            stopHyperTunnel()
-                        } ?: run {
-                            AiLogHelper.w(TAG, "stopHyperTunnel timeout (1000ms), assuming stopped")
-                            0 // Assume success if timeout
-                        }
-                        
-                        // Log result asynchronously (don't block)
-                        if (result == 0) {
-                            AiLogHelper.i(TAG, "✅ VPN tunnel stopped successfully")
-                        } else {
-                            AiLogHelper.w(TAG, "Warning: stopHyperTunnel returned $result")
-                            // Native code failed to stop properly, close manually (async, don't block)
-                            tunFdToClose?.let { fd ->
-                                try {
-                                    fd.close()
-                                } catch (e: Exception) {
-                                    AiLogHelper.e(TAG, "Error closing tunFd after failed stop: ${e.message}")
-                                }
+                // Stop native tunnel IMMEDIATELY (synchronous but fast - should be < 100ms)
+                // This ensures all goroutines and processes are killed immediately
+                try {
+                    val result = stopHyperTunnel()
+                    if (result == 0) {
+                        AiLogHelper.i(TAG, "✅ VPN tunnel stopped successfully")
+                    } else {
+                        AiLogHelper.w(TAG, "Warning: stopHyperTunnel returned $result")
+                        // Native code failed to stop properly, close manually
+                        tunFdToClose?.let { fd ->
+                            try {
+                                fd.close()
+                            } catch (e: Exception) {
+                                AiLogHelper.e(TAG, "Error closing tunFd after failed stop: ${e.message}")
                             }
                         }
-                    } catch (e: UnsatisfiedLinkError) {
-                        AiLogHelper.e(TAG, "stopHyperTunnel() failed: ${e.message}", e)
+                    }
+                } catch (e: UnsatisfiedLinkError) {
+                    AiLogHelper.e(TAG, "stopHyperTunnel() failed: ${e.message}", e)
+                } catch (e: Exception) {
+                    AiLogHelper.e(TAG, "stopHyperTunnel() threw exception: ${e.message}", e)
+                }
+                
+                // Start DNS shutdown asynchronously (fire-and-forget, don't block)
+                serviceScope.launch {
+                    try {
+                        shutdownDnsComponents()
                     } catch (e: Exception) {
-                        AiLogHelper.e(TAG, "stopHyperTunnel() threw exception: ${e.message}", e)
+                        AiLogHelper.e(TAG, "Error in DNS shutdown: ${e.message}")
                     }
                 }
                 

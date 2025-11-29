@@ -623,51 +623,71 @@ func maskPrivateKey(config string) string {
 	return config // In production, actually mask it
 }
 
-// Stop stops the tunnel
+// Stop stops the tunnel IMMEDIATELY (aggressive cleanup)
 func (t *HyperTunnel) Stop() error {
-	logInfo("[Tunnel] Stopping HyperTunnel...")
+	logInfo("[Tunnel] ⚡ IMMEDIATE STOP: Stopping HyperTunnel...")
 
 	if !t.running.Load() {
-		return fmt.Errorf("tunnel not running")
+		logInfo("[Tunnel] Tunnel not running, nothing to stop")
+		return nil
 	}
 
-	// Signal stop
-	close(t.stopChan)
-
-	t.cleanup()
-
+	// IMMEDIATELY signal stop to all goroutines
+	select {
+	case <-t.stopChan:
+		// Already closed
+	default:
+		close(t.stopChan)
+	}
+	
+	// IMMEDIATELY mark as not running (before cleanup)
 	t.running.Store(false)
 
-	logInfo("[Tunnel] ✅ Tunnel stopped")
+	// Aggressive cleanup - kill everything immediately
+	t.cleanup()
+
+	logInfo("[Tunnel] ✅ Tunnel stopped immediately")
 
 	return nil
 }
 
 // cleanup cleans up all resources
 func (t *HyperTunnel) cleanup() {
-	// Stop WireGuard
-	if t.wgDevice != nil {
-		t.wgDevice.Close()
-		t.wgDevice = nil
+	logInfo("[Tunnel] Starting cleanup...")
+	
+	// Close bind first (this will stop health check goroutine and UDP connection)
+	if t.xrayBind != nil {
+		logInfo("[Tunnel] Closing XrayBind...")
+		t.xrayBind.Close()
+		t.xrayBind = nil
+		logInfo("[Tunnel] ✅ XrayBind closed")
 	}
 
-	// Stop Xray
+	// Stop Xray (this will close all UDP connections and their goroutines)
 	if t.xrayInstance != nil {
+		logInfo("[Tunnel] Stopping Xray instance...")
 		t.xrayInstance.Stop()
 		t.xrayInstance = nil
+		logInfo("[Tunnel] ✅ Xray instance stopped")
+	}
+
+	// Stop WireGuard
+	if t.wgDevice != nil {
+		logInfo("[Tunnel] Closing WireGuard device...")
+		t.wgDevice.Close()
+		t.wgDevice = nil
+		logInfo("[Tunnel] ✅ WireGuard device closed")
 	}
 
 	// Close TUN
 	if t.tunDevice != nil {
+		logInfo("[Tunnel] Closing TUN device...")
 		t.tunDevice.Close()
 		t.tunDevice = nil
+		logInfo("[Tunnel] ✅ TUN device closed")
 	}
-
-	// Close bind
-	if t.xrayBind != nil {
-		t.xrayBind.Close()
-		t.xrayBind = nil
-	}
+	
+	logInfo("[Tunnel] ✅ Cleanup complete")
 }
 
 // GetStats returns tunnel statistics

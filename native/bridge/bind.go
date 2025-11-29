@@ -22,6 +22,7 @@ type XrayBind struct {
 	
 	mu       sync.Mutex
 	closed   bool
+	stopChan chan struct{} // Channel to signal health check goroutine to stop
 	
 	// Health check
 	lastHealthCheck time.Time
@@ -58,6 +59,7 @@ func NewXrayBind(xray *XrayWrapper, endpoint string) (*XrayBind, error) {
 		endpoint: endpoint,
 		host:     host,
 		port:     port,
+		stopChan: make(chan struct{}),
 	}, nil
 }
 
@@ -310,19 +312,31 @@ func (b *XrayBind) ParseEndpoint(s string) (conn.Endpoint, error) {
 	return &xrayEndpoint{addr: s}, nil
 }
 
-// Close implements conn.Bind
+// Close implements conn.Bind - IMMEDIATE cleanup
 func (b *XrayBind) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	
-	logInfo("[XrayBind] Closing...")
+	logInfo("[XrayBind] ⚡ IMMEDIATE CLOSE: Closing...")
+	
+	// IMMEDIATELY mark as closed
 	b.closed = true
 	
+	// IMMEDIATELY signal health check goroutine to stop
+	select {
+	case <-b.stopChan:
+		// Already closed
+	default:
+		close(b.stopChan)
+	}
+	
+	// IMMEDIATELY close UDP connection (goroutines will exit via context cancel)
 	if b.udpConn != nil {
 		b.udpConn.Close()
 		b.udpConn = nil
 	}
 	
+	logInfo("[XrayBind] ✅ Closed immediately")
 	return nil
 }
 
@@ -403,6 +417,9 @@ func (b *XrayBind) healthCheckLoop() {
 	
 	for {
 		select {
+		case <-b.stopChan:
+			logInfo("[XrayBind] Health check loop exiting: stop channel signalled")
+			return
 		case <-ticker.C:
 			if b.closed {
 				logInfo("[XrayBind] Health check loop exiting: bind closed")

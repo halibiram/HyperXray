@@ -37,6 +37,8 @@ type XrayWrapper struct {
 	mu        sync.Mutex
 	grpcClient *XrayGrpcClient
 	apiPort   int
+	udpConns  map[*XrayUDPConn]struct{} // Track active UDP connections
+	connsMu   sync.Mutex
 }
 
 // ensureDebugLogging adds debug log settings to config
@@ -311,6 +313,7 @@ func NewXrayWrapper(configJSON string) (*XrayWrapper, error) {
 		cancel:     cancel,
 		apiPort:    apiPort,
 		grpcClient: nil, // Will be created in Start() if apiPort > 0
+		udpConns:   make(map[*XrayUDPConn]struct{}),
 	}, nil
 }
 
@@ -503,7 +506,7 @@ func (x *XrayWrapper) StartWithoutVerification() error {
 	return nil
 }
 
-// Stop stops Xray-core
+// Stop stops Xray-core IMMEDIATELY (aggressive cleanup)
 func (x *XrayWrapper) Stop() error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
@@ -512,27 +515,42 @@ func (x *XrayWrapper) Stop() error {
 		return nil
 	}
 	
-	logInfo("[Xray] Stopping Xray-core...")
+	logInfo("[Xray] ⚡ IMMEDIATE STOP: Stopping Xray-core...")
+	
+	// IMMEDIATELY cancel context to signal all goroutines to stop
 	x.cancel()
+	
+	// IMMEDIATELY mark as not running (before cleanup)
+	x.running = false
+	
+	// IMMEDIATELY close all active UDP connections to prevent zombie goroutines
+	x.connsMu.Lock()
+	connCount := len(x.udpConns)
+	if connCount > 0 {
+		logInfo("[Xray] ⚡ Closing %d active UDP connection(s) immediately...", connCount)
+		for conn := range x.udpConns {
+			// Close without waiting - goroutines will exit via context cancel
+			conn.Close()
+		}
+		x.udpConns = make(map[*XrayUDPConn]struct{})
+		logInfo("[Xray] ✅ All UDP connections closed")
+	}
+	x.connsMu.Unlock()
 	
 	// Close gRPC client if it exists
 	if x.grpcClient != nil {
 		logInfo("[Xray] Closing gRPC client...")
-		if err := x.grpcClient.Close(); err != nil {
-			logWarn("[Xray] Error closing gRPC client: %v", err)
-		} else {
-			logInfo("[Xray] ✅ gRPC client closed")
-		}
+		x.grpcClient.Close() // Don't wait for error
 		x.grpcClient = nil
 	}
 	
+	// Close Xray instance
 	if err := x.instance.Close(); err != nil {
 		logError("[Xray] Close error: %v", err)
-		return err
+		// Don't return error - continue cleanup
 	}
 	
-	x.running = false
-	logInfo("[Xray] Xray-core stopped")
+	logInfo("[Xray] ✅ Xray-core stopped immediately")
 	return nil
 }
 
@@ -573,15 +591,21 @@ func (x *XrayWrapper) DialUDP(address string, port int) (*XrayUDPConn, error) {
 	// The outbound manager will handle routing based on destination
 	
 	conn := &XrayUDPConn{
-		xray:    x,
-		ctx:     ctx,
-		dest:    dest,
-		address: address,
-		port:    port,
-		readCh:  make(chan []byte, 256),
+		xray:     x,
+		ctx:      ctx,
+		dest:     dest,
+		address:  address,
+		port:     port,
+		readCh:   make(chan []byte, 256),
+		stopChan: make(chan struct{}),
 	}
 	
 	logInfo("[Xray] ✅ XrayUDPConn created")
+	
+	// Track this connection
+	x.connsMu.Lock()
+	x.udpConns[conn] = struct{}{}
+	x.connsMu.Unlock()
 	
 	return conn, nil
 }
@@ -613,6 +637,7 @@ type XrayUDPConn struct {
 	closed   bool
 	reconnecting bool
 	reconnectMu  sync.Mutex
+	stopChan chan struct{} // Channel to signal goroutine shutdown
 }
 
 // Connect establishes the connection
@@ -714,6 +739,17 @@ func (c *XrayUDPConn) readLoop() {
 	errorCount := 0
 	
 	for {
+		// Check if context is cancelled (XrayWrapper.Stop() was called)
+		select {
+		case <-c.ctx.Done():
+			logInfo("[XrayUDP] readLoop() exiting: context cancelled (Xray stopped)")
+			return
+		case <-c.stopChan:
+			logInfo("[XrayUDP] readLoop() exiting: stop channel signalled")
+			return
+		default:
+		}
+		
 		c.mu.Lock()
 		closed := c.closed
 		c.mu.Unlock()
@@ -943,22 +979,62 @@ func (c *XrayUDPConn) Write(data []byte) (int, error) {
 // Read receives data from Xray
 func (c *XrayUDPConn) Read(timeout time.Duration) ([]byte, error) {
 	select {
-	case data := <-c.readCh:
+	case data, ok := <-c.readCh:
+		if !ok {
+			// Channel closed
+			return nil, fmt.Errorf("connection closed")
+		}
 		return data, nil
 	case <-time.After(timeout):
 		return nil, fmt.Errorf("read timeout")
+	case <-c.ctx.Done():
+		return nil, fmt.Errorf("context cancelled")
+	case <-c.stopChan:
+		return nil, fmt.Errorf("connection closed")
 	}
 }
 
-// Close closes the connection
+// Close closes the connection IMMEDIATELY
 func (c *XrayUDPConn) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	
-	c.closed = true
-	if c.conn != nil {
-		return c.conn.Close()
+	if c.closed {
+		return nil // Already closed
 	}
+	
+	// IMMEDIATELY mark as closed
+	c.closed = true
+	
+	// Remove from XrayWrapper tracking
+	if c.xray != nil {
+		c.xray.connsMu.Lock()
+		delete(c.xray.udpConns, c)
+		c.xray.connsMu.Unlock()
+	}
+	
+	// IMMEDIATELY signal goroutine to stop
+	select {
+	case <-c.stopChan:
+		// Already closed
+	default:
+		close(c.stopChan)
+	}
+	
+	// IMMEDIATELY close read channel to unblock any waiting readers
+	select {
+	case <-c.readCh:
+		// Channel already closed
+	default:
+		close(c.readCh)
+	}
+	
+	// IMMEDIATELY close connection
+	if c.conn != nil {
+		c.conn.Close() // Don't wait for error
+		c.conn = nil
+	}
+	
 	return nil
 }
 

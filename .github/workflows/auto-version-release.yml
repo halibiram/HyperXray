@@ -1,19 +1,25 @@
 name: Auto-Version & Release
 on:
   schedule:
-    - cron: '0 23 * * *'
+    - cron: "0 23 * * *"
   workflow_dispatch:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   check-for-updates:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    
+
     if: github.event_name != 'push'
+
+    outputs:
+      update_needed: ${{ steps.compare.outputs.update_needed }}
+      new_xray_version: ${{ steps.compare.outputs.new_xray_version }}
+      new_app_name: ${{ steps.update_versions.outputs.new_app_name }}
+      new_app_code: ${{ steps.update_versions.outputs.new_app_code }}
 
     steps:
       - name: Checkout code
@@ -28,12 +34,12 @@ jobs:
         id: get_tag
         run: |
           latest_tag=$(curl -sI https://github.com/XTLS/Xray-core/releases/latest | awk '/^location:/ {gsub(/.*tag\/v/, "", $2); gsub(/\r/, "", $2); print $2}')
-          
+
           if [ -z "$latest_tag" ]; then
             echo "Failed to get latest tag" >&2
             exit 1
           fi
-          
+
           echo "latest_tag=$latest_tag" >> $GITHUB_OUTPUT
           echo "Latest Xray-core version: v$latest_tag"
 
@@ -60,6 +66,7 @@ jobs:
           fi
 
       - name: Notify if no update needed
+        id: notify_no_update
         if: steps.compare.outputs.update_needed != 'true'
         run: |
           echo "No Xray-core update available. Current version is up-to-date."
@@ -72,14 +79,14 @@ jobs:
           wget -q "https://github.com/XTLS/Xray-core/releases/download/v${{ steps.get_tag.outputs.latest_tag }}/Xray-linux-64.zip"
           unzip -q -o Xray-linux-64.zip
           chmod +x xray
-          
+
           go_version=$(./xray version | grep -o 'go[0-9.]\+' | head -1 | sed 's/go//')
-          
+
           if [ -z "$go_version" ]; then
             echo "Failed to extract Go version" >&2
             exit 1
           fi
-          
+
           echo "go_version=$go_version" >> $GITHUB_OUTPUT
           echo "Extracted Go version: $go_version"
 
@@ -87,11 +94,11 @@ jobs:
         if: steps.compare.outputs.update_needed == 'true'
         id: update_versions
         run: |
-          git pull origin ${{ github.ref }}
+          git pull origin ${{ github.ref_name }}
 
           sed -i "s/^XRAY_CORE_VERSION=.*/XRAY_CORE_VERSION=${{ steps.compare.outputs.new_xray_version }}/" version.properties
           sed -i "s/^GO_VERSION=.*/GO_VERSION=${{ steps.download.outputs.go_version }}/" version.properties
-          
+
           echo "Updated Go and Xray versions in version.properties."
           git config user.name "lhear"
           git config user.email "121179341+lhear@users.noreply.github.com"
@@ -100,13 +107,13 @@ jobs:
 
           app_code=$(grep '^APP_VERSION_CODE=' version.properties | sed 's/.*= *//; s/ //g')
           app_name=$(grep '^APP_VERSION_NAME=' version.properties | sed 's/.*= *//; s/ //g')
-          
+
           new_app_code=$((app_code + 1))
           new_app_name=$(echo "$app_name" | awk -F. '{ $NF++; print }' OFS='.')
 
           sed -i "s/^APP_VERSION_CODE=.*/APP_VERSION_CODE=$new_app_code/" version.properties
           sed -i "s/^APP_VERSION_NAME=.*/APP_VERSION_NAME=$new_app_name/" version.properties
-          
+
           echo "Updated app version in version.properties."
           git add version.properties
           git commit -m "chore(release): Bump version to $new_app_name"
@@ -115,7 +122,6 @@ jobs:
           echo "new_app_code=$new_app_code" >> $GITHUB_OUTPUT
           echo "update_needed=true" >> $GITHUB_OUTPUT
 
-
   build-and-release-from-update:
     name: Build and Release (from update)
     runs-on: ubuntu-latest
@@ -123,7 +129,7 @@ jobs:
     if: github.event_name != 'push' && always() && needs.check-for-updates.result != 'failure' && needs.check-for-updates.outputs.update_needed == 'true'
     permissions:
       contents: write
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -151,9 +157,9 @@ jobs:
       - name: Set up Java 22
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '22'
-          cache: 'gradle'
+          distribution: "temurin"
+          java-version: "22"
+          cache: "gradle"
         env:
           JAVA_HOME: ${{ env.JAVA_HOME }}
 
@@ -210,7 +216,7 @@ jobs:
           # Read NDK version from version.properties
           NDK_VERSION=$(grep '^NDK_VERSION=' version.properties | cut -d '=' -f 2 | tr -d ' ')
           NDK_MAJOR=$(echo "$NDK_VERSION" | cut -d '.' -f 1)
-          
+
           # Determine NDK download URL (r28c format for version 28.x)
           if [ "$NDK_MAJOR" = "28" ]; then
             NDK_ZIP="android-ndk-r28c-linux.zip"
@@ -218,7 +224,7 @@ jobs:
             # Fallback to r28c if version format doesn't match
             NDK_ZIP="android-ndk-r28c-linux.zip"
           fi
-          
+
           # Set up NDK
           wget -qO android-ndk.zip https://dl.google.com/android/repository/$NDK_ZIP
           unzip -q android-ndk.zip
@@ -254,8 +260,8 @@ jobs:
       - name: Set up Python for Model Training
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Train Policy Model
         run: |
@@ -297,7 +303,7 @@ jobs:
           VERSION_NAME: ${{ steps.version.outputs.version_name }}
         run: |
           BUILD_DATE=$(date -u +'%Y-%m-%d %H:%M:%S UTC')
-          
+
           {
             echo "## Release ${TAG_NAME}"
             echo ""
@@ -311,7 +317,7 @@ jobs:
             echo "- ARM64-v8a APK"
             echo "- x86_64 APK"
           } > /tmp/release_notes.txt
-          
+
           echo "notes<<EOF" >> $GITHUB_OUTPUT
           cat /tmp/release_notes.txt >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -334,7 +340,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -362,9 +368,9 @@ jobs:
       - name: Set up Java 22
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '22'
-          cache: 'gradle'
+          distribution: "temurin"
+          java-version: "22"
+          cache: "gradle"
         env:
           JAVA_HOME: ${{ env.JAVA_HOME }}
 
@@ -421,7 +427,7 @@ jobs:
           # Read NDK version from version.properties
           NDK_VERSION=$(grep '^NDK_VERSION=' version.properties | cut -d '=' -f 2 | tr -d ' ')
           NDK_MAJOR=$(echo "$NDK_VERSION" | cut -d '.' -f 1)
-          
+
           # Determine NDK download URL (r28c format for version 28.x)
           if [ "$NDK_MAJOR" = "28" ]; then
             NDK_ZIP="android-ndk-r28c-linux.zip"
@@ -429,7 +435,7 @@ jobs:
             # Fallback to r28c if version format doesn't match
             NDK_ZIP="android-ndk-r28c-linux.zip"
           fi
-          
+
           # Set up NDK
           wget -qO android-ndk.zip https://dl.google.com/android/repository/$NDK_ZIP
           unzip -q android-ndk.zip
@@ -465,8 +471,8 @@ jobs:
       - name: Set up Python for Model Training
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Train Policy Model
         run: |
@@ -508,7 +514,7 @@ jobs:
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
           BUILD_DATE=$(date -u +'%Y-%m-%d %H:%M:%S UTC')
-          
+
           {
             echo "## Release ${TAG_NAME}"
             echo ""
@@ -522,7 +528,7 @@ jobs:
             echo "- ARM64-v8a APK"
             echo "- x86_64 APK"
           } > /tmp/release_notes.txt
-          
+
           echo "notes<<EOF" >> $GITHUB_OUTPUT
           cat /tmp/release_notes.txt >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
