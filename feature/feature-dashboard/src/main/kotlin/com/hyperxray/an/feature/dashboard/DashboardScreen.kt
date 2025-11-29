@@ -34,7 +34,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -373,157 +375,91 @@ fun DashboardScreen(
             )
         }
 
-        
-        // Summary Stats Row - Enhanced with Modern Glass Cards
-        item(key = "summary_stats") {
-            AnimatedVisibility(
-                visible = isServiceEnabled,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    // Total Traffic Card - Enhanced with Glassmorphism
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(
-                                        Color(0xFF000000).copy(alpha = 0.6f),
-                                        Color(0xFF0A0A0A).copy(alpha = 0.4f)
-                                    )
-                                )
-                            )
-                            .border(
-                                width = 1.5.dp,
-                                brush = Brush.linearGradient(trafficGradient),
-                                shape = RoundedCornerShape(24.dp)
-                            )
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(
-                                    Brush.verticalGradient(
-                                        colors = trafficGradient.map { it.copy(alpha = 0.08f) }
-                                    )
-                                )
-                                .padding(20.dp)
-                        ) {
-                            Column {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(MaterialTheme.colorScheme.primary)
-                                    )
-                                    Text(
-                                        text = "Total Traffic",
-                                        style = MaterialTheme.typography.labelLarge.copy(
-                                            fontWeight = FontWeight.SemiBold,
-                                            letterSpacing = 0.2.sp
-                                        ),
-                                        color = Color(0xFFB0B0B0)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    text = formatBytes(coreStats.uplink + coreStats.downlink),
-                                    style = MaterialTheme.typography.headlineSmall.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = (-0.5).sp
-                                    ),
-                                    color = trafficGradient.first(),
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                        }
-                    }
-                    
-                    // Connection Time Card - Enhanced with Glassmorphism
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(
-                                        Color(0xFF000000).copy(alpha = 0.6f),
-                                        Color(0xFF0A0A0A).copy(alpha = 0.4f)
-                                    )
-                                )
-                            )
-                            .border(
-                                width = 1.5.dp,
-                                brush = Brush.linearGradient(performanceGradient),
-                                shape = RoundedCornerShape(24.dp)
-                            )
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(
-                                    Brush.verticalGradient(
-                                        colors = performanceGradient.map { it.copy(alpha = 0.08f) }
-                                    )
-                                )
-                                .padding(20.dp)
-                        ) {
-                            Column {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(connectionActiveColor)
-                                    )
-                                    Text(
-                                        text = "Uptime",
-                                        style = MaterialTheme.typography.labelLarge.copy(
-                                            fontWeight = FontWeight.SemiBold,
-                                            letterSpacing = 0.2.sp
-                                        ),
-                                        color = Color(0xFFB0B0B0)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text(
-                                    text = formatUptime(coreStats.uptime),
-                                    style = MaterialTheme.typography.headlineSmall.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = (-0.5).sp
-                                    ),
-                                    color = connectionActiveColor,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
         // Traffic Chart (always show if connected, prevents flickering) - Animated
         item(key = "traffic_chart") {
+            val hyperVpnStats by (viewModel.hyperVpnStats ?: kotlinx.coroutines.flow.MutableStateFlow(
+                com.hyperxray.an.core.network.vpn.HyperVpnStateManager.TunnelStats()
+            )).collectAsState()
+            
+            // Throughput hesaplama için önceki değerleri sakla
+            var previousTxBytes by remember { mutableStateOf(0L) }
+            var previousRxBytes by remember { mutableStateOf(0L) }
+            var lastUpdateTime by remember { mutableStateOf(System.currentTimeMillis()) }
+            var previousUptime by remember { mutableStateOf(0L) }
+            var txThroughput by remember { mutableStateOf(0.0) }
+            var rxThroughput by remember { mutableStateOf(0.0) }
+            
+            // Uptime değiştiğinde önceki değerleri sıfırla (yeni bağlantı başladı)
+            LaunchedEffect(hyperVpnStats.uptime) {
+                if (hyperVpnStats.uptime != previousUptime) {
+                    // Uptime değişti - yeni bağlantı veya bağlantı durumu değişti
+                    if (hyperVpnStats.uptime == 0L && previousUptime > 0L) {
+                        // Bağlantı kesildi - değerleri sıfırla
+                        previousTxBytes = 0L
+                        previousRxBytes = 0L
+                        txThroughput = 0.0
+                        rxThroughput = 0.0
+                    } else if (hyperVpnStats.uptime > 0L && previousUptime == 0L) {
+                        // Yeni bağlantı başladı - önceki değerleri sıfırla
+                        previousTxBytes = hyperVpnStats.txBytes
+                        previousRxBytes = hyperVpnStats.rxBytes
+                        lastUpdateTime = System.currentTimeMillis()
+                    }
+                    previousUptime = hyperVpnStats.uptime
+                }
+            }
+            
+            // Throughput hesaplama - HyperVpnStateManager verilerini kullan
+            // Uptime'a göre güncelleme yap (sadece bağlıyken)
+            // Use rememberUpdatedState to track latest stats without restarting coroutine
+            val currentStats = rememberUpdatedState(hyperVpnStats)
+            val currentUptime = rememberUpdatedState(hyperVpnStats.uptime)
+            
+            LaunchedEffect(Unit) {
+                while (true) {
+                    val stats = currentStats.value
+                    val uptime = currentUptime.value
+                    
+                    // Sadece uptime > 0 olduğunda (bağlıyken) güncelleme yap
+                    if (uptime > 0) {
+                        val currentTime = System.currentTimeMillis()
+                        val timeDelta = ((currentTime - lastUpdateTime).coerceAtLeast(1000L)) / 1000.0 // seconds (minimum 1 saniye)
+                        
+                        if (timeDelta > 0 && previousTxBytes > 0 && previousRxBytes > 0) {
+                            val txDiff = (stats.txBytes - previousTxBytes).coerceAtLeast(0L)
+                            val rxDiff = (stats.rxBytes - previousRxBytes).coerceAtLeast(0L)
+                            
+                            txThroughput = txDiff / timeDelta
+                            rxThroughput = rxDiff / timeDelta
+                        } else if (previousTxBytes == 0L && previousRxBytes == 0L && stats.txBytes > 0) {
+                            // İlk güncelleme - önceki değerleri set et
+                            previousTxBytes = stats.txBytes
+                            previousRxBytes = stats.rxBytes
+                            lastUpdateTime = currentTime
+                        }
+                        
+                        previousTxBytes = stats.txBytes
+                        previousRxBytes = stats.rxBytes
+                        lastUpdateTime = currentTime
+                    } else {
+                        // Bağlantı yok - throughput'u sıfırla
+                        txThroughput = 0.0
+                        rxThroughput = 0.0
+                    }
+                    
+                    // Veriler 1 saniyede bir geldiği için 1 saniyede bir güncelle
+                    delay(1000L)
+                }
+            }
+            
             AnimatedVisibility(
                 visible = shouldShowTrafficChart,
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
             ) {
                 FuturisticTrafficChart(
-                    uplinkThroughput = coreStats.uplinkThroughput,
-                    downlinkThroughput = coreStats.downlinkThroughput
+                    uplinkThroughput = txThroughput,
+                    downlinkThroughput = rxThroughput
                 )
             }
         }
@@ -717,214 +653,6 @@ fun DashboardScreen(
             }
         }
 
-    item(key = "traffic") {
-        // HyperVpn stats'larını Traffic card'ında kullanabilmek için
-        val hyperVpnStats by (viewModel.hyperVpnStats ?: kotlinx.coroutines.flow.MutableStateFlow(
-            com.hyperxray.an.core.network.vpn.HyperVpnStateManager.TunnelStats()
-        )).collectAsState()
-
-        AnimatedVisibility(
-            visible = isServiceEnabled,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically()
-        ) {
-            AnimatedStatCard(
-                title = "Traffic",
-                iconRes = resources.drawableCloudDownload,
-                gradientColors = trafficGradient,
-                animationDelay = 100,
-                content = {
-                    // WireGuard TX/RX/Total
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        // TX - Gönderilen
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = "TX",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF808080)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = formatBytes(hyperVpnStats.txBytes),
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = trafficGradient[0]
-                            )
-                        }
-
-                        // RX - Alınan
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = "RX",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF808080)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = formatBytes(hyperVpnStats.rxBytes),
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = trafficGradient[1]
-                            )
-                        }
-
-                        // Total - Toplam
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = "Total",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF808080)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = formatBytes(hyperVpnStats.totalBytes),
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = trafficGradient[2]
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Throughput ve Uptime
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        // Throughput
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = "Throughput",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF808080)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = formatThroughput(hyperVpnStats.throughput),
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = trafficGradient[0]
-                            )
-                        }
-
-                        // Uptime
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = "Uptime",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF808080)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = formatUptime(hyperVpnStats.uptime.toInt()),
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = trafficGradient[1]
-                            )
-                        }
-
-                        // Latency
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = "Latency",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF808080)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "${hyperVpnStats.latency}ms",
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                color = if (hyperVpnStats.latency < 100) successColor else warningColor
-                            )
-                        }
-                    }
-
-                    // Packet Loss (sadece varsa göster)
-                    if (hyperVpnStats.packetLoss > 0) {
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            // Packet Loss
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    text = "Packet Loss",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF808080)
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = String.format("%.2f%%", hyperVpnStats.packetLoss),
-                                    style = MaterialTheme.typography.bodyLarge.copy(
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    color = if (hyperVpnStats.packetLoss < 1.0) successColor else errorColor
-                                )
-                            }
-
-                            // Total Packets
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    text = "Packets",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF808080)
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = "${hyperVpnStats.totalPackets}",
-                                    style = MaterialTheme.typography.bodyLarge.copy(
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    color = trafficGradient[2]
-                                )
-                            }
-
-                            // Boş alan
-                            Spacer(modifier = Modifier.weight(1f))
-                        }
-                    }
-                }
-            )
-        }
-    }
-
     item(key = "system_stats") {
         AnimatedVisibility(
             visible = isServiceEnabled,
@@ -996,80 +724,6 @@ fun DashboardScreen(
                 )
             }
         )
-        }
-    }
-
-    item(key = "ai_telemetry") {
-        AnimatedVisibility(
-            visible = isServiceEnabled,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically()
-        ) {
-            AnimatedStatCard(
-                title = "AI Telemetry",
-                iconRes = resources.drawableOptimizer,
-                gradientColors = telemetryGradient,
-                animationDelay = 400,
-                content = {
-                if (telemetryState != null) {
-                    StatRow(
-                        label = "Avg Throughput",
-                        value = formatThroughput(telemetryState!!.avgThroughput)
-                    )
-                    StatRow(
-                        label = "RTT P95",
-                        value = formatRtt(telemetryState!!.rttP95)
-                    )
-                    StatRow(
-                        label = "Avg Handshake Time",
-                        value = formatHandshakeTime(telemetryState!!.avgHandshakeTime)
-                    )
-                    StatRow(
-                        label = "Avg Packet Loss",
-                        value = formatLoss(telemetryState!!.avgLoss)
-                    )
-                    StatRow(
-                        label = "Sample Count",
-                        value = formatNumber(telemetryState!!.sampleCount.toLong())
-                    )
-                } else {
-                    Text(
-                        text = stringResource(id = resources.stringVpnDisconnected),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 8.dp)
-                    )
-                }
-            }
-        )
-        }
-    }
-
-    // DNS Cache Card
-    item(key = "dns_cache") {
-        AnimatedVisibility(
-            visible = isServiceEnabled,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically()
-        ) {
-            DnsCacheCard(
-                stats = dnsCacheStats ?: DnsCacheStats(
-                    entryCount = 0,
-                    memoryUsageMB = 0,
-                    memoryLimitMB = 500,
-                    memoryUsagePercent = 0,
-                    hits = 0,
-                    misses = 0,
-                    hitRate = 0,
-                    avgDomainHitRate = 0,
-                    avgHitLatencyMs = 0.0,
-                    avgMissLatencyMs = 0.0,
-                    avgTtlSeconds = 0L,
-                    activeEntries = emptyList()
-                ),
-                gradientColors = dnsCacheGradient,
-                onClearCache = { viewModel.clearDnsCache() }
-            )
         }
     }
     }
