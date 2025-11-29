@@ -2,7 +2,8 @@
 
 ## Genel Bilgiler
 - **Proje:** HyperXray Android VPN Uygulaması
-- **Son Güncelleme:** $(date)
+- **Son Güncelleme:** 2025-11-29
+- **Son Version:** v2.0.4 (Version Code: 52)
 - **Aktif Modül:** Core VPN Service + Xray Integration
 - **Mimari:** Android + Kotlin + Native (Go) + Xray Core
 
