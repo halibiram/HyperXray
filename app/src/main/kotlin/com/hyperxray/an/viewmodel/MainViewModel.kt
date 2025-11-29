@@ -614,9 +614,6 @@ class MainViewModel(
         }
     }
 
-    fun setXrayCoreInstanceCount(count: Int) {
-        settingsRepository.setXrayCoreInstanceCount(count)
-    }
 
     // Performance Settings Functions - delegated to SettingsRepository
     fun setAggressiveSpeedOptimizations(enabled: Boolean) {

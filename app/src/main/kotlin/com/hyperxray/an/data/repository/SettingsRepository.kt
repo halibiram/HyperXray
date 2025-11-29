@@ -92,7 +92,6 @@ class SettingsRepository(
             ),
             bypassDomains = prefs.bypassDomains,
             bypassIps = prefs.bypassIps,
-            xrayCoreInstanceCount = prefs.xrayCoreInstanceCount
         )
     }
 
@@ -839,13 +838,6 @@ class SettingsRepository(
     /**
      * Set Xray core instance count.
      */
-    fun setXrayCoreInstanceCount(count: Int) {
-        prefs.xrayCoreInstanceCount = count
-        _settingsState.update {
-            it.copy(xrayCoreInstanceCount = count)
-        }
-    }
-
     /**
      * Set bypass domains.
      */

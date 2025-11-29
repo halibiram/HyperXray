@@ -519,30 +519,6 @@ class Preferences(context: Context) {
             setValueInProvider(BYPASS_IPS, jsonList)
         }
 
-    var xrayCoreInstanceCount: Int
-        get() {
-            val value = getPrefData(XRAY_CORE_INSTANCE_COUNT).first
-            val count = value?.toIntOrNull()
-            // Return value from preferences, or default to 1 if not set or invalid
-            val result = when {
-                count == null -> 1
-                count < 1 -> 1
-                count > 4 -> 4
-                else -> count
-            }
-            Log.d(TAG, "xrayCoreInstanceCount get() returning: $result (from prefs: $value, parsed: $count)")
-            return result
-        }
-        set(count) {
-            // Clamp value between 1 and 4
-            val clampedCount = when {
-                count < 1 -> 1
-                count > 4 -> 4
-                else -> count
-            }
-            Log.d(TAG, "xrayCoreInstanceCount set() called with: $count, clamping to: $clampedCount")
-            setValueInProvider(XRAY_CORE_INSTANCE_COUNT, clampedCount.toString())
-        }
 
     // Telegram notification preferences
     var telegramEnabled: Boolean
@@ -644,7 +620,6 @@ class Preferences(context: Context) {
         const val EXTREME_PROXY_OPTIMIZATION: String = "ExtremeProxyOptimization"
         const val BYPASS_DOMAINS: String = "BypassDomains"
         const val BYPASS_IPS: String = "BypassIps"
-        const val XRAY_CORE_INSTANCE_COUNT: String = "XrayCoreInstanceCount"
 
         // Sticky routing keys
         const val STICKY_ROUTING_ENABLED: String = "StickyRoutingEnabled"

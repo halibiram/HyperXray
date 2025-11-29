@@ -200,31 +200,6 @@ class HyperVpnService : VpnService() {
      */
     private external fun loadGoLibraryWithPath(path: String): Boolean
     
-    // Multi-instance native function declarations
-    private external fun initMultiInstanceManager(
-        nativeLibDir: String,
-        filesDir: String,
-        maxInstances: Int
-    ): Int
-    
-    private external fun startMultiInstances(
-        count: Int,
-        configJSON: String,
-        excludedPortsJSON: String
-    ): String
-    
-    private external fun stopMultiInstance(index: Int): Int
-    
-    private external fun stopAllMultiInstances(): Int
-    
-    private external fun getMultiInstanceStatus(index: Int): String
-    
-    private external fun getAllMultiInstancesStatus(): String
-    
-    private external fun getMultiInstanceCount(): Int
-    
-    private external fun isMultiInstanceRunning(): Boolean
-    
     // DNS native function declarations
     private external fun initDNSCache(cacheDir: String): Int
     private external fun dnsCacheLookup(hostname: String): String
