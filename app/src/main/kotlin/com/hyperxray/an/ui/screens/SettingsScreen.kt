@@ -392,22 +392,6 @@ fun SettingsScreen(
                 modifier = Modifier.padding(horizontal = 16.dp),
                 color = MaterialTheme.colorScheme.outlineVariant
             )
-
-            ListItem(
-                headlineContent = { Text(stringResource(R.string.auto_start_title)) },
-                supportingContent = { Text(stringResource(R.string.auto_start_summary)) },
-                trailingContent = {
-                    Switch(
-                        checked = settingsState.switches.autoStart,
-                        onCheckedChange = {
-                            mainViewModel.setAutoStart(it)
-                        }
-                    )
-                },
-                colors = ListItemDefaults.colors(
-                    containerColor = Color.Transparent
-                )
-            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))

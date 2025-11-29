@@ -49,8 +49,7 @@ class SettingsRepository(
                 httpProxyEnabled = prefs.httpProxyEnabled,
                 bypassLanEnabled = prefs.bypassLan,
                 disableVpn = prefs.disableVpn,
-                themeMode = prefs.theme,
-                autoStart = prefs.autoStart
+                themeMode = prefs.theme
             ),
             info = InfoStates(
                 appVersion = BuildConfig.VERSION_NAME,
@@ -242,13 +241,6 @@ class SettingsRepository(
     /**
      * Set auto start enabled.
      */
-    fun setAutoStart(enabled: Boolean) {
-        prefs.autoStart = enabled
-        _settingsState.update {
-            it.copy(switches = it.switches.copy(autoStart = enabled))
-        }
-    }
-
     /**
      * Update connectivity test target.
      */

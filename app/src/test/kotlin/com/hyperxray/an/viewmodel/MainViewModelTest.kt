@@ -349,8 +349,7 @@ class MainViewModelTest {
                 httpProxyEnabled = false,
                 bypassLanEnabled = true,
                 disableVpn = false,
-                themeMode = ThemeMode.Auto,
-                autoStart = false
+                themeMode = ThemeMode.Auto
             ),
             info = InfoStates(
                 appVersion = "1.0.0",

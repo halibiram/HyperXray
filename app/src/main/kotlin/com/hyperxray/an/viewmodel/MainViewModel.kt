@@ -601,10 +601,6 @@ class MainViewModel(
         reloadView?.invoke()
     }
 
-    fun setAutoStart(enabled: Boolean) {
-        settingsRepository.setAutoStart(enabled)
-    }
-
     fun setConnectionStateDisconnecting() {
         // Connection state is now managed by VpnConnectionUseCase
         // This method is kept for backward compatibility but does nothing
@@ -846,15 +842,6 @@ class MainViewModel(
      */
     fun stopConnectionProcess() {
         vpnConnectionUseCase.disconnect()
-    }
-
-    fun checkAndStartAutoVpn(vpnPrepareLauncher: ActivityResultLauncher<Intent>) {
-        viewModelScope.launch {
-            if (prefs.autoStart && !_isServiceEnabled.value && selectedConfigFile.value != null) {
-                Log.d(TAG, "Auto start enabled, starting VPN")
-                prepareAndStartVpn(vpnPrepareLauncher)
-            }
-        }
     }
 
     fun navigateToAppList() {

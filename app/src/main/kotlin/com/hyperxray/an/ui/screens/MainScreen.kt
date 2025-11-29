@@ -67,12 +67,6 @@ fun MainScreen(
         scope.launch(Dispatchers.IO) {
             mainViewModel.extractAssetsIfNeeded()
         }
-        
-        // Check auto start and start VPN if enabled
-        scope.launch {
-            kotlinx.coroutines.delay(1000) // Wait for UI to initialize
-            mainViewModel.checkAndStartAutoVpn(launchers.vpnPrepareLauncher)
-        }
 
         mainViewModel.uiEvent.collectLatest { event ->
             when (event) {
