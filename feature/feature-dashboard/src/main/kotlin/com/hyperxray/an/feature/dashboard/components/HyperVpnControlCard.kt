@@ -105,9 +105,9 @@ fun HyperVpnControlCard(
                                     "Connected"
                                 }
                             }
-                            is HyperVpnStateManager.VpnState.Connecting -> state.message
-                            is HyperVpnStateManager.VpnState.Disconnecting -> "Disconnecting..."
-                            is HyperVpnStateManager.VpnState.Error -> "Error: ${state.message}"
+                            is HyperVpnStateManager.VpnState.Connecting -> state.getMessage()
+                            is HyperVpnStateManager.VpnState.Disconnecting -> state.getMessage()
+                            is HyperVpnStateManager.VpnState.Error -> state.getMessage()
                             is HyperVpnStateManager.VpnState.Disconnected -> "Disconnected"
                         },
                         style = MaterialTheme.typography.bodyMedium,
@@ -273,7 +273,7 @@ fun HyperVpnControlCard(
                                 )
                                 Text(
                                     text = when (state) {
-                                        is HyperVpnStateManager.VpnState.Connecting -> state.message
+                                        is HyperVpnStateManager.VpnState.Connecting -> state.getMessage()
                                         else -> "Connecting..."
                                     },
                                     style = MaterialTheme.typography.labelLarge,

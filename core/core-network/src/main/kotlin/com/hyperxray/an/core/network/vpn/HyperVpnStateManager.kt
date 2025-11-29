@@ -38,27 +38,28 @@ class HyperVpnStateManager(private val context: Context) {
         object Disconnected : VpnState()
         data class Connecting(
             val progress: Float = 0f,
-            val message: String = "Initializing..."
+            val statusMessage: String = "Initializing..."
         ) : VpnState()
         data class Connected(
             val serverName: String = "",
             val serverLocation: String = "",
             val connectedAt: Long = System.currentTimeMillis()
         ) : VpnState()
-        data class Disconnecting(val progress: Float = 0f) : VpnState()
+        data class Disconnecting(val progress: Float = 0f, val statusMessage: String = "Disconnecting...") : VpnState()
         data class Error(
-            val message: String,
+            val errorMessage: String,
             val code: Int = -1,
             val details: String? = null,
             val retryable: Boolean = true
         ) : VpnState()
-        
+
         /**
          * Helper properties
          */
         val isConnected: Boolean get() = this is Connected
         val isConnecting: Boolean get() = this is Connecting
         val isDisconnected: Boolean get() = this is Disconnected
+        val isDisconnecting: Boolean get() = this is Disconnecting
         val isError: Boolean get() = this is Error
         
         /**
@@ -70,6 +71,17 @@ class HyperVpnStateManager(private val context: Context) {
             is Connected -> "Connected"
             is Disconnecting -> "Disconnecting..."
             is Error -> "Error"
+        }
+
+        /**
+         * Get detailed message for UI
+         */
+        fun getMessage(): String = when (this) {
+            is Disconnected -> "VPN is not connected"
+            is Connecting -> statusMessage
+            is Connected -> "Connected to $serverName"
+            is Disconnecting -> statusMessage
+            is Error -> errorMessage
         }
         
         /**
@@ -149,10 +161,13 @@ class HyperVpnStateManager(private val context: Context) {
                         }
                         "connecting" -> {
                             val progress = intent.getFloatExtra("progress", 0f)
-                            val message = intent.getStringExtra("message") ?: "Initializing..."
-                            VpnState.Connecting(progress, message)
+                            val statusMessage = intent.getStringExtra("message") ?: "Initializing..."
+                            VpnState.Connecting(progress, statusMessage)
                         }
-                        "disconnecting" -> VpnState.Disconnecting(intent.getFloatExtra("progress", 0f))
+                        "disconnecting" -> VpnState.Disconnecting(
+                            progress = intent.getFloatExtra("progress", 0f),
+                            statusMessage = intent.getStringExtra("message") ?: "Disconnecting..."
+                        )
                         "error" -> {
                             val errorMsg = intent.getStringExtra(EXTRA_ERROR) ?: "Unknown error"
                             val errorCode = intent.getIntExtra(EXTRA_ERROR_CODE, -1)

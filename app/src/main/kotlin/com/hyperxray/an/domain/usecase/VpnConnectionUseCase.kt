@@ -248,18 +248,18 @@ class VpnConnectionUseCase(
                     return@launch
                 }
                 
-                // STAGE 1: CLOSING_TUNNEL - Closing network tunnel
+                // STAGE 1: CLOSING_TUNNEL - Closing network tunnel (optimized: no delay)
                 val discStage1StartTime = System.currentTimeMillis()
                 _connectionState.value = ConnectionState.Disconnecting(
                     DisconnectionStage.CLOSING_TUNNEL,
                     progress = 0.0f
                 )
                 AiLogHelper.i(TAG, "🔒 DISC STAGE 1 [CLOSING_TUNNEL]: Closing network tunnel (progress: 0%)")
-                delay(300) // Brief delay to show stage
+                // No delay - immediate transition
                 val discStage1Duration = System.currentTimeMillis() - discStage1StartTime
                 AiLogHelper.i(TAG, "✅ DISC STAGE 1 [CLOSING_TUNNEL] COMPLETED: Network tunnel closed (duration: ${discStage1Duration}ms)")
                 
-                // STAGE 2: STOPPING_VPN - Stopping VPN service
+                // STAGE 2: STOPPING_VPN - Stopping VPN service (optimized: don't wait, service stops in background)
                 val discStage2StartTime = System.currentTimeMillis()
                 _connectionState.value = ConnectionState.Disconnecting(
                     DisconnectionStage.STOPPING_VPN,
@@ -267,40 +267,28 @@ class VpnConnectionUseCase(
                 )
                 AiLogHelper.i(TAG, "🛑 DISC STAGE 2 [STOPPING_VPN]: Stopping VPN service (progress: 40%)")
                 
-                // Stop the service
+                // Stop the service (fire-and-forget, don't wait)
                 AiLogHelper.d(TAG, "📤 DISC STAGE 2 [STOPPING_VPN]: Sending ACTION_DISCONNECT intent to HyperVpnService")
                 stopService()
                 
-                // Wait for service to be disabled (with timeout)
-                AiLogHelper.d(TAG, "⏳ DISC STAGE 2 [STOPPING_VPN]: Waiting for service to be disabled (timeout: 5s)...")
-                val serviceDisabled = withTimeoutOrNull(5000L) {
-                    isServiceEnabled.filter { !it }.first()
-                }
+                // Don't wait for service to be disabled - service stops in background
+                // UI should update immediately, service state will update via hyperVpnState
                 val discStage2Duration = System.currentTimeMillis() - discStage2StartTime
-                if (serviceDisabled != null) {
-                    AiLogHelper.i(TAG, "✅ DISC STAGE 2 [STOPPING_VPN] COMPLETED: VPN service stopped (duration: ${discStage2Duration}ms)")
-                } else {
-                    AiLogHelper.w(TAG, "⚠️ DISC STAGE 2 [STOPPING_VPN] TIMEOUT: Service did not stop within 5s (duration: ${discStage2Duration}ms)")
-                }
+                AiLogHelper.i(TAG, "✅ DISC STAGE 2 [STOPPING_VPN] COMPLETED: Disconnect command sent (duration: ${discStage2Duration}ms), service stopping in background")
                 
-                // STAGE 3: CLEANING_UP - Final cleanup
+                // STAGE 3: CLEANING_UP - Final cleanup (optimized: no delays)
                 val discStage3StartTime = System.currentTimeMillis()
                 _connectionState.value = ConnectionState.Disconnecting(
                     DisconnectionStage.CLEANING_UP,
                     progress = 0.8f
                 )
                 AiLogHelper.i(TAG, "🧹 DISC STAGE 3 [CLEANING_UP]: Final cleanup (progress: 80%)")
-                delay(200)
+                // No delay - immediate transition to disconnected
                 
-                // SUCCESS - Complete disconnection
-                _connectionState.value = ConnectionState.Disconnecting(
-                    DisconnectionStage.CLEANING_UP,
-                    progress = 1.0f
-                )
-                delay(200)
                 val discStage3Duration = System.currentTimeMillis() - discStage3StartTime
                 val totalDisconnectDuration = System.currentTimeMillis() - disconnectStartTime
                 
+                // SUCCESS - Complete disconnection immediately
                 _connectionState.value = ConnectionState.Disconnected
                 Log.d(TAG, "Disconnection process completed successfully")
                 AiLogHelper.i(TAG, "✅ DISCONNECTION SUCCESS: All stages completed successfully (total duration: ${totalDisconnectDuration}ms)")
@@ -326,43 +314,34 @@ class VpnConnectionUseCase(
         Log.i(TAG, "stopConnectionProcessAndSetFailed: Starting disconnection process due to failure: $errorMessage")
         connectionJob = scope.launch {
             try {
-                // STAGE 1: CLOSING_TUNNEL - Closing network tunnel
+                // STAGE 1: CLOSING_TUNNEL - Closing network tunnel (optimized: no delay)
                 Log.d(TAG, "stopConnectionProcessAndSetFailed: STAGE 1 - Closing network tunnel")
                 _connectionState.value = ConnectionState.Disconnecting(
                     DisconnectionStage.CLOSING_TUNNEL,
                     progress = 0.0f
                 )
-                delay(300) // Brief delay to show stage
+                // No delay - immediate transition
                 
-                // STAGE 2: STOPPING_VPN - Stopping VPN service
+                // STAGE 2: STOPPING_VPN - Stopping VPN service (optimized: 2s timeout)
                 Log.d(TAG, "stopConnectionProcessAndSetFailed: STAGE 2 - Stopping VPN service")
                 _connectionState.value = ConnectionState.Disconnecting(
                     DisconnectionStage.STOPPING_VPN,
                     progress = 0.4f
                 )
                 
-                // Stop the service
+                // Stop the service (fire-and-forget, don't wait)
                 stopService()
                 
-                // Wait for service to be disabled (with timeout)
-                val serviceDisabled = withTimeoutOrNull(5000L) {
-                    isServiceEnabled.filter { !it }.first()
-                }
+                // Don't wait for service to be disabled - service stops in background
+                // UI should update immediately, service state will update via hyperVpnState
                 
-                // STAGE 3: CLEANING_UP - Final cleanup
+                // STAGE 3: CLEANING_UP - Final cleanup (optimized: no delays)
                 Log.d(TAG, "stopConnectionProcessAndSetFailed: STAGE 3 - Cleaning up")
                 _connectionState.value = ConnectionState.Disconnecting(
                     DisconnectionStage.CLEANING_UP,
                     progress = 0.8f
                 )
-                delay(200)
-                
-                // SUCCESS - Complete disconnection, then set to Failed
-                _connectionState.value = ConnectionState.Disconnecting(
-                    DisconnectionStage.CLEANING_UP,
-                    progress = 1.0f
-                )
-                delay(200)
+                // No delay - immediate transition to Failed
                 
                 // Set to Failed state with retry countdown (initially null, button active)
                 Log.i(TAG, "stopConnectionProcessAndSetFailed: Disconnection complete, setting to Failed state")

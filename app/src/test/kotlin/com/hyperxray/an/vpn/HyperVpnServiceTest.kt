@@ -4,11 +4,12 @@ import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import androidx.test.core.app.ApplicationProvider
+import com.hyperxray.an.core.network.vpn.HyperVpnStateManager
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
-import org.junit.Assert.*
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
 import org.mockito.kotlin.*
@@ -121,14 +122,15 @@ class HyperVpnServiceTest {
     }
     
     @Test
-    fun `test clearError resets error state`() = runTest {
+    fun `test clearError resets error state`() {
         // Simulate error state (would normally come from broadcast)
         // Since we can't easily mock broadcasts, we test the clearError function
         stateManager.clearError()
-        
-        val error = stateManager.error.first()
+
+        val error = stateManager.error.value
         assertNull("Error should be null after clearing", error)
     }
+
 }
 
 

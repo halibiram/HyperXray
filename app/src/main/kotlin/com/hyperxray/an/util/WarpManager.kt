@@ -19,16 +19,18 @@ import org.json.JSONObject
 /**
  * WarpManager generates WireGuard configuration from Cloudflare WARP API.
  * This allows users to use free Cloudflare WARP as their WireGuard tunnel.
- * 
+ *
  * This is a critical component for the WireGuard over Xray architecture.
- * 
+ *
+ * Thread-safe singleton pattern to prevent multiple client instances.
+ *
  * Usage:
  * ```kotlin
- * val warpManager = WarpManager()
+ * val warpManager = WarpManager.getInstance()
  * val result = warpManager.registerAndGetConfig()
  * ```
  */
-class WarpManager {
+class WarpManager private constructor() {
     
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -48,6 +50,21 @@ class WarpManager {
         private const val WARP_PORT = 2408
         private const val WARP_PUBLIC_KEY = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
         private const val WARP_MTU = 1280
+
+        @Volatile
+        private var INSTANCE: WarpManager? = null
+
+        /**
+         * Get singleton instance of WarpManager.
+         * Thread-safe lazy initialization using double-checked locking pattern.
+         *
+         * @return Singleton instance of WarpManager
+         */
+        fun getInstance(): WarpManager {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: WarpManager().also { INSTANCE = it }
+            }
+        }
     }
     
     // Data Classes for API

@@ -22,16 +22,39 @@ object HyperVpnHelper {
      */
     fun startVpnWithWarp(context: Context) {
         try {
+            AiLogHelper.i(TAG, "🔐 Checking VPN permission...")
+
             // Check VPN permission first
             val prepareIntent = android.net.VpnService.prepare(context)
+            AiLogHelper.d(TAG, "🔍 VpnService.prepare() returned: ${if (prepareIntent != null) "Intent (permission needed)" else "null (permission granted)"}")
+
             if (prepareIntent != null) {
                 // VPN permission not granted, user needs to approve
+                AiLogHelper.w(TAG, "⚠️ VPN permission not granted, showing permission dialog")
+
+                // Add flags to make sure the intent works
                 prepareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(prepareIntent)
-                AiLogHelper.w(TAG, "VPN permission not granted, showing permission dialog")
+                prepareIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+
+                try {
+                    context.startActivity(prepareIntent)
+                    AiLogHelper.i(TAG, "✅ Permission dialog intent started successfully")
+                } catch (e: Exception) {
+                    AiLogHelper.e(TAG, "❌ Failed to start permission dialog: ${e.message}", e)
+                    // Fallback: try with application context if activity context fails
+                    try {
+                        val appContext = context.applicationContext ?: context
+                        appContext.startActivity(prepareIntent)
+                        AiLogHelper.i(TAG, "✅ Permission dialog started with application context")
+                    } catch (e2: Exception) {
+                        AiLogHelper.e(TAG, "❌ Failed to start permission dialog with app context: ${e2.message}", e2)
+                    }
+                }
                 return
             }
-            
+
+            AiLogHelper.i(TAG, "✅ VPN permission already granted, starting service...")
+
             val intent = Intent(context, HyperVpnService::class.java).apply {
                 action = HyperVpnService.ACTION_START
             }
@@ -68,7 +91,8 @@ object HyperVpnHelper {
     }
     
     /**
-     * Stop HyperVpnService.
+     * Stop HyperVpnService with robust disconnection sequence.
+     * This will trigger the new atomic shutdown process in HyperVpnService.
      */
     fun stopVpn(context: Context) {
         try {
@@ -76,9 +100,9 @@ object HyperVpnHelper {
                 action = HyperVpnService.ACTION_STOP
             }
             context.startService(intent)
-            AiLogHelper.d(TAG, "Stopped HyperVpnService")
+            AiLogHelper.d(TAG, "Initiated robust VPN disconnection sequence")
         } catch (e: Exception) {
-            AiLogHelper.e(TAG, "Failed to stop HyperVpnService: ${e.message}", e)
+            AiLogHelper.e(TAG, "Failed to initiate VPN disconnection: ${e.message}", e)
         }
     }
 }

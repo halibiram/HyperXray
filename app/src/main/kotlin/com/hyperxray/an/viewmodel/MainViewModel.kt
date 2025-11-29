@@ -38,6 +38,7 @@ import com.hyperxray.an.telemetry.TelemetryStore
 import com.hyperxray.an.telemetry.AggregatedTelemetry
 import com.hyperxray.an.vpn.HyperVpnHelper
 import com.hyperxray.an.core.network.vpn.HyperVpnStateManager
+import com.hyperxray.an.common.AiLogHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -232,7 +233,7 @@ class MainViewModel(
                     progress = vpnState.progress
                 )
                 is HyperVpnStateManager.VpnState.Error -> com.hyperxray.an.feature.dashboard.ConnectionState.Failed(
-                    error = vpnState.message,
+                    error = vpnState.getMessage(),
                     retryCountdownSeconds = if (vpnState.retryable) null else null
                 )
                 is HyperVpnStateManager.VpnState.Disconnected -> com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
@@ -242,6 +243,24 @@ class MainViewModel(
             started = kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000),
             initialValue = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
         )
+        
+        // Optimize: Update isServiceEnabled immediately when hyperVpnState changes
+        // This ensures VpnConnectionUseCase disconnect doesn't wait for ServiceEvent.Stopped
+        viewModelScope.launch {
+            hyperVpnState.collect { vpnState ->
+                val shouldBeEnabled = when (vpnState) {
+                    is HyperVpnStateManager.VpnState.Connected,
+                    is HyperVpnStateManager.VpnState.Connecting -> true
+                    is HyperVpnStateManager.VpnState.Disconnected,
+                    is HyperVpnStateManager.VpnState.Disconnecting,
+                    is HyperVpnStateManager.VpnState.Error -> false
+                }
+                if (_isServiceEnabled.value != shouldBeEnabled) {
+                    _isServiceEnabled.value = shouldBeEnabled
+                    AiLogHelper.d(TAG, "isServiceEnabled updated to $shouldBeEnabled based on hyperVpnState: ${vpnState.javaClass.simpleName}")
+                }
+            }
+        }
         
         // Start observing service events
         serviceEventObserver.startObserving(application)

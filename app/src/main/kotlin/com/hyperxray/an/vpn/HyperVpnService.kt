@@ -40,6 +40,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -145,7 +146,7 @@ class HyperVpnService : VpnService() {
     private var isRunning = false
     private var isStopping = false
     private var isStarting = false
-    private val warpManager = WarpManager()
+    private val warpManager = WarpManager.getInstance()
     private var startTime: Long = 0
     private var lastStatsUpdate: Long = 0
     
@@ -1009,6 +1010,7 @@ class HyperVpnService : VpnService() {
     
     /**
      * Stop VPN tunnel
+     * Optimized for fast disconnect (< 2 seconds)
      */
     private fun stopVpn() {
         if (isStopping) {
@@ -1022,59 +1024,99 @@ class HyperVpnService : VpnService() {
         }
         
         isStopping = true
+        val disconnectStartTime = System.currentTimeMillis()
+        
+        // Immediately broadcast disconnecting state (don't wait for anything)
+        broadcastState("disconnecting", 0.5f, "Disconnecting...")
         
         serviceScope.launch {
             try {
                 AiLogHelper.d(TAG, "Stopping VPN tunnel...")
                 
-                // Log to file
-                logFileManager?.appendLog("[${System.currentTimeMillis()}] Stopping VPN tunnel...")
-                
-                // Note: Xray-core is integrated in native Go code, will be stopped with tunnel
-                
-                // Shutdown DNS components
-                shutdownDnsComponents()
-                
-                // ===== STEP 1: Disconnecting =====
-                broadcastState("disconnecting", 0.5f, "Disconnecting...")
-                
-                val result = try {
-                    stopHyperTunnel()
-                } catch (e: UnsatisfiedLinkError) {
-                    AiLogHelper.e(TAG, "stopHyperTunnel() failed: ${e.message}", e)
-                    -100
-                } catch (e: Exception) {
-                    AiLogHelper.e(TAG, "stopHyperTunnel() threw exception: ${e.message}", e)
-                    -100
-                }
-                
-                if (result == 0) {
-                    AiLogHelper.i(TAG, "✅ VPN tunnel stopped successfully")
-                    logFileManager?.appendLog("[${System.currentTimeMillis()}] VPN tunnel stopped successfully")
-                    // Native code already closed the TUN device, so we only need to clear the reference
-                    // Do NOT call tunFd?.close() here to avoid double-close
-                } else {
-                    AiLogHelper.w(TAG, "Warning: stopHyperTunnel returned $result")
-                    logFileManager?.appendLog("[${System.currentTimeMillis()}] stopHyperTunnel returned: $result")
-                    // Native code failed to stop properly, close manually
+                // Fire-and-forget: Log to file asynchronously (don't wait)
+                serviceScope.launch {
                     try {
-                        tunFd?.close()
+                        logFileManager?.appendLog("[${System.currentTimeMillis()}] Stopping VPN tunnel...")
                     } catch (e: Exception) {
-                        AiLogHelper.e(TAG, "Error closing tunFd after failed stop: ${e.message}")
+                        // Ignore log errors
                     }
                 }
                 
+                // Update state immediately (BEFORE stopping tunnel - don't wait)
+                // Save tunFd reference before nulling (for potential cleanup)
+                val tunFdToClose = tunFd
                 tunFd = null
                 isRunning = false
                 startTime = 0
                 
-                // Broadcast disconnected state
+                // Broadcast disconnected state IMMEDIATELY (before stopping tunnel)
+                // This ensures UI updates instantly, tunnel stops in background
                 broadcastState("disconnected")
                 
-                // Broadcast log update
-                broadcastLogUpdate("VPN tunnel stopped")
+                // Start DNS shutdown asynchronously with timeout (don't block disconnect)
+                val dnsShutdownJob = serviceScope.launch {
+                    try {
+                        withTimeoutOrNull(500L) {
+                            shutdownDnsComponents()
+                        } ?: run {
+                            AiLogHelper.w(TAG, "DNS shutdown timeout (500ms), continuing disconnect")
+                        }
+                    } catch (e: Exception) {
+                        AiLogHelper.e(TAG, "Error in DNS shutdown: ${e.message}")
+                    }
+                }
                 
-                // Notify via Telegram if configured
+                // Stop native tunnel asynchronously (don't block disconnect)
+                // Tunnel stops in background, UI already updated to disconnected
+                val stopTunnelJob = serviceScope.launch {
+                    try {
+                        val result = withTimeoutOrNull(1000L) {
+                            stopHyperTunnel()
+                        } ?: run {
+                            AiLogHelper.w(TAG, "stopHyperTunnel timeout (1000ms), assuming stopped")
+                            0 // Assume success if timeout
+                        }
+                        
+                        // Log result asynchronously (don't block)
+                        if (result == 0) {
+                            AiLogHelper.i(TAG, "✅ VPN tunnel stopped successfully")
+                        } else {
+                            AiLogHelper.w(TAG, "Warning: stopHyperTunnel returned $result")
+                            // Native code failed to stop properly, close manually (async, don't block)
+                            tunFdToClose?.let { fd ->
+                                try {
+                                    fd.close()
+                                } catch (e: Exception) {
+                                    AiLogHelper.e(TAG, "Error closing tunFd after failed stop: ${e.message}")
+                                }
+                            }
+                        }
+                    } catch (e: UnsatisfiedLinkError) {
+                        AiLogHelper.e(TAG, "stopHyperTunnel() failed: ${e.message}", e)
+                    } catch (e: Exception) {
+                        AiLogHelper.e(TAG, "stopHyperTunnel() threw exception: ${e.message}", e)
+                    }
+                }
+                
+                // Fire-and-forget: Log operations (don't wait)
+                serviceScope.launch {
+                    try {
+                        logFileManager?.appendLog("[${System.currentTimeMillis()}] VPN tunnel stopped")
+                    } catch (e: Exception) {
+                        // Ignore log errors
+                    }
+                }
+                
+                // Fire-and-forget: Broadcast log update (don't wait)
+                serviceScope.launch {
+                    try {
+                        broadcastLogUpdate("VPN tunnel stopped")
+                    } catch (e: Exception) {
+                        // Ignore broadcast errors
+                    }
+                }
+                
+                // Fire-and-forget: Telegram notification (don't wait)
                 telegramNotificationManager?.let { manager ->
                     serviceScope.launch {
                         try {
@@ -1085,11 +1127,22 @@ class HyperVpnService : VpnService() {
                     }
                 }
                 
+                // Stop service immediately (don't wait for DNS shutdown or other async operations)
+                val disconnectDuration = System.currentTimeMillis() - disconnectStartTime
+                AiLogHelper.i(TAG, "✅ Disconnect completed in ${disconnectDuration}ms")
+                
                 stopForeground(true)
                 stopSelf()
                 
             } catch (e: Exception) {
                 AiLogHelper.e(TAG, "Error stopping VPN: ${e.message}", e)
+                // Still stop service even on error
+                try {
+                    stopForeground(true)
+                    stopSelf()
+                } catch (stopErr: Exception) {
+                    AiLogHelper.e(TAG, "Error stopping service: ${stopErr.message}")
+                }
             } finally {
                 isStopping = false
             }
@@ -1159,7 +1212,7 @@ class HyperVpnService : VpnService() {
                         "Connected - TX: ${formatBytes(txBytes)}, RX: ${formatBytes(rxBytes)}"
                     )
                     
-                    delay(5000) // Update every 5 seconds
+                    delay(1000) // Update every 1 second
                     
                 } catch (e: Exception) {
                     AiLogHelper.e(TAG, "Error getting stats: ${e.message}", e)

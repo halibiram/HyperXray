@@ -119,32 +119,66 @@ class HyperVpnSessionState {
     }
     
     /**
-     * Cleanup all resources.
+     * Cleanup all resources with proper error handling.
+     * This method ensures all resources are cleaned up even if individual cleanups fail.
      */
     fun cleanup() {
-        heartbeatJob?.cancel()
-        heartbeatJob = null
-        
-        statsMonitoringJob?.cancel()
-        statsMonitoringJob = null
-        
-        
-        telegramNotificationManager = null
-        
         try {
-            wakeLock?.let {
-                if (it.isHeld) {
-                    it.release()
+            // Cancel heartbeat job
+            try {
+                heartbeatJob?.cancel()
+            } catch (e: Exception) {
+                // Ignore cancellation errors
+            } finally {
+                heartbeatJob = null
+            }
+
+            // Cancel stats monitoring job
+            try {
+                statsMonitoringJob?.cancel()
+            } catch (e: Exception) {
+                // Ignore cancellation errors
+            } finally {
+                statsMonitoringJob = null
+            }
+
+            // Cleanup telegram notification manager
+            telegramNotificationManager = null
+
+            // Release wake lock
+            try {
+                wakeLock?.let {
+                    if (it.isHeld) {
+                        it.release()
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore wake lock release errors
+            } finally {
+                wakeLock = null
+            }
+
+            // Close TUN file descriptor
+            synchronized(tunFdLock) {
+                try {
+                    tunFd?.close()
+                } catch (e: Exception) {
+                    // TUN fd might already be closed by native code
+                } finally {
+                    tunFd = null
                 }
             }
-            wakeLock = null
+
+            // Reset state flags
+            isRunning = false
+            isStopping = false
+            isStarting = false
+            startTime = 0L
+            lastStatsUpdate = 0L
+
         } catch (e: Exception) {
-            // Ignore release errors
-        }
-        
-        synchronized(tunFdLock) {
-            tunFd?.close()
-            tunFd = null
+            // Log any unexpected errors during cleanup
+            // We don't rethrow to ensure cleanup completes
         }
     }
 }

@@ -113,9 +113,9 @@ fun DashboardScreen(
                 viewModel.updateTelemetryStats()
                 viewModel.updateDnsCacheStats()
                 
-                // Fixed interval: 2000ms (2 seconds) for battery efficiency
+                // Fixed interval: 1000ms (1 second)
                 // Core stats are updated by XrayStatsManager at its own interval
-                delay(2000L)
+                delay(1000L)
             }
         }
     }
