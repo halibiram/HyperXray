@@ -67,6 +67,7 @@ import (
 
 	"github.com/hyperxray/native/bridge"
 	"github.com/hyperxray/native/dns"
+	"github.com/hyperxray/native/xray"
 )
 
 var (
@@ -74,6 +75,9 @@ var (
 	tunnelLock sync.Mutex
 	lastError  string
 	
+	// Multi-instance manager
+	multiManager     *xray.MultiInstanceManager
+	multiManagerLock sync.Mutex
 )
 
 // Error codes
@@ -543,6 +547,186 @@ func SetSocketProtector(protector C.socket_protector_func) {
 // Multi-Instance Management Functions
 // ============================================================================
 
+//export InitMultiInstanceManager
+func InitMultiInstanceManager(nativeLibDir, filesDir *C.char, maxInstances C.int) C.int {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in InitMultiInstanceManager: %v\n%s", r, debug.Stack())
+		}
+	}()
+
+	multiManagerLock.Lock()
+	defer multiManagerLock.Unlock()
+
+	nativeDir := C.GoString(nativeLibDir)
+	files := C.GoString(filesDir)
+	max := int(maxInstances)
+
+	logInfo("InitMultiInstanceManager: nativeLibDir=%s, filesDir=%s, maxInstances=%d", nativeDir, files, max)
+
+	multiManager = xray.NewMultiInstanceManager(nativeDir, files, max)
+	
+	logInfo("MultiInstanceManager initialized successfully")
+	return ErrorSuccess
+}
+
+//export StartMultiInstances
+func StartMultiInstances(count C.int, configJSON *C.char, excludedPortsJSON *C.char) *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in StartMultiInstances: %v\n%s", r, debug.Stack())
+		}
+	}()
+
+	multiManagerLock.Lock()
+	defer multiManagerLock.Unlock()
+
+	if multiManager == nil {
+		logError("MultiInstanceManager not initialized")
+		return C.CString(`{"error":"manager not initialized"}`)
+	}
+
+	config := C.GoString(configJSON)
+	excludedStr := C.GoString(excludedPortsJSON)
+	
+	var excludedPorts []int
+	if excludedStr != "" {
+		json.Unmarshal([]byte(excludedStr), &excludedPorts)
+	}
+
+	logInfo("StartMultiInstances: count=%d, configLen=%d, excludedPorts=%v", count, len(config), excludedPorts)
+
+	result, err := multiManager.StartInstances(int(count), config, excludedPorts)
+	if err != nil {
+		logError("StartMultiInstances failed: %v", err)
+		errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
+		return C.CString(string(errJSON))
+	}
+
+	logInfo("StartMultiInstances successful: %v", result)
+	resultJSON, _ := json.Marshal(map[string]interface{}{
+		"success":   true,
+		"instances": result,
+	})
+	return C.CString(string(resultJSON))
+}
+
+//export StopMultiInstance
+func StopMultiInstance(index C.int) C.int {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in StopMultiInstance: %v\n%s", r, debug.Stack())
+		}
+	}()
+
+	multiManagerLock.Lock()
+	defer multiManagerLock.Unlock()
+
+	if multiManager == nil {
+		logError("MultiInstanceManager not initialized")
+		return ErrorTunnelNotRunning
+	}
+
+	err := multiManager.StopInstance(int(index))
+	if err != nil {
+		logError("StopMultiInstance failed: %v", err)
+		return ErrorTunnelNotRunning
+	}
+
+	logInfo("StopMultiInstance %d successful", index)
+	return ErrorSuccess
+}
+
+//export StopAllMultiInstances
+func StopAllMultiInstances() C.int {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in StopAllMultiInstances: %v\n%s", r, debug.Stack())
+		}
+	}()
+
+	multiManagerLock.Lock()
+	defer multiManagerLock.Unlock()
+
+	if multiManager == nil {
+		logError("MultiInstanceManager not initialized")
+		return ErrorTunnelNotRunning
+	}
+
+	multiManager.StopAllInstances()
+	logInfo("StopAllMultiInstances successful")
+	return ErrorSuccess
+}
+
+//export GetMultiInstanceStatus
+func GetMultiInstanceStatus(index C.int) *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in GetMultiInstanceStatus: %v", r)
+		}
+	}()
+
+	multiManagerLock.Lock()
+	defer multiManagerLock.Unlock()
+
+	if multiManager == nil {
+		return C.CString(`{"error":"manager not initialized"}`)
+	}
+
+	info, err := multiManager.GetInstanceStatus(int(index))
+	if err != nil {
+		errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
+		return C.CString(string(errJSON))
+	}
+
+	infoJSON, _ := json.Marshal(info)
+	return C.CString(string(infoJSON))
+}
+
+//export GetAllMultiInstancesStatus
+func GetAllMultiInstancesStatus() *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in GetAllMultiInstancesStatus: %v", r)
+		}
+	}()
+
+	multiManagerLock.Lock()
+	defer multiManagerLock.Unlock()
+
+	if multiManager == nil {
+		return C.CString(`{"error":"manager not initialized"}`)
+	}
+
+	return C.CString(multiManager.GetAllInstancesStatusJSON())
+}
+
+//export GetMultiInstanceCount
+func GetMultiInstanceCount() C.int {
+	multiManagerLock.Lock()
+	defer multiManagerLock.Unlock()
+
+	if multiManager == nil {
+		return 0
+	}
+
+	return C.int(multiManager.GetInstanceCount())
+}
+
+//export IsMultiInstanceRunning
+func IsMultiInstanceRunning() C.int {
+	multiManagerLock.Lock()
+	defer multiManagerLock.Unlock()
+
+	if multiManager == nil {
+		return 0
+	}
+
+	if multiManager.IsRunning() {
+		return 1
+	}
+	return 0
+}
 
 // ============================================================================
 // DNS Cache Management Functions

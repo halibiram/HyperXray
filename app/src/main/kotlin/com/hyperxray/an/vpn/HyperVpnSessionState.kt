@@ -17,7 +17,7 @@ import kotlin.concurrent.Volatile
  * Separates data (state) from logic (service operations).
  * 
  * Note: This is a simplified version for the native Go-based HyperVpnService.
- * SOCKS5 and SystemDnsCacheServer are NOT included
+ * SOCKS5, MultiInstanceXrayRunner, and SystemDnsCacheServer are NOT included
  * as they are not compatible with the native Go architecture.
  */
 class HyperVpnSessionState {

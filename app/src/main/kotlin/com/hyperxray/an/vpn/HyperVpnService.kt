@@ -200,6 +200,31 @@ class HyperVpnService : VpnService() {
      */
     private external fun loadGoLibraryWithPath(path: String): Boolean
     
+    // Multi-instance native function declarations
+    private external fun initMultiInstanceManager(
+        nativeLibDir: String,
+        filesDir: String,
+        maxInstances: Int
+    ): Int
+    
+    private external fun startMultiInstances(
+        count: Int,
+        configJSON: String,
+        excludedPortsJSON: String
+    ): String
+    
+    private external fun stopMultiInstance(index: Int): Int
+    
+    private external fun stopAllMultiInstances(): Int
+    
+    private external fun getMultiInstanceStatus(index: Int): String
+    
+    private external fun getAllMultiInstancesStatus(): String
+    
+    private external fun getMultiInstanceCount(): Int
+    
+    private external fun isMultiInstanceRunning(): Boolean
+    
     // DNS native function declarations
     private external fun initDNSCache(cacheDir: String): Int
     private external fun dnsCacheLookup(hostname: String): String
@@ -1838,18 +1863,9 @@ class HyperVpnService : VpnService() {
      */
     private fun getDefaultXrayConfig(): String {
         return JSONObject().apply {
-            // SOCKS5 inbound for WireGuard over Xray-core UDP handler
-            put("inbounds", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("port", 10808)
-                    put("listen", "127.0.0.1")
-                    put("protocol", "socks")
-                    put("settings", JSONObject().apply {
-                        put("udp", true)
-                    })
-                })
-            })
-
+            // Empty inbounds array (not needed for WireGuard over Xray-core)
+            put("inbounds", JSONArray())
+            
             // Minimal "direct" outbound for fallback (when WARP is used without VLESS profile)
             put("outbounds", JSONArray().apply {
                 put(JSONObject().apply {

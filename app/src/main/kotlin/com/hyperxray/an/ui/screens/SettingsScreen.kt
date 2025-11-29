@@ -392,6 +392,22 @@ fun SettingsScreen(
                 modifier = Modifier.padding(horizontal = 16.dp),
                 color = MaterialTheme.colorScheme.outlineVariant
             )
+
+            ListItem(
+                headlineContent = { Text(stringResource(R.string.auto_start_title)) },
+                supportingContent = { Text(stringResource(R.string.auto_start_summary)) },
+                trailingContent = {
+                    Switch(
+                        checked = settingsState.switches.autoStart,
+                        onCheckedChange = {
+                            mainViewModel.setAutoStart(it)
+                        }
+                    )
+                },
+                colors = ListItemDefaults.colors(
+                    containerColor = Color.Transparent
+                )
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -441,6 +457,18 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.outlineVariant
             )
 
+            EditableListItemInCard(
+                headline = stringResource(R.string.socks_port),
+                currentValue = settingsState.socksPort.value,
+                onValueConfirmed = { newValue -> mainViewModel.updateSocksPort(newValue) },
+                label = stringResource(R.string.socks_port),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                isError = !settingsState.socksPort.isValid,
+                errorMessage = settingsState.socksPort.error,
+                enabled = !vpnDisabled,
+                sheetState = sheetState,
+                scope = scope
+            )
 
             HorizontalDivider(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -569,6 +597,77 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // Xray Core Performance Settings Card
+        SettingsCategoryCard(title = stringResource(R.string.xray_core_instances_title)) {
+            ListItem(
+                headlineContent = { 
+                    Text(
+                        stringResource(R.string.xray_core_instances_title),
+                        color = Color.White
+                    ) 
+                },
+                supportingContent = { 
+                    Column {
+                        Text(
+                            stringResource(R.string.xray_core_instances_summary),
+                            color = Color(0xFFB0B0B0)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            stringResource(R.string.xray_core_instances_warning),
+                            color = Color(0xFFFFA726),
+                            fontSize = 12.sp
+                        )
+                    }
+                },
+                colors = ListItemDefaults.colors(
+                    containerColor = Color.Transparent
+                )
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // Segmented button for instance count selection
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                (1..4).forEach { count ->
+                    val isSelected = settingsState.xrayCoreInstanceCount == count
+                    TextButton(
+                        onClick = {
+                            mainViewModel.setXrayCoreInstanceCount(count)
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                        colors = ButtonDefaults.textButtonColors(
+                            containerColor = if (isSelected) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant
+                            },
+                            contentColor = if (isSelected) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = count.toString(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 

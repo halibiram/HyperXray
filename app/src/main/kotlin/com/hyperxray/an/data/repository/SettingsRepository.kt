@@ -40,6 +40,7 @@ class SettingsRepository(
      */
     private fun createInitialSettingsState(): SettingsState {
         return SettingsState(
+            socksPort = InputFieldState(prefs.socksPort.toString()),
             dnsIpv4 = InputFieldState(prefs.dnsIpv4),
             dnsIpv6 = InputFieldState(prefs.dnsIpv6),
             switches = SwitchStates(
@@ -48,7 +49,8 @@ class SettingsRepository(
                 httpProxyEnabled = prefs.httpProxyEnabled,
                 bypassLanEnabled = prefs.bypassLan,
                 disableVpn = prefs.disableVpn,
-                themeMode = prefs.theme
+                themeMode = prefs.theme,
+                autoStart = prefs.autoStart
             ),
             info = InfoStates(
                 appVersion = BuildConfig.VERSION_NAME,
@@ -91,12 +93,45 @@ class SettingsRepository(
             ),
             bypassDomains = prefs.bypassDomains,
             bypassIps = prefs.bypassIps,
+            xrayCoreInstanceCount = prefs.xrayCoreInstanceCount
         )
     }
 
     /**
      * Update SOCKS port setting.
      */
+    fun updateSocksPort(portString: String): Boolean {
+        return try {
+            val port = portString.toInt()
+            if (port in 1025..65535) {
+                prefs.socksPort = port
+                _settingsState.update { it.copy(socksPort = InputFieldState(portString)) }
+                true
+            } else {
+                _settingsState.update {
+                    it.copy(
+                        socksPort = InputFieldState(
+                            value = portString,
+                            error = application.getString(com.hyperxray.an.R.string.invalid_port_range),
+                            isValid = false
+                        )
+                    )
+                }
+                false
+            }
+        } catch (e: NumberFormatException) {
+            _settingsState.update {
+                it.copy(
+                    socksPort = InputFieldState(
+                        value = portString,
+                        error = application.getString(com.hyperxray.an.R.string.invalid_port),
+                        isValid = false
+                    )
+                )
+            }
+            false
+        }
+    }
 
     /**
      * Update DNS IPv4 setting.
@@ -207,6 +242,13 @@ class SettingsRepository(
     /**
      * Set auto start enabled.
      */
+    fun setAutoStart(enabled: Boolean) {
+        prefs.autoStart = enabled
+        _settingsState.update {
+            it.copy(switches = it.switches.copy(autoStart = enabled))
+        }
+    }
+
     /**
      * Update connectivity test target.
      */
@@ -805,6 +847,13 @@ class SettingsRepository(
     /**
      * Set Xray core instance count.
      */
+    fun setXrayCoreInstanceCount(count: Int) {
+        prefs.xrayCoreInstanceCount = count
+        _settingsState.update {
+            it.copy(xrayCoreInstanceCount = count)
+        }
+    }
+
     /**
      * Set bypass domains.
      */

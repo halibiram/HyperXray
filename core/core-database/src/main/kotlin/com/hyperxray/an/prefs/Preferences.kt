@@ -100,6 +100,27 @@ class Preferences(context: Context) {
         }
     }
 
+    val socksAddress: String
+        get() = getPrefData(SOCKS_ADDR).first ?: "127.0.0.1"
+
+    var socksPort: Int
+        get() {
+            val value = getPrefData(SOCKS_PORT).first
+            val port = value?.toIntOrNull()
+            if (value != null && port == null) {
+                Log.e(TAG, "Failed to parse SocksPort as Integer: $value")
+            }
+            return port ?: 10808
+        }
+        set(port) {
+            setValueInProvider(SOCKS_PORT, port.toString())
+        }
+
+    val socksUsername: String
+        get() = getPrefData(SOCKS_USER).first ?: ""
+
+    val socksPassword: String
+        get() = getPrefData(SOCKS_PASS).first ?: ""
 
     var dnsIpv4: String
         get() = getPrefData(DNS_IPV4).first ?: "8.8.8.8"
@@ -498,6 +519,30 @@ class Preferences(context: Context) {
             setValueInProvider(BYPASS_IPS, jsonList)
         }
 
+    var xrayCoreInstanceCount: Int
+        get() {
+            val value = getPrefData(XRAY_CORE_INSTANCE_COUNT).first
+            val count = value?.toIntOrNull()
+            // Return value from preferences, or default to 1 if not set or invalid
+            val result = when {
+                count == null -> 1
+                count < 1 -> 1
+                count > 4 -> 4
+                else -> count
+            }
+            Log.d(TAG, "xrayCoreInstanceCount get() returning: $result (from prefs: $value, parsed: $count)")
+            return result
+        }
+        set(count) {
+            // Clamp value between 1 and 4
+            val clampedCount = when {
+                count < 1 -> 1
+                count > 4 -> 4
+                else -> count
+            }
+            Log.d(TAG, "xrayCoreInstanceCount set() called with: $count, clamping to: $clampedCount")
+            setValueInProvider(XRAY_CORE_INSTANCE_COUNT, clampedCount.toString())
+        }
 
     // Telegram notification preferences
     var telegramEnabled: Boolean
@@ -537,6 +582,10 @@ class Preferences(context: Context) {
         }
 
     companion object {
+        const val SOCKS_ADDR: String = "SocksAddr"
+        const val SOCKS_PORT: String = "SocksPort"
+        const val SOCKS_USER: String = "SocksUser"
+        const val SOCKS_PASS: String = "SocksPass"
         const val DNS_IPV4: String = "DnsIpv4"
         const val DNS_IPV6: String = "DnsIpv6"
         const val IPV4: String = "Ipv4"
@@ -595,7 +644,9 @@ class Preferences(context: Context) {
         const val EXTREME_PROXY_OPTIMIZATION: String = "ExtremeProxyOptimization"
         const val BYPASS_DOMAINS: String = "BypassDomains"
         const val BYPASS_IPS: String = "BypassIps"
-
+        const val XRAY_CORE_INSTANCE_COUNT: String = "XrayCoreInstanceCount"
+        const val AUTO_START: String = "AutoStart"
+        
         // Sticky routing keys
         const val STICKY_ROUTING_ENABLED: String = "StickyRoutingEnabled"
         const val STICKY_ROUTING_CACHE_SIZE: String = "StickyRoutingCacheSize"
@@ -603,7 +654,13 @@ class Preferences(context: Context) {
         
         private const val TAG = "Preferences"
     }
-
+    
+    var autoStart: Boolean
+        get() = getBooleanPref(AUTO_START, true)
+        set(enable) {
+            setValueInProvider(AUTO_START, enable)
+        }
+    
     // Sticky routing preferences
     var stickyRoutingEnabled: Boolean
         get() = getBooleanPref(STICKY_ROUTING_ENABLED, true)

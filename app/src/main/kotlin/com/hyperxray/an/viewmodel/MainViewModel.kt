@@ -601,6 +601,10 @@ class MainViewModel(
         reloadView?.invoke()
     }
 
+    fun setAutoStart(enabled: Boolean) {
+        settingsRepository.setAutoStart(enabled)
+    }
+
     fun setConnectionStateDisconnecting() {
         // Connection state is now managed by VpnConnectionUseCase
         // This method is kept for backward compatibility but does nothing
@@ -614,6 +618,9 @@ class MainViewModel(
         }
     }
 
+    fun setXrayCoreInstanceCount(count: Int) {
+        settingsRepository.setXrayCoreInstanceCount(count)
+    }
 
     // Performance Settings Functions - delegated to SettingsRepository
     fun setAggressiveSpeedOptimizations(enabled: Boolean) {
@@ -841,6 +848,15 @@ class MainViewModel(
         vpnConnectionUseCase.disconnect()
     }
 
+    fun checkAndStartAutoVpn(vpnPrepareLauncher: ActivityResultLauncher<Intent>) {
+        viewModelScope.launch {
+            if (prefs.autoStart && !_isServiceEnabled.value && selectedConfigFile.value != null) {
+                Log.d(TAG, "Auto start enabled, starting VPN")
+                prepareAndStartVpn(vpnPrepareLauncher)
+            }
+        }
+    }
+
     fun navigateToAppList() {
         viewModelScope.launch {
             appListViewModel = AppListViewModel(application)
@@ -880,6 +896,8 @@ class MainViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val config = ConnectivityTestConfig(
                 targetUrl = prefs.connectivityTestTarget,
+                proxyAddress = prefs.socksAddress,
+                proxyPort = prefs.socksPort,
                 timeoutMs = prefs.connectivityTestTimeout
             )
             
@@ -967,7 +985,8 @@ class MainViewModel(
             val result = configRepository.downloadRuleFile(
                 url = url,
                 fileName = fileName,
-                isServiceEnabled = _isServiceEnabled.value
+                isServiceEnabled = _isServiceEnabled.value,
+                socksPort = prefs.socksPort
             )
             
             result.fold(

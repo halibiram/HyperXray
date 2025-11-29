@@ -14,7 +14,8 @@ data class SwitchStates(
     val httpProxyEnabled: Boolean,
     val bypassLanEnabled: Boolean,
     val disableVpn: Boolean,
-    val themeMode: ThemeMode
+    val themeMode: ThemeMode,
+    val autoStart: Boolean
 )
 
 data class InfoStates(
@@ -60,6 +61,7 @@ data class PerformanceSettings(
 )
 
 data class SettingsState(
+    val socksPort: InputFieldState,
     val dnsIpv4: InputFieldState,
     val dnsIpv6: InputFieldState,
     val switches: SwitchStates,
@@ -70,4 +72,5 @@ data class SettingsState(
     val performance: PerformanceSettings,
     val bypassDomains: List<String> = emptyList(),
     val bypassIps: List<String> = emptyList(),
+    val xrayCoreInstanceCount: Int = 1
 ) 

@@ -137,5 +137,10 @@
     <string name="theme_dark">Dark</string>
     <string name="auto">Auto</string>
     <string name="vpn_disconnected">VPN Disconnected</string>
+    <string name="xray_core_instances_title">Xray Core Instances</string>
+    <string name="xray_core_instances_summary">Eş zamanlı çalışacak xray-core instance sayısı</string>
+    <string name="xray_core_instances_warning">Daha fazla instance daha fazla CPU ve RAM kullanır</string>
+    <string name="auto_start_title">Auto Start</string>
+    <string name="auto_start_summary">Automatically start VPN connection when app opens</string>
     <string name="verification_failed">Connection verification failed</string>
 </resources>
