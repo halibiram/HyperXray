@@ -117,7 +117,7 @@ jobs:
           echo "Updated app version in version.properties."
           git add version.properties
           git commit -m "chore(release): Bump version to $new_app_name"
-          git push https://x-access-token:${{ secrets.PAT }}@github.com/${{ github.repository }}.git
+          git push https://x-access-token:${{ secrets.PAT }}@github.com/${{ github.repository }}.git ${{ github.ref_name }}
           echo "new_app_name=$new_app_name" >> $GITHUB_OUTPUT
           echo "new_app_code=$new_app_code" >> $GITHUB_OUTPUT
           echo "update_needed=true" >> $GITHUB_OUTPUT
@@ -126,7 +126,7 @@ jobs:
     name: Build and Release (from update)
     runs-on: ubuntu-latest
     needs: check-for-updates
-    if: github.event_name != 'push' && always() && needs.check-for-updates.result != 'failure' && needs.check-for-updates.outputs.update_needed == 'true'
+    if: github.event_name != 'push' && needs.check-for-updates.outputs.update_needed == 'true'
     permissions:
       contents: write
 
