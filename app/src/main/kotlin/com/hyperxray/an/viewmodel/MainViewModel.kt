@@ -880,8 +880,6 @@ class MainViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val config = ConnectivityTestConfig(
                 targetUrl = prefs.connectivityTestTarget,
-                proxyAddress = prefs.socksAddress,
-                proxyPort = prefs.socksPort,
                 timeoutMs = prefs.connectivityTestTimeout
             )
             
@@ -969,8 +967,7 @@ class MainViewModel(
             val result = configRepository.downloadRuleFile(
                 url = url,
                 fileName = fileName,
-                isServiceEnabled = _isServiceEnabled.value,
-                socksPort = prefs.socksPort
+                isServiceEnabled = _isServiceEnabled.value
             )
             
             result.fold(

@@ -1838,9 +1838,18 @@ class HyperVpnService : VpnService() {
      */
     private fun getDefaultXrayConfig(): String {
         return JSONObject().apply {
-            // Empty inbounds array (not needed for WireGuard over Xray-core)
-            put("inbounds", JSONArray())
-            
+            // SOCKS5 inbound for WireGuard over Xray-core UDP handler
+            put("inbounds", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("port", 10808)
+                    put("listen", "127.0.0.1")
+                    put("protocol", "socks")
+                    put("settings", JSONObject().apply {
+                        put("udp", true)
+                    })
+                })
+            })
+
             // Minimal "direct" outbound for fallback (when WARP is used without VLESS profile)
             put("outbounds", JSONArray().apply {
                 put(JSONObject().apply {

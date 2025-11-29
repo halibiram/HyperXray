@@ -441,18 +441,6 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.outlineVariant
             )
 
-            EditableListItemInCard(
-                headline = stringResource(R.string.socks_port),
-                currentValue = settingsState.socksPort.value,
-                onValueConfirmed = { newValue -> mainViewModel.updateSocksPort(newValue) },
-                label = stringResource(R.string.socks_port),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                isError = !settingsState.socksPort.isValid,
-                errorMessage = settingsState.socksPort.error,
-                enabled = !vpnDisabled,
-                sheetState = sheetState,
-                scope = scope
-            )
 
             HorizontalDivider(
                 modifier = Modifier.padding(horizontal = 16.dp),

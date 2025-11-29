@@ -100,27 +100,6 @@ class Preferences(context: Context) {
         }
     }
 
-    val socksAddress: String
-        get() = getPrefData(SOCKS_ADDR).first ?: "127.0.0.1"
-
-    var socksPort: Int
-        get() {
-            val value = getPrefData(SOCKS_PORT).first
-            val port = value?.toIntOrNull()
-            if (value != null && port == null) {
-                Log.e(TAG, "Failed to parse SocksPort as Integer: $value")
-            }
-            return port ?: 10808
-        }
-        set(port) {
-            setValueInProvider(SOCKS_PORT, port.toString())
-        }
-
-    val socksUsername: String
-        get() = getPrefData(SOCKS_USER).first ?: ""
-
-    val socksPassword: String
-        get() = getPrefData(SOCKS_PASS).first ?: ""
 
     var dnsIpv4: String
         get() = getPrefData(DNS_IPV4).first ?: "8.8.8.8"
@@ -558,10 +537,6 @@ class Preferences(context: Context) {
         }
 
     companion object {
-        const val SOCKS_ADDR: String = "SocksAddr"
-        const val SOCKS_PORT: String = "SocksPort"
-        const val SOCKS_USER: String = "SocksUser"
-        const val SOCKS_PASS: String = "SocksPass"
         const val DNS_IPV4: String = "DnsIpv4"
         const val DNS_IPV6: String = "DnsIpv6"
         const val IPV4: String = "Ipv4"

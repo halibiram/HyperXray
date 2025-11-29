@@ -173,7 +173,6 @@ class MainViewModelTest {
 
         assertEquals(expectedConfigFiles, actualConfigFiles)
         assertEquals(expectedSelectedFile, actualSelectedFile)
-        assertEquals(expectedSettingsState.socksPort.value, actualSettingsState.socksPort.value)
         assertEquals(expectedSettingsState.switches.themeMode, actualSettingsState.switches.themeMode)
     }
 
@@ -340,7 +339,6 @@ class MainViewModelTest {
      */
     private fun createDefaultSettingsState(): SettingsState {
         return SettingsState(
-            socksPort = InputFieldState("10808"),
             dnsIpv4 = InputFieldState("8.8.8.8"),
             dnsIpv6 = InputFieldState("2001:4860:4860::8888"),
             switches = SwitchStates(

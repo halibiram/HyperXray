@@ -40,7 +40,6 @@ class SettingsRepository(
      */
     private fun createInitialSettingsState(): SettingsState {
         return SettingsState(
-            socksPort = InputFieldState(prefs.socksPort.toString()),
             dnsIpv4 = InputFieldState(prefs.dnsIpv4),
             dnsIpv6 = InputFieldState(prefs.dnsIpv6),
             switches = SwitchStates(
@@ -98,38 +97,6 @@ class SettingsRepository(
     /**
      * Update SOCKS port setting.
      */
-    fun updateSocksPort(portString: String): Boolean {
-        return try {
-            val port = portString.toInt()
-            if (port in 1025..65535) {
-                prefs.socksPort = port
-                _settingsState.update { it.copy(socksPort = InputFieldState(portString)) }
-                true
-            } else {
-                _settingsState.update {
-                    it.copy(
-                        socksPort = InputFieldState(
-                            value = portString,
-                            error = application.getString(com.hyperxray.an.R.string.invalid_port_range),
-                            isValid = false
-                        )
-                    )
-                }
-                false
-            }
-        } catch (e: NumberFormatException) {
-            _settingsState.update {
-                it.copy(
-                    socksPort = InputFieldState(
-                        value = portString,
-                        error = application.getString(com.hyperxray.an.R.string.invalid_port),
-                        isValid = false
-                    )
-                )
-            }
-            false
-        }
-    }
 
     /**
      * Update DNS IPv4 setting.

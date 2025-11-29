@@ -60,7 +60,6 @@ data class PerformanceSettings(
 )
 
 data class SettingsState(
-    val socksPort: InputFieldState,
     val dnsIpv4: InputFieldState,
     val dnsIpv6: InputFieldState,
     val switches: SwitchStates,
