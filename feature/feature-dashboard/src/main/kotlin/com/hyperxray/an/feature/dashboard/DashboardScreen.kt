@@ -59,6 +59,7 @@ import com.hyperxray.an.feature.dashboard.components.PerformanceIndicator
 import com.hyperxray.an.feature.dashboard.components.StatRow
 import com.hyperxray.an.feature.dashboard.components.FuturisticTrafficChart
 import com.hyperxray.an.feature.dashboard.components.HyperVpnControlCard
+import com.hyperxray.an.feature.dashboard.components.WarpAccountCard
 
 import com.hyperxray.an.feature.dashboard.formatBytes
 import com.hyperxray.an.feature.dashboard.formatNumber
@@ -372,6 +373,22 @@ fun DashboardScreen(
                 onStartClick = { viewModel.startHyperVpn() },
                 onStopClick = { viewModel.stopHyperVpn() },
                 onClearError = { viewModel.clearHyperVpnError() }
+            )
+        }
+
+        // WARP Account Card
+        item(key = "warp_account") {
+            val warpAccountInfo by (viewModel.warpAccountInfo ?: kotlinx.coroutines.flow.MutableStateFlow(
+                WarpAccountInfo()
+            )).collectAsState()
+            
+            WarpAccountCard(
+                accountExists = warpAccountInfo.accountExists,
+                publicKey = warpAccountInfo.publicKey,
+                endpoint = warpAccountInfo.endpoint,
+                accountType = warpAccountInfo.accountType,
+                license = warpAccountInfo.license,
+                warpEnabled = warpAccountInfo.warpEnabled
             )
         }
 

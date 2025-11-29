@@ -253,6 +253,10 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
     override fun clearHyperVpnError() {
         mainViewModel.clearHyperVpnError()
     }
+    
+    // WARP Account state flow
+    override val warpAccountInfo: StateFlow<com.hyperxray.an.feature.dashboard.WarpAccountInfo>? =
+        mainViewModel.warpAccountInfo
 }
 
 /**

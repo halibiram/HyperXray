@@ -145,5 +145,23 @@ object DashboardColors {
             )
         }
     }
+    
+    @Composable
+    fun warpGradient(): List<Color> {
+        val isDark = isSystemInDarkTheme()
+        return if (isDark) {
+            listOf(
+                Color(0xFFFF6B35), // Cloudflare Orange
+                Color(0xFFFF8C42), // Bright Orange
+                Color(0xFFFFA500)  // Amber Orange
+            )
+        } else {
+            listOf(
+                Color(0xFFF97316),
+                Color(0xFFEA580C),
+                Color(0xFFDC2626)
+            )
+        }
+    }
 }
 

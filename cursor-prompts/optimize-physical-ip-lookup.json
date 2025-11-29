@@ -1,0 +1,139 @@
+{
+  "title": "Optimize Physical IP Lookup: Add Caching and Async Support",
+  "description": "Optimize GetLocalPhysicalIP() to use caching and async background lookup to prevent blocking dial operations",
+  "problem": {
+    "summary": "GetLocalPhysicalIP() is called synchronously before every dial operation in xray_dialer.go, causing blocking delays and timeout issues",
+    "details": [
+      "Blocking delays (500ms-2s+) due to net.Interfaces() calls on Android",
+      "Timeout issues when interface enumeration is slow",
+      "Unnecessary repeated lookups for the same physical IP",
+      "Dial operations delayed before they even start"
+    ]
+  },
+  "solution": {
+    "requirements": [
+      {
+        "name": "Thread-Safe Caching Mechanism",
+        "description": "Cache the physical IP with expiration (e.g., 30 seconds)",
+        "features": [
+          "Cache invalidation on network state changes",
+          "Thread-safe access using sync.RWMutex",
+          "Cache structure: {ip: net.IP, timestamp: time.Time, interface: string}"
+        ]
+      },
+      {
+        "name": "Async Background Lookup",
+        "description": "Non-blocking interface lookup with timeout protection",
+        "features": [
+          "First call: Return cached value immediately if available, trigger async refresh",
+          "Subsequent calls: Return cached value, refresh in background if expired",
+          "Non-blocking: Never block dial operations",
+          "Timeout: 2-second timeout for interface lookup operations"
+        ]
+      }
+    ]
+  },
+  "implementation": {
+    "files_to_modify": [
+      {
+        "file": "native/bridge/protector.go",
+        "changes": [
+          "Add cache structure and mutex",
+          "Implement GetLocalPhysicalIP() with caching",
+          "Add refreshPhysicalIPCache() goroutine function",
+          "Add invalidatePhysicalIPCache() function",
+          "Keep getLocalPhysicalIPInternal() for actual lookup"
+        ],
+        "code_structure": {
+          "cache_variables": [
+            "var physicalIPCache struct {",
+            "  sync.RWMutex",
+            "  ip        net.IP",
+            "  timestamp time.Time",
+            "  iface     string",
+            "}",
+            "var cacheExpiration = 30 * time.Second",
+            "var lookupTimeout   = 2 * time.Second"
+          ]
+        }
+      },
+      {
+        "file": "native/bridge/xray_dialer.go",
+        "changes": [
+          "No changes needed (already handles nil IP gracefully)",
+          "Optional: Add cache invalidation on network errors"
+        ]
+      }
+    ],
+    "new_functions": [
+      {
+        "name": "GetLocalPhysicalIP()",
+        "description": "Returns cached value immediately, triggers async refresh if needed",
+        "behavior": "Non-blocking, returns nil on cache miss (non-fatal)"
+      },
+      {
+        "name": "GetLocalPhysicalIPSync()",
+        "description": "Synchronous version for compatibility",
+        "behavior": "Blocking, for backward compatibility"
+      },
+      {
+        "name": "refreshPhysicalIPCache()",
+        "description": "Background refresh function",
+        "behavior": "Goroutine-based, non-blocking"
+      },
+      {
+        "name": "invalidatePhysicalIPCache()",
+        "description": "Manual cache invalidation",
+        "behavior": "Thread-safe cache clearing"
+      }
+    ],
+    "cache_strategy": {
+      "first_call": "Cache miss → Return nil immediately, start async lookup",
+      "cached_valid": "Return cached IP immediately",
+      "cached_expired": "Return cached IP immediately, refresh in background",
+      "lookup_timeout": "Return nil (non-fatal), continue without bind"
+    },
+    "thread_safety": [
+      "Use sync.RWMutex for concurrent reads",
+      "Write lock only for cache updates",
+      "Atomic cache replacement"
+    ],
+    "error_handling": [
+      "Cache lookup errors are non-fatal",
+      "Return nil IP on timeout/error",
+      "Log warnings but continue dial operation",
+      "Socket protection is more important than bind"
+    ]
+  },
+  "expected_behavior": {
+    "before": {
+      "flow": "Dial() → GetLocalPhysicalIP() [500ms-2s blocking] → Socket creation → Connect",
+      "issue": "Blocking delay before dial starts"
+    },
+    "after": {
+      "flow": "Dial() → GetLocalPhysicalIP() [<1ms cache hit] → Socket creation → Connect",
+      "background": "Refresh cache if expired",
+      "benefit": "No dial blocking"
+    }
+  },
+  "testing_considerations": [
+    "Test cache hit/miss scenarios",
+    "Test concurrent access",
+    "Test cache expiration",
+    "Test timeout handling",
+    "Test network change scenarios",
+    "Verify no dial blocking"
+  ],
+  "code_style": [
+    "Follow existing Go conventions in the codebase",
+    "Use English comments",
+    "Add debug logging for cache operations",
+    "Maintain backward compatibility"
+  ],
+  "priority": "high",
+  "related_issues": [
+    "XrayDialer timeout sorunu",
+    "Physical network interface bulunamaması",
+    "net.Interfaces() blocking calls"
+  ]
+}

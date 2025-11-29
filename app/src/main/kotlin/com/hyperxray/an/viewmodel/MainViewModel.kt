@@ -39,6 +39,7 @@ import com.hyperxray.an.telemetry.AggregatedTelemetry
 import com.hyperxray.an.vpn.HyperVpnHelper
 import com.hyperxray.an.core.network.vpn.HyperVpnStateManager
 import com.hyperxray.an.common.AiLogHelper
+import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -59,6 +60,7 @@ import com.hyperxray.an.feature.dashboard.ConnectionStage
 import com.hyperxray.an.feature.dashboard.DisconnectionStage
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.TimeoutCancellationException
@@ -144,6 +146,12 @@ class MainViewModel(
     val hyperVpnState: StateFlow<HyperVpnStateManager.VpnState> = hyperVpnStateManager.state
     val hyperVpnStats: StateFlow<HyperVpnStateManager.TunnelStats> = hyperVpnStateManager.stats
     val hyperVpnError: StateFlow<String?> = hyperVpnStateManager.error
+    
+    // WARP Account state
+    private val _warpAccountInfo = MutableStateFlow<com.hyperxray.an.feature.dashboard.WarpAccountInfo>(
+        com.hyperxray.an.feature.dashboard.WarpAccountInfo()
+    )
+    val warpAccountInfo: StateFlow<com.hyperxray.an.feature.dashboard.WarpAccountInfo> = _warpAccountInfo.asStateFlow()
 
     private val _uiEvent = Channel<MainViewUiEvent>(Channel.BUFFERED)
     val uiEvent = _uiEvent.receiveAsFlow()
@@ -222,6 +230,12 @@ class MainViewModel(
         
         // Start observing HyperVpnService
         hyperVpnStateManager.startObserving()
+        
+        // Load WARP account info initially
+        loadWarpAccountInfo()
+        
+        // Start watching WARP account file for changes (updates dashboard automatically)
+        startWarpAccountFileWatcher()
         
         // Map HyperVpnStateManager state to connectionState for dashboard
         // This ensures dashboard reflects the actual VPN service state
@@ -1104,6 +1118,81 @@ class MainViewModel(
         _newVersionAvailable.value = null
     }
 
+    // Track last modified time to detect file changes
+    private var lastAccountFileModified: Long = 0L
+    private var accountFileWatcherJob: Job? = null
+    
+    /**
+     * Load WARP account information from file
+     * Public so it can be called when account is created/updated
+     */
+    fun loadWarpAccountInfo() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val filesDir = getApplication<Application>().filesDir
+                val accountFile = File(filesDir, "warp-account.json")
+                
+                if (!accountFile.exists() || !accountFile.canRead()) {
+                    _warpAccountInfo.value = com.hyperxray.an.feature.dashboard.WarpAccountInfo()
+                    lastAccountFileModified = 0L
+                    return@launch
+                }
+                
+                val currentModified = accountFile.lastModified()
+                // Skip if file hasn't changed
+                if (currentModified == lastAccountFileModified && _warpAccountInfo.value.accountExists) {
+                    return@launch
+                }
+                
+                lastAccountFileModified = currentModified
+                
+                val accountContent = accountFile.readText()
+                val accountJson = JSONObject(accountContent)
+                
+                val publicKey = accountJson.optString("publicKey", null).takeIf { it.isNotBlank() }
+                val endpoint = accountJson.optString("endpoint", null).takeIf { it.isNotBlank() }
+                val accountType = accountJson.optString("accountType", null).takeIf { it.isNotBlank() }
+                val license = accountJson.optString("license", null).takeIf { it.isNotBlank() }
+                val warpEnabled = accountJson.optBoolean("warpEnabled", false)
+                
+                _warpAccountInfo.value = com.hyperxray.an.feature.dashboard.WarpAccountInfo(
+                    accountExists = true,
+                    publicKey = publicKey,
+                    endpoint = endpoint,
+                    accountType = accountType,
+                    license = license,
+                    warpEnabled = warpEnabled
+                )
+                
+                Log.d(TAG, "✅ WARP account info loaded and updated in dashboard")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading WARP account info: ${e.message}", e)
+                _warpAccountInfo.value = com.hyperxray.an.feature.dashboard.WarpAccountInfo()
+            }
+        }
+    }
+    
+    /**
+     * Start watching WARP account file for changes
+     * Automatically updates dashboard when account file is modified
+     */
+    private fun startWarpAccountFileWatcher() {
+        accountFileWatcherJob?.cancel()
+        accountFileWatcherJob = viewModelScope.launch {
+            while (isActive) {
+                try {
+                    loadWarpAccountInfo()
+                    // Check every 2 seconds for file changes
+                    delay(2000)
+                } catch (e: Exception) {
+                    if (isActive) {
+                        Log.e(TAG, "Error in WARP account file watcher: ${e.message}", e)
+                        delay(2000) // Continue watching even on error
+                    }
+                }
+            }
+        }
+    }
 
     companion object {
         private const val IPV4_REGEX =

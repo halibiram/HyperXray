@@ -81,6 +81,18 @@ data class DnsCacheStats(
 )
 
 /**
+ * WARP Account information for dashboard display
+ */
+data class WarpAccountInfo(
+    val accountExists: Boolean = false,
+    val publicKey: String? = null,
+    val endpoint: String? = null,
+    val accountType: String? = null,
+    val license: String? = null,
+    val warpEnabled: Boolean = false
+)
+
+/**
  * ViewModel interface for Dashboard screen.
  * This allows the feature module to work without depending on MainViewModel from app module.
  */
@@ -97,6 +109,9 @@ interface DashboardViewModel {
     val hyperVpnState: StateFlow<com.hyperxray.an.core.network.vpn.HyperVpnStateManager.VpnState>?
     val hyperVpnStats: StateFlow<com.hyperxray.an.core.network.vpn.HyperVpnStateManager.TunnelStats>?
     val hyperVpnError: StateFlow<String?>?
+    
+    // WARP Account state (optional - may be null if not available)
+    val warpAccountInfo: StateFlow<WarpAccountInfo>?
     
     fun updateCoreStats()
     fun updateTelemetryStats()
