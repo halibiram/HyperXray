@@ -107,14 +107,10 @@ class TelegramApiDataSource(
                 return null
             }
             
-            val socksAddress = prefs.socksAddress
-            val socksPort = prefs.socksPort
-            
-            // Validate SOCKS5 configuration
-            if (socksAddress.isBlank() || socksPort <= 0 || socksPort > 65535) {
-                Log.d(TAG, "SOCKS5 not configured or invalid: address=$socksAddress, port=$socksPort")
-                return null
-            }
+            // Use default Xray SOCKS5 proxy (localhost:1080)
+            // This is the standard SOCKS5 proxy port that Xray creates
+            val socksAddress = "127.0.0.1"
+            val socksPort = 1080
             
             // Create SOCKS5 proxy for tunnel
             val proxyAddress = InetSocketAddress(socksAddress, socksPort)

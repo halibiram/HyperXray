@@ -1,9 +1,6 @@
-Starting a Gradle Daemon, 3 busy and 2 incompatible Daemons could not be reused, use --status for details
 
-> Task :app:checkXrayCore
-✓ Xray-core binaries found for all architectures
-  - arm64-v8a: ✓
-  - x86_64: ✓
+> Configure project :app
+✅ Found NDK at: C:\Users\halil\AppData\Local\Android\Sdk\ndk\28.2.13676358
 
 > Task :app:preBuild UP-TO-DATE
 > Task :app:preDebugBuild UP-TO-DATE
@@ -21,12 +18,7 @@ Starting a Gradle Daemon, 3 busy and 2 incompatible Daemons could not be reused,
 > Task :core:core-database:processDebugNavigationResources UP-TO-DATE
 > Task :core:core-database:parseDebugLocalResources UP-TO-DATE
 > Task :core:core-database:generateDebugRFile UP-TO-DATE
-> Task :core:core-database:compileDebugKotlin UP-TO-DATE
 > Task :core:core-database:javaPreCompileDebug UP-TO-DATE
-> Task :core:core-database:compileDebugJavaWithJavac UP-TO-DATE
-> Task :core:core-database:bundleLibRuntimeToJarDebug UP-TO-DATE
-> Task :core:core-database:processDebugJavaRes UP-TO-DATE
-> Task :core:core-database:createFullJarDebug UP-TO-DATE
 > Task :core:core-di:checkKotlinGradlePluginConfigurationErrors SKIPPED
 > Task :core:core-di:preBuild UP-TO-DATE
 > Task :core:core-di:preDebugBuild UP-TO-DATE
@@ -56,12 +48,7 @@ Starting a Gradle Daemon, 3 busy and 2 incompatible Daemons could not be reused,
 > Task :core:core-network:processDebugNavigationResources UP-TO-DATE
 > Task :core:core-network:parseDebugLocalResources UP-TO-DATE
 > Task :core:core-network:generateDebugRFile UP-TO-DATE
-> Task :core:core-network:compileDebugKotlin UP-TO-DATE
 > Task :core:core-network:javaPreCompileDebug UP-TO-DATE
-> Task :core:core-network:compileDebugJavaWithJavac UP-TO-DATE
-> Task :core:core-network:bundleLibRuntimeToJarDebug UP-TO-DATE
-> Task :core:core-network:processDebugJavaRes UP-TO-DATE
-> Task :core:core-network:createFullJarDebug UP-TO-DATE
 > Task :core:core-designsystem:checkKotlinGradlePluginConfigurationErrors SKIPPED
 > Task :core:core-designsystem:preBuild UP-TO-DATE
 > Task :core:core-designsystem:preDebugBuild UP-TO-DATE
@@ -76,7 +63,6 @@ Starting a Gradle Daemon, 3 busy and 2 incompatible Daemons could not be reused,
 > Task :core:core-designsystem:javaPreCompileDebug UP-TO-DATE
 > Task :core:core-designsystem:compileDebugJavaWithJavac UP-TO-DATE
 > Task :core:core-designsystem:bundleLibCompileToJarDebug UP-TO-DATE
-> Task :core:core-network:bundleLibCompileToJarDebug UP-TO-DATE
 > Task :core:core-telemetry:checkKotlinGradlePluginConfigurationErrors SKIPPED
 > Task :core:core-telemetry:preBuild UP-TO-DATE
 > Task :core:core-telemetry:preDebugBuild UP-TO-DATE
@@ -119,12 +105,7 @@ Starting a Gradle Daemon, 3 busy and 2 incompatible Daemons could not be reused,
 > Task :xray:xray-runtime-service:javaPreCompileDebug UP-TO-DATE
 > Task :xray:xray-runtime-service:compileDebugJavaWithJavac UP-TO-DATE
 > Task :xray:xray-runtime-service:bundleLibCompileToJarDebug UP-TO-DATE
-> Task :feature:feature-dashboard:compileDebugKotlin UP-TO-DATE
 > Task :feature:feature-dashboard:javaPreCompileDebug UP-TO-DATE
-> Task :feature:feature-dashboard:compileDebugJavaWithJavac UP-TO-DATE
-> Task :feature:feature-dashboard:bundleLibRuntimeToJarDebug UP-TO-DATE
-> Task :feature:feature-dashboard:processDebugJavaRes UP-TO-DATE
-> Task :feature:feature-dashboard:createFullJarDebug UP-TO-DATE
 > Task :feature:feature-hysteria2:checkKotlinGradlePluginConfigurationErrors SKIPPED
 > Task :feature:feature-hysteria2:preBuild UP-TO-DATE
 > Task :feature:feature-hysteria2:preDebugBuild UP-TO-DATE
@@ -206,7 +187,6 @@ Starting a Gradle Daemon, 3 busy and 2 incompatible Daemons could not be reused,
 > Task :feature:feature-routing:bundleLibRuntimeToJarDebug UP-TO-DATE
 > Task :feature:feature-routing:processDebugJavaRes UP-TO-DATE
 > Task :feature:feature-routing:createFullJarDebug UP-TO-DATE
-> Task :core:core-database:bundleLibCompileToJarDebug UP-TO-DATE
 > Task :feature:feature-telegram:checkKotlinGradlePluginConfigurationErrors SKIPPED
 > Task :feature:feature-telegram:preBuild UP-TO-DATE
 > Task :feature:feature-telegram:preDebugBuild UP-TO-DATE
@@ -217,12 +197,7 @@ Starting a Gradle Daemon, 3 busy and 2 incompatible Daemons could not be reused,
 > Task :feature:feature-telegram:processDebugNavigationResources UP-TO-DATE
 > Task :feature:feature-telegram:parseDebugLocalResources UP-TO-DATE
 > Task :feature:feature-telegram:generateDebugRFile UP-TO-DATE
-> Task :feature:feature-telegram:compileDebugKotlin UP-TO-DATE
 > Task :feature:feature-telegram:javaPreCompileDebug UP-TO-DATE
-> Task :feature:feature-telegram:compileDebugJavaWithJavac UP-TO-DATE
-> Task :feature:feature-telegram:bundleLibRuntimeToJarDebug UP-TO-DATE
-> Task :feature:feature-telegram:processDebugJavaRes UP-TO-DATE
-> Task :feature:feature-telegram:createFullJarDebug UP-TO-DATE
 > Task :feature:feature-vless:checkKotlinGradlePluginConfigurationErrors SKIPPED
 > Task :feature:feature-vless:preBuild UP-TO-DATE
 > Task :feature:feature-vless:preDebugBuild UP-TO-DATE
@@ -233,18 +208,33 @@ Starting a Gradle Daemon, 3 busy and 2 incompatible Daemons could not be reused,
 > Task :feature:feature-vless:processDebugNavigationResources UP-TO-DATE
 > Task :feature:feature-vless:parseDebugLocalResources UP-TO-DATE
 > Task :feature:feature-vless:generateDebugRFile UP-TO-DATE
+> Task :core:core-database:compileDebugKotlin
 > Task :feature:feature-vless:compileDebugKotlin UP-TO-DATE
+> Task :core:core-database:compileDebugJavaWithJavac UP-TO-DATE
+> Task :core:core-database:processDebugJavaRes UP-TO-DATE
 > Task :feature:feature-vless:javaPreCompileDebug UP-TO-DATE
 > Task :feature:feature-vless:compileDebugJavaWithJavac UP-TO-DATE
 > Task :feature:feature-vless:bundleLibRuntimeToJarDebug UP-TO-DATE
 > Task :feature:feature-vless:processDebugJavaRes UP-TO-DATE
 > Task :feature:feature-vless:createFullJarDebug UP-TO-DATE
+> Task :feature:feature-warp:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :feature:feature-warp:preBuild UP-TO-DATE
+> Task :feature:feature-warp:preDebugBuild UP-TO-DATE
+> Task :feature:feature-warp:generateDebugBuildConfig UP-TO-DATE
+> Task :feature:feature-warp:generateDebugResValues UP-TO-DATE
+> Task :feature:feature-warp:generateDebugResources UP-TO-DATE
+> Task :core:core-database:bundleLibRuntimeToJarDebug
+> Task :feature:feature-warp:packageDebugResources UP-TO-DATE
+> Task :core:core-database:bundleLibCompileToJarDebug
+> Task :core:core-database:createFullJarDebug
+> Task :feature:feature-warp:processDebugNavigationResources UP-TO-DATE
+> Task :feature:feature-warp:parseDebugLocalResources UP-TO-DATE
+> Task :feature:feature-warp:generateDebugRFile UP-TO-DATE
+> Task :feature:feature-warp:javaPreCompileDebug UP-TO-DATE
 > Task :xray:xray-runtime-service:bundleLibRuntimeToJarDebug UP-TO-DATE
 > Task :xray:xray-runtime-service:processDebugJavaRes UP-TO-DATE
 > Task :xray:xray-runtime-service:createFullJarDebug UP-TO-DATE
-> Task :app:extractIncludeDebugProto UP-TO-DATE
 > Task :app:extractProto UP-TO-DATE
-> Task :app:generateDebugProto SKIPPED
 > Task :core:core-database:writeDebugAarMetadata UP-TO-DATE
 > Task :core:core-designsystem:writeDebugAarMetadata UP-TO-DATE
 > Task :core:core-di:writeDebugAarMetadata UP-TO-DATE
@@ -258,551 +248,43 @@ Starting a Gradle Daemon, 3 busy and 2 incompatible Daemons could not be reused,
 > Task :feature:feature-routing:writeDebugAarMetadata UP-TO-DATE
 > Task :feature:feature-telegram:writeDebugAarMetadata UP-TO-DATE
 > Task :feature:feature-vless:writeDebugAarMetadata UP-TO-DATE
+> Task :feature:feature-warp:writeDebugAarMetadata UP-TO-DATE
 > Task :xray:xray-runtime-service:writeDebugAarMetadata UP-TO-DATE
 > Task :app:checkDebugAarMetadata UP-TO-DATE
-> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:processDebugNavigationResources
 > Task :app:compileDebugNavigationResources UP-TO-DATE
 > Task :app:generateDebugResValues UP-TO-DATE
-> Task :app:mapDebugSourceSetPaths UP-TO-DATE
-> Task :app:generateDebugResources UP-TO-DATE
-> Task :app:mergeDebugResources UP-TO-DATE
-> Task :app:packageDebugResources UP-TO-DATE
-> Task :app:parseDebugLocalResources UP-TO-DATE
-> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
-> Task :app:extractDeepLinksDebug UP-TO-DATE
-> Task :core:core-database:extractDeepLinksDebug UP-TO-DATE
-> Task :core:core-database:processDebugManifest UP-TO-DATE
-> Task :core:core-designsystem:extractDeepLinksDebug UP-TO-DATE
-> Task :core:core-designsystem:processDebugManifest UP-TO-DATE
-> Task :core:core-di:extractDeepLinksDebug UP-TO-DATE
-> Task :core:core-di:processDebugManifest UP-TO-DATE
-> Task :core:core-network:extractDeepLinksDebug UP-TO-DATE
-> Task :core:core-network:processDebugManifest UP-TO-DATE
-> Task :core:core-telemetry:extractDeepLinksDebug UP-TO-DATE
-> Task :core:core-telemetry:processDebugManifest UP-TO-DATE
-> Task :feature:feature-dashboard:extractDeepLinksDebug UP-TO-DATE
-> Task :feature:feature-dashboard:processDebugManifest UP-TO-DATE
-> Task :feature:feature-hysteria2:extractDeepLinksDebug UP-TO-DATE
-> Task :feature:feature-hysteria2:processDebugManifest UP-TO-DATE
-> Task :feature:feature-policy-ai:extractDeepLinksDebug UP-TO-DATE
-> Task :feature:feature-policy-ai:processDebugManifest UP-TO-DATE
-> Task :feature:feature-profiles:extractDeepLinksDebug UP-TO-DATE
-> Task :feature:feature-profiles:processDebugManifest UP-TO-DATE
-> Task :feature:feature-reality:extractDeepLinksDebug UP-TO-DATE
-> Task :feature:feature-reality:processDebugManifest UP-TO-DATE
-> Task :feature:feature-routing:extractDeepLinksDebug UP-TO-DATE
-> Task :feature:feature-routing:processDebugManifest UP-TO-DATE
-> Task :feature:feature-telegram:extractDeepLinksDebug UP-TO-DATE
-> Task :feature:feature-telegram:processDebugManifest UP-TO-DATE
-> Task :feature:feature-vless:extractDeepLinksDebug UP-TO-DATE
-> Task :feature:feature-vless:processDebugManifest UP-TO-DATE
-> Task :xray:xray-runtime-service:extractDeepLinksDebug UP-TO-DATE
-> Task :xray:xray-runtime-service:processDebugManifest UP-TO-DATE
-> Task :app:processDebugMainManifest UP-TO-DATE
-> Task :app:processDebugManifest UP-TO-DATE
-> Task :app:processDebugManifestForPackage UP-TO-DATE
-> Task :core:core-database:compileDebugLibraryResources UP-TO-DATE
-> Task :core:core-designsystem:compileDebugLibraryResources UP-TO-DATE
-> Task :core:core-di:compileDebugLibraryResources UP-TO-DATE
-> Task :core:core-network:compileDebugLibraryResources UP-TO-DATE
-> Task :core:core-telemetry:compileDebugLibraryResources UP-TO-DATE
-> Task :feature:feature-dashboard:compileDebugLibraryResources UP-TO-DATE
-> Task :feature:feature-hysteria2:compileDebugLibraryResources UP-TO-DATE
-> Task :feature:feature-policy-ai:compileDebugLibraryResources UP-TO-DATE
-> Task :feature:feature-profiles:compileDebugLibraryResources UP-TO-DATE
-> Task :feature:feature-reality:compileDebugLibraryResources UP-TO-DATE
-> Task :feature:feature-routing:compileDebugLibraryResources UP-TO-DATE
-> Task :feature:feature-telegram:compileDebugLibraryResources UP-TO-DATE
-> Task :feature:feature-vless:compileDebugLibraryResources UP-TO-DATE
-> Task :xray:xray-runtime-service:compileDebugLibraryResources UP-TO-DATE
-> Task :app:processDebugResources UP-TO-DATE
-> Task :feature:feature-dashboard:bundleLibCompileToJarDebug UP-TO-DATE
-> Task :feature:feature-hysteria2:bundleLibCompileToJarDebug UP-TO-DATE
-> Task :feature:feature-policy-ai:bundleLibCompileToJarDebug UP-TO-DATE
-> Task :feature:feature-profiles:bundleLibCompileToJarDebug UP-TO-DATE
-> Task :feature:feature-reality:bundleLibCompileToJarDebug UP-TO-DATE
-> Task :feature:feature-routing:bundleLibCompileToJarDebug UP-TO-DATE
-> Task :feature:feature-telegram:bundleLibCompileToJarDebug UP-TO-DATE
-> Task :feature:feature-vless:bundleLibCompileToJarDebug UP-TO-DATE
-> Task :app:kaptGenerateStubsDebugKotlin UP-TO-DATE
-> Task :app:kaptDebugKotlin SKIPPED
-> Task :app:javaPreCompileDebug UP-TO-DATE
-> Task :app:mergeDebugShaders UP-TO-DATE
-> Task :app:compileDebugShaders NO-SOURCE
-> Task :app:downloadGeoFiles SKIPPED
-> Task :app:generateDebugAssets UP-TO-DATE
-> Task :core:core-database:mergeDebugShaders UP-TO-DATE
-> Task :core:core-database:compileDebugShaders NO-SOURCE
-> Task :core:core-database:generateDebugAssets UP-TO-DATE
-> Task :core:core-database:mergeDebugAssets UP-TO-DATE
-> Task :core:core-designsystem:mergeDebugShaders UP-TO-DATE
-> Task :core:core-designsystem:compileDebugShaders NO-SOURCE
-> Task :core:core-designsystem:generateDebugAssets UP-TO-DATE
-> Task :core:core-designsystem:mergeDebugAssets UP-TO-DATE
-> Task :core:core-di:mergeDebugShaders UP-TO-DATE
-> Task :core:core-di:compileDebugShaders NO-SOURCE
-> Task :core:core-di:generateDebugAssets UP-TO-DATE
-> Task :core:core-di:mergeDebugAssets UP-TO-DATE
-> Task :core:core-network:mergeDebugShaders UP-TO-DATE
-> Task :core:core-network:compileDebugShaders NO-SOURCE
-> Task :core:core-network:generateDebugAssets UP-TO-DATE
-> Task :core:core-network:mergeDebugAssets UP-TO-DATE
-> Task :core:core-telemetry:mergeDebugShaders UP-TO-DATE
-> Task :core:core-telemetry:compileDebugShaders NO-SOURCE
-> Task :core:core-telemetry:generateDebugAssets UP-TO-DATE
-> Task :core:core-telemetry:mergeDebugAssets UP-TO-DATE
-> Task :feature:feature-dashboard:mergeDebugShaders UP-TO-DATE
-> Task :feature:feature-dashboard:compileDebugShaders NO-SOURCE
-> Task :feature:feature-dashboard:generateDebugAssets UP-TO-DATE
-> Task :feature:feature-dashboard:mergeDebugAssets UP-TO-DATE
-> Task :feature:feature-hysteria2:mergeDebugShaders UP-TO-DATE
-> Task :feature:feature-hysteria2:compileDebugShaders NO-SOURCE
-> Task :feature:feature-hysteria2:generateDebugAssets UP-TO-DATE
-> Task :feature:feature-hysteria2:mergeDebugAssets UP-TO-DATE
-> Task :feature:feature-policy-ai:mergeDebugShaders UP-TO-DATE
-> Task :feature:feature-policy-ai:compileDebugShaders NO-SOURCE
-> Task :feature:feature-policy-ai:generateDebugAssets UP-TO-DATE
-> Task :feature:feature-policy-ai:mergeDebugAssets UP-TO-DATE
-> Task :feature:feature-profiles:mergeDebugShaders UP-TO-DATE
-> Task :feature:feature-profiles:compileDebugShaders NO-SOURCE
-> Task :feature:feature-profiles:generateDebugAssets UP-TO-DATE
-> Task :feature:feature-profiles:mergeDebugAssets UP-TO-DATE
-> Task :feature:feature-reality:mergeDebugShaders UP-TO-DATE
-> Task :feature:feature-reality:compileDebugShaders NO-SOURCE
-> Task :feature:feature-reality:generateDebugAssets UP-TO-DATE
-> Task :feature:feature-reality:mergeDebugAssets UP-TO-DATE
-> Task :feature:feature-routing:mergeDebugShaders UP-TO-DATE
-> Task :feature:feature-routing:compileDebugShaders NO-SOURCE
-> Task :feature:feature-routing:generateDebugAssets UP-TO-DATE
-> Task :feature:feature-routing:mergeDebugAssets UP-TO-DATE
-> Task :feature:feature-telegram:mergeDebugShaders UP-TO-DATE
-> Task :feature:feature-telegram:compileDebugShaders NO-SOURCE
-> Task :feature:feature-telegram:generateDebugAssets UP-TO-DATE
-> Task :feature:feature-telegram:mergeDebugAssets UP-TO-DATE
-> Task :feature:feature-vless:mergeDebugShaders UP-TO-DATE
-> Task :feature:feature-vless:compileDebugShaders NO-SOURCE
-> Task :feature:feature-vless:generateDebugAssets UP-TO-DATE
-> Task :feature:feature-vless:mergeDebugAssets UP-TO-DATE
-> Task :xray:xray-runtime-service:mergeDebugShaders UP-TO-DATE
-> Task :xray:xray-runtime-service:compileDebugShaders NO-SOURCE
-> Task :xray:xray-runtime-service:generateDebugAssets UP-TO-DATE
-> Task :xray:xray-runtime-service:mergeDebugAssets UP-TO-DATE
-> Task :app:mergeDebugAssets UP-TO-DATE
-> Task :app:compressDebugAssets UP-TO-DATE
-> Task :core:core-designsystem:bundleLibRuntimeToJarDebug UP-TO-DATE
-> Task :core:core-telemetry:bundleLibRuntimeToJarDebug UP-TO-DATE
-> Task :app:desugarDebugFileDependencies UP-TO-DATE
-> Task :core:core-designsystem:processDebugJavaRes UP-TO-DATE
-> Task :core:core-telemetry:processDebugJavaRes UP-TO-DATE
-> Task :app:checkDebugDuplicateClasses UP-TO-DATE
-> Task :feature:feature-profiles:bundleLibRuntimeToDirDebug UP-TO-DATE
-> Task :core:core-di:bundleLibRuntimeToDirDebug
-> Task :feature:feature-telegram:bundleLibRuntimeToDirDebug
-> Task :core:core-database:bundleLibRuntimeToDirDebug
-> Task :feature:feature-dashboard:bundleLibRuntimeToDirDebug
-> Task :app:compileDebugKotlin
-> Task :core:core-network:bundleLibRuntimeToDirDebug
-> Task :app:mergeExtDexDebug
-> Task :xray:xray-runtime-service:bundleLibRuntimeToDirDebug
-> Task :feature:feature-vless:bundleLibRuntimeToDirDebug
-> Task :feature:feature-reality:bundleLibRuntimeToDirDebug
-> Task :feature:feature-hysteria2:bundleLibRuntimeToDirDebug
-> Task :feature:feature-routing:bundleLibRuntimeToDirDebug
-> Task :feature:feature-policy-ai:bundleLibRuntimeToDirDebug
-> Task :core:core-designsystem:bundleLibRuntimeToDirDebug
-> Task :core:core-telemetry:bundleLibRuntimeToDirDebug
-> Task :app:configureNdkBuildDebug[arm64-v8a]
-> Task :app:mergeLibDexDebug
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources
 
-> Task :app:compileDebugKotlin FAILED
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/TProxyService.kt:148:46 No value passed for parameter 'service'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/TProxyService.kt:148:46 No value passed for parameter 'serviceScope'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/TProxyService.kt:164:35 Class '<anonymous>' is not abstract and does not implement abstract member:
-fun onUdpErrorDetected(errorRecord: TProxyUtils.UdpErrorRecord, pattern: TProxyUtils.UdpErrorPattern, updateLastErrorTime: (Long) -> Unit, updateErrorCount: (Int) -> Unit): Unit
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/TProxyService.kt:178:13 'onUdpErrorDetected' overrides nothing. Potential signatures for overriding:
-fun onUdpErrorDetected(errorRecord: TProxyUtils.UdpErrorRecord, pattern: TProxyUtils.UdpErrorPattern, updateLastErrorTime: (Long) -> Unit, updateErrorCount: (Int) -> Unit): Unit
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/TProxyService.kt:179:61 Unresolved reference 'UdpErrorRecord'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/TProxyService.kt:180:57 Unresolved reference 'UdpErrorPattern'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/TProxyService.kt:370:16 Class '<anonymous>' is not abstract and does not implement abstract member:
-suspend fun runXrayProcess(): Unit
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/TProxyService.kt:400:26 Non-suspend function 'checkSocks5Readiness' cannot override suspend function 'suspend fun checkSocks5Readiness(prefs: Preferences): Unit' defined in 'com.hyperxray.an.service.xray.XrayRunnerContext'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/TProxyService.kt:400:88 Suspend function 'suspend fun checkSocks5Readiness(prefs: Preferences): Unit' can only be called from a coroutine or another suspend function.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/TProxyService.kt:707:74 Unresolved reference 'UdpErrorPattern'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/TProxyService.kt:714:62 Unresolved reference 'UdpErrorPattern'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/handlers/ServiceIntentHandler.kt:79:17 Cannot access 'fun stopVpn(reason: String? = ...): Unit': it is private in 'com.hyperxray.an.service.TProxyService'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/handlers/ServiceIntentHandler.kt:108:25 Unresolved reference 'runXrayProcess'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/handlers/ServiceIntentHandler.kt:124:21 Unresolved reference 'runXrayProcess'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/handlers/ServiceIntentHandler.kt:150:33 Cannot access 'fun initiateVpnSession(): Unit': it is private in 'com.hyperxray.an.service.TProxyService'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/handlers/ServiceIntentHandler.kt:170:25 Unresolved reference 'runXrayProcess'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/handlers/ServiceIntentHandler.kt:206:21 Cannot access 'fun initiateVpnSession(): Unit': it is private in 'com.hyperxray.an.service.TProxyService'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/service/handlers/ServiceIntentHandler.kt:234:17 Cannot access 'fun initiateVpnSession(): Unit': it is private in 'com.hyperxray.an.service.TProxyService'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:192:11 Syntax error: Expecting member declaration.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:192:17 Syntax error: Expecting member declaration.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:192:18 Syntax error: Expecting member declaration.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:192:19 Syntax error: Expecting member declaration.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:192:21 Syntax error: Expecting member declaration.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:192:30 Syntax error: Expecting member declaration.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:192:32 Syntax error: Expecting member declaration.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:192:32 Function declaration must have a name.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:193:61 Unresolved reference 'e'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:202:60 Unresolved reference 'NativeTProxyStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:204:19 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:210:20 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:210:47 Unresolved reference 'lastNativeStatsTime'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:211:56 Unresolved reference 'lastNativeStatsTime'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:213:43 Unresolved reference 'txBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:213:53 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:213:71 Unresolved reference 'txBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:214:43 Unresolved reference 'rxBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:214:53 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:214:71 Unresolved reference 'rxBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:217:23 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:217:65 Unresolved reference 'txBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:217:114 Unresolved reference 'rxBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:223:17 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:224:17 Unresolved reference 'lastNativeStatsTime'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:228:23 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:233:19 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:233:97 Unresolved reference 'txBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:233:129 Unresolved reference 'rxBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:234:13 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:235:13 Unresolved reference 'lastNativeStatsTime'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:245:22 Unresolved reference 'NativeTProxyStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:249:36 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:249:63 Unresolved reference 'lastNativeStatsTime'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:251:19 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:251:101 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:251:149 Unresolved reference 'lastNativeStatsTime'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:256:25 Unresolved reference 'txPackets'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:256:56 Unresolved reference 'rxPackets'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:257:25 Unresolved reference 'txBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:257:54 Unresolved reference 'rxBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:258:13 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:258:31 Unresolved reference 'txPackets'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:258:50 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:258:68 Unresolved reference 'rxPackets'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:259:13 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:259:31 Unresolved reference 'txBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:259:48 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:259:66 Unresolved reference 'rxBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:261:19 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:265:15 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:265:82 Unresolved reference 'txPackets'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:265:118 Unresolved reference 'rxPackets'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:265:152 Unresolved reference 'txBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:265:184 Unresolved reference 'rxBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:266:46 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:266:64 Unresolved reference 'txPackets'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:266:88 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:266:106 Unresolved reference 'rxPackets'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:266:128 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:266:146 Unresolved reference 'txBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:266:166 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:266:184 Unresolved reference 'rxBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:270:58 Unresolved reference 'lastNativeStatsTime'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:278:41 Unresolved reference 'txPackets'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:278:53 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:278:71 Unresolved reference 'txPackets'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:279:41 Unresolved reference 'rxPackets'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:279:53 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:279:71 Unresolved reference 'rxPackets'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:282:39 Unresolved reference 'txBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:282:49 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:282:67 Unresolved reference 'txBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:283:39 Unresolved reference 'rxBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:283:49 Unresolved reference 'lastNativeStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:283:67 Unresolved reference 'rxBytes'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:294:15 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:296:26 'operator' modifier is required on 'fun <T> Comparable<T>.compareTo(other: T): Int'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:298:19 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:309:24 'operator' modifier is required on 'fun <T> Comparable<T>.compareTo(other: T): Int'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:309:44 'operator' modifier is required on 'fun <T> Comparable<T>.compareTo(other: T): Int'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:329:27 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:337:49 'operator' modifier is required on 'fun <T> Comparable<T>.compareTo(other: T): Int'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:337:93 'operator' modifier is required on 'fun <T> Comparable<T>.compareTo(other: T): Int'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:340:19 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:346:15 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:361:20 Unresolved reference 'lastTrafficStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:361:48 Unresolved reference 'lastTrafficTime'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:362:56 Unresolved reference 'lastTrafficTime'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:364:51 Unresolved reference 'lastTrafficStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:364:70 Function invocation 'first()' expected.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:365:55 Unresolved reference 'lastTrafficStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:365:74 Unresolved reference 'second'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:371:23 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:374:17 Unresolved reference 'lastTrafficStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:375:17 Unresolved reference 'lastTrafficTime'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:379:23 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:384:19 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:385:13 Unresolved reference 'lastTrafficStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:386:13 Unresolved reference 'lastTrafficTime'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:436:17 Unresolved reference 'lastTrafficStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:436:45 Unresolved reference 'lastTrafficTime'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:438:60 Unresolved reference 'lastTrafficTime'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:441:55 Unresolved reference 'lastTrafficStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:441:74 Function invocation 'first()' expected.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:442:59 Unresolved reference 'lastTrafficStats'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:442:78 Unresolved reference 'second'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:451:39 'operator' modifier is required on 'fun <T> Comparable<T>.compareTo(other: T): Int'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:458:63 'operator' modifier is required on 'fun <T> Comparable<T>.compareTo(other: T): Int'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:464:31 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:478:23 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:484:13 Unresolved reference 'metricsHistory'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:485:33 Unresolved reference 'metricsHistory'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:486:47 Unresolved reference 'it'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:490:25 'operator' modifier is required on 'fun <T> Comparable<T>.compareTo(other: T): Int'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:491:23 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:491:96 Unresolved reference 'metricsHistory'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:491:165 Unresolved reference 'it'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:501:19 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:506:15 Unresolved reference 'TAG'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:537:16 Unresolved reference 'metricsHistory'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:544:13 Unresolved reference 'metricsHistory'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:551:29 Unresolved reference 'metricsHistory'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:551:53 Unresolved reference 'it'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:558:49 Unresolved reference 'it'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:559:42 Unresolved reference 'it'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:560:52 Unresolved reference 'it'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:561:43 Unresolved reference 'it'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:562:51 Unresolved reference 'it'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:563:41 Unresolved reference 'size'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:573:9 Unresolved reference 'coreStatsClient'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:574:9 Unresolved reference 'coreStatsClient'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:575:9 Unresolved reference 'lastClientCloseTime'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/telemetry/TProxyMetricsCollector.kt:577:1 Syntax error: Expecting a top level declaration.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/navigation/AppNavGraph.kt:45:33 Unresolved reference 'warp'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/navigation/AppNavGraph.kt:46:33 Unresolved reference 'warp'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/navigation/AppNavGraph.kt:169:29 Cannot infer type for type parameter 'T'. Specify it explicitly.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/navigation/AppNavGraph.kt:169:40 Unresolved reference 'WarpFeatureProvider'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/navigation/AppNavGraph.kt:171:17 Unresolved reference 'WarpScreen'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/screens/config/sections/WireGuardSection.kt:38:47 Unresolved reference 'Visibility'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/screens/config/sections/WireGuardSection.kt:39:47 Unresolved reference 'VisibilityOff'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/screens/config/sections/WireGuardSection.kt:457:77 Unresolved reference 'Visibility'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/screens/config/sections/WireGuardSection.kt:457:107 Unresolved reference 'VisibilityOff'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:29:48 Unresolved reference 'Dashboard'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:32:46 Unresolved reference 'Code'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:35:43 Unresolved reference 'History'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:41:46 Unresolved reference 'Route'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:68:49 Unresolved reference 'Stop'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:71:44 Unresolved reference 'Pause'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:77:43 Unresolved reference 'Save'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:86:43 Unresolved reference 'ContentCopy'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:105:48 Unresolved reference 'MoreHoriz'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:118:45 Unresolved reference 'VpnKey'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:121:47 Unresolved reference 'Security'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:124:44 Unresolved reference 'Speed'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:127:51 Unresolved reference 'RocketLaunch'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:130:43 Unresolved reference 'NetworkCheck'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:133:45 Unresolved reference 'Upload'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:136:47 Unresolved reference 'Download'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:139:52 Unresolved reference 'CloudDownload'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:142:42 Unresolved reference 'Dns'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:145:47 Unresolved reference 'Security'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:148:46 Unresolved reference 'Wifi'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:151:51 Unresolved reference 'NetworkCheck'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:154:45 Unresolved reference 'Public'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:160:45 Unresolved reference 'LockOpen'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:171:44 Unresolved reference 'Error'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:180:51 Unresolved reference 'ErrorOutline'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:183:51 Unresolved reference 'WarningAmber'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:187:45 Unresolved reference 'FilterList'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:191:43 Unresolved reference 'Sort'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:194:49 Unresolved reference 'ExpandMore'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:197:49 Unresolved reference 'ExpandLess'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:200:49 Unresolved reference 'Visibility'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:203:52 Unresolved reference 'VisibilityOff'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:212:45 Unresolved reference 'Folder'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:216:43 Unresolved reference 'InsertDriveFile'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:219:43 Unresolved reference 'Code'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:222:46 Unresolved reference 'History'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:225:48 Unresolved reference 'Analytics'.
-e: file:///C:/Users/halil/Desktop/hadila/app/src/main/kotlin/com/hyperxray/an/ui/theme/HyperIcons.kt:228:43 Unresolved reference 'Tune'.
+> Task :core:core-network:compileDebugKotlin FAILED
+e: file:///C:/Users/halil/Desktop/hadila/core/core-network/src/main/kotlin/com/hyperxray/an/core/network/dns/DnsUpstreamClient.kt:138:31 Unresolved reference 'Socks5UdpClient'.
+e: file:///C:/Users/halil/Desktop/hadila/core/core-network/src/main/kotlin/com/hyperxray/an/core/network/dns/DnsUpstreamClient.kt:143:33 Unresolved reference 'Socks5UdpClient'.
+e: file:///C:/Users/halil/Desktop/hadila/core/core-network/src/main/kotlin/com/hyperxray/an/core/network/dns/DnsUpstreamClient.kt:635:16 Return type mismatch: expected 'ByteArray?', actual 'Any?'.
+e: file:///C:/Users/halil/Desktop/hadila/core/core-network/src/main/kotlin/com/hyperxray/an/core/network/dns/DnsUpstreamClient.kt:642:34 Unresolved reference 'sendUdpAndReceive'.
+e: file:///C:/Users/halil/Desktop/hadila/core/core-network/src/main/kotlin/com/hyperxray/an/core/network/dns/DnsUpstreamClient.kt:651:86 Unresolved reference 'size'.
+e: file:///C:/Users/halil/Desktop/hadila/core/core-network/src/main/kotlin/com/hyperxray/an/core/network/dns/DnsUpstreamClient.kt:655:57 Argument type mismatch: actual type is 'Any', but 'ByteArray' was expected.
+e: file:///C:/Users/halil/Desktop/hadila/core/core-network/src/main/kotlin/com/hyperxray/an/core/network/dns/SystemDnsCacheServer.kt:55:31 Unresolved reference 'Socks5UdpClient'.
+e: file:///C:/Users/halil/Desktop/hadila/core/core-network/src/main/kotlin/com/hyperxray/an/core/network/dns/SystemDnsCacheServer.kt:552:29 Unresolved reference 'Socks5UdpClient'.
+e: file:///C:/Users/halil/Desktop/hadila/core/core-network/src/main/kotlin/com/hyperxray/an/core/network/dns/SystemDnsCacheServer.kt:554:35 Unresolved reference 'close'.
+e: file:///C:/Users/halil/Desktop/hadila/core/core-network/src/main/kotlin/com/hyperxray/an/core/network/dns/SystemDnsCacheServer.kt:572:23 Unresolved reference 'close'.
 
-> Task :app:buildNdkBuildDebug[arm64-v8a]
+> Task :app:mergeDebugResources
 
 [Incubating] Problems report is available at: file:///C:/Users/halil/Desktop/hadila/build/reports/problems/problems-report.html
 
 FAILURE: Build failed with an exception.
 
 * What went wrong:
-Execution failed for task ':app:compileDebugKotlin'.
+Execution failed for task ':core:core-network:compileDebugKotlin'.
 > A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
    > Compilation error. See log for more details
 
 * Try:
+> Run with --stacktrace option to get the stack trace.
 > Run with --info or --debug option to get more log output.
 > Run with --scan to generate a Build Scan (powered by Develocity).
 > Get more help at https://help.gradle.org.
-
-* Exception is:
-org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':app:compileDebugKotlin'.
-	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.lambda$executeIfValid$1(ExecuteActionsTaskExecuter.java:135)
-	at org.gradle.internal.Try$Failure.ifSuccessfulOrElse(Try.java:288)
-	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeIfValid(ExecuteActionsTaskExecuter.java:133)
-	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.execute(ExecuteActionsTaskExecuter.java:121)
-	at org.gradle.api.internal.tasks.execution.ProblemsTaskPathTrackingTaskExecuter.execute(ProblemsTaskPathTrackingTaskExecuter.java:41)
-	at org.gradle.api.internal.tasks.execution.FinalizePropertiesTaskExecuter.execute(FinalizePropertiesTaskExecuter.java:46)
-	at org.gradle.api.internal.tasks.execution.ResolveTaskExecutionModeExecuter.execute(ResolveTaskExecutionModeExecuter.java:51)
-	at org.gradle.api.internal.tasks.execution.SkipTaskWithNoActionsExecuter.execute(SkipTaskWithNoActionsExecuter.java:57)
-	at org.gradle.api.internal.tasks.execution.SkipOnlyIfTaskExecuter.execute(SkipOnlyIfTaskExecuter.java:74)
-	at org.gradle.api.internal.tasks.execution.CatchExceptionTaskExecuter.execute(CatchExceptionTaskExecuter.java:36)
-	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.executeTask(EventFiringTaskExecuter.java:77)
-	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:55)
-	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:52)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:209)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:204)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:59)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:53)
-	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter.execute(EventFiringTaskExecuter.java:52)
-	at org.gradle.execution.plan.DefaultNodeExecutor.executeLocalTaskNode(DefaultNodeExecutor.java:55)
-	at org.gradle.execution.plan.DefaultNodeExecutor.execute(DefaultNodeExecutor.java:34)
-	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$InvokeNodeExecutorsAction.execute(DefaultTaskExecutionGraph.java:355)
-	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$InvokeNodeExecutorsAction.execute(DefaultTaskExecutionGraph.java:343)
-	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.lambda$execute$0(DefaultTaskExecutionGraph.java:339)
-	at org.gradle.internal.operations.CurrentBuildOperationRef.with(CurrentBuildOperationRef.java:84)
-	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.execute(DefaultTaskExecutionGraph.java:339)
-	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.execute(DefaultTaskExecutionGraph.java:328)
-	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.execute(DefaultPlanExecutor.java:459)
-	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.run(DefaultPlanExecutor.java:376)
-	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
-	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:47)
-Caused by: org.gradle.workers.internal.DefaultWorkerExecutor$WorkExecutionException: A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
-	at org.gradle.workers.internal.DefaultWorkerExecutor$WorkItemExecution.waitForCompletion(DefaultWorkerExecutor.java:289)
-	at org.gradle.internal.work.DefaultAsyncWorkTracker.lambda$waitForItemsAndGatherFailures$2(DefaultAsyncWorkTracker.java:130)
-	at org.gradle.internal.Factories$1.create(Factories.java:33)
-	at org.gradle.internal.work.DefaultWorkerLeaseService.lambda$withoutLocks$2(DefaultWorkerLeaseService.java:344)
-	at org.gradle.internal.work.ResourceLockStatistics$1.measure(ResourceLockStatistics.java:42)
-	at org.gradle.internal.work.DefaultWorkerLeaseService.withoutLocks(DefaultWorkerLeaseService.java:342)
-	at org.gradle.internal.work.DefaultWorkerLeaseService.withoutLocks(DefaultWorkerLeaseService.java:326)
-	at org.gradle.internal.work.DefaultWorkerLeaseService.withoutLock(DefaultWorkerLeaseService.java:331)
-	at org.gradle.internal.work.DefaultAsyncWorkTracker.waitForItemsAndGatherFailures(DefaultAsyncWorkTracker.java:126)
-	at org.gradle.internal.work.DefaultAsyncWorkTracker.waitForItemsAndGatherFailures(DefaultAsyncWorkTracker.java:92)
-	at org.gradle.internal.work.DefaultAsyncWorkTracker.waitForAll(DefaultAsyncWorkTracker.java:78)
-	at org.gradle.internal.work.DefaultAsyncWorkTracker.waitForCompletion(DefaultAsyncWorkTracker.java:66)
-	at org.gradle.api.internal.tasks.execution.TaskExecution$3.run(TaskExecution.java:260)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$1.execute(DefaultBuildOperationRunner.java:29)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$1.execute(DefaultBuildOperationRunner.java:26)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:59)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.run(DefaultBuildOperationRunner.java:47)
-	at org.gradle.api.internal.tasks.execution.TaskExecution.executeAction(TaskExecution.java:237)
-	at org.gradle.api.internal.tasks.execution.TaskExecution.executeActions(TaskExecution.java:220)
-	at org.gradle.api.internal.tasks.execution.TaskExecution.executeWithPreviousOutputFiles(TaskExecution.java:203)
-	at org.gradle.api.internal.tasks.execution.TaskExecution.execute(TaskExecution.java:170)
-	at org.gradle.internal.execution.steps.ExecuteStep.executeInternal(ExecuteStep.java:105)
-	at org.gradle.internal.execution.steps.ExecuteStep.access$000(ExecuteStep.java:44)
-	at org.gradle.internal.execution.steps.ExecuteStep$1.call(ExecuteStep.java:59)
-	at org.gradle.internal.execution.steps.ExecuteStep$1.call(ExecuteStep.java:56)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:209)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:204)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:59)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:53)
-	at org.gradle.internal.execution.steps.ExecuteStep.execute(ExecuteStep.java:56)
-	at org.gradle.internal.execution.steps.ExecuteStep.execute(ExecuteStep.java:44)
-	at org.gradle.internal.execution.steps.CancelExecutionStep.execute(CancelExecutionStep.java:42)
-	at org.gradle.internal.execution.steps.TimeoutStep.executeWithoutTimeout(TimeoutStep.java:75)
-	at org.gradle.internal.execution.steps.TimeoutStep.execute(TimeoutStep.java:55)
-	at org.gradle.internal.execution.steps.PreCreateOutputParentsStep.execute(PreCreateOutputParentsStep.java:50)
-	at org.gradle.internal.execution.steps.PreCreateOutputParentsStep.execute(PreCreateOutputParentsStep.java:28)
-	at org.gradle.internal.execution.steps.RemovePreviousOutputsStep.execute(RemovePreviousOutputsStep.java:68)
-	at org.gradle.internal.execution.steps.RemovePreviousOutputsStep.execute(RemovePreviousOutputsStep.java:38)
-	at org.gradle.internal.execution.steps.BroadcastChangingOutputsStep.execute(BroadcastChangingOutputsStep.java:61)
-	at org.gradle.internal.execution.steps.BroadcastChangingOutputsStep.execute(BroadcastChangingOutputsStep.java:26)
-	at org.gradle.internal.execution.steps.CaptureOutputsAfterExecutionStep.execute(CaptureOutputsAfterExecutionStep.java:69)
-	at org.gradle.internal.execution.steps.CaptureOutputsAfterExecutionStep.execute(CaptureOutputsAfterExecutionStep.java:46)
-	at org.gradle.internal.execution.steps.ResolveInputChangesStep.execute(ResolveInputChangesStep.java:39)
-	at org.gradle.internal.execution.steps.ResolveInputChangesStep.execute(ResolveInputChangesStep.java:28)
-	at org.gradle.internal.execution.steps.BuildCacheStep.executeWithoutCache(BuildCacheStep.java:189)
-	at org.gradle.internal.execution.steps.BuildCacheStep.lambda$execute$1(BuildCacheStep.java:75)
-	at org.gradle.internal.Either$Right.fold(Either.java:176)
-	at org.gradle.internal.execution.caching.CachingState.fold(CachingState.java:62)
-	at org.gradle.internal.execution.steps.BuildCacheStep.execute(BuildCacheStep.java:73)
-	at org.gradle.internal.execution.steps.BuildCacheStep.execute(BuildCacheStep.java:48)
-	at org.gradle.internal.execution.steps.StoreExecutionStateStep.execute(StoreExecutionStateStep.java:46)
-	at org.gradle.internal.execution.steps.StoreExecutionStateStep.execute(StoreExecutionStateStep.java:35)
-	at org.gradle.internal.execution.steps.SkipUpToDateStep.executeBecause(SkipUpToDateStep.java:75)
-	at org.gradle.internal.execution.steps.SkipUpToDateStep.lambda$execute$2(SkipUpToDateStep.java:53)
-	at org.gradle.internal.execution.steps.SkipUpToDateStep.execute(SkipUpToDateStep.java:53)
-	at org.gradle.internal.execution.steps.SkipUpToDateStep.execute(SkipUpToDateStep.java:35)
-	at org.gradle.internal.execution.steps.legacy.MarkSnapshottingInputsFinishedStep.execute(MarkSnapshottingInputsFinishedStep.java:37)
-	at org.gradle.internal.execution.steps.legacy.MarkSnapshottingInputsFinishedStep.execute(MarkSnapshottingInputsFinishedStep.java:27)
-	at org.gradle.internal.execution.steps.ResolveIncrementalCachingStateStep.executeDelegate(ResolveIncrementalCachingStateStep.java:49)
-	at org.gradle.internal.execution.steps.ResolveIncrementalCachingStateStep.executeDelegate(ResolveIncrementalCachingStateStep.java:27)
-	at org.gradle.internal.execution.steps.AbstractResolveCachingStateStep.execute(AbstractResolveCachingStateStep.java:71)
-	at org.gradle.internal.execution.steps.AbstractResolveCachingStateStep.execute(AbstractResolveCachingStateStep.java:39)
-	at org.gradle.internal.execution.steps.ResolveChangesStep.execute(ResolveChangesStep.java:64)
-	at org.gradle.internal.execution.steps.ResolveChangesStep.execute(ResolveChangesStep.java:35)
-	at org.gradle.internal.execution.steps.ValidateStep.execute(ValidateStep.java:62)
-	at org.gradle.internal.execution.steps.ValidateStep.execute(ValidateStep.java:40)
-	at org.gradle.internal.execution.steps.AbstractCaptureStateBeforeExecutionStep.execute(AbstractCaptureStateBeforeExecutionStep.java:76)
-	at org.gradle.internal.execution.steps.AbstractCaptureStateBeforeExecutionStep.execute(AbstractCaptureStateBeforeExecutionStep.java:45)
-	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.executeWithNonEmptySources(AbstractSkipEmptyWorkStep.java:136)
-	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.execute(AbstractSkipEmptyWorkStep.java:66)
-	at org.gradle.internal.execution.steps.AbstractSkipEmptyWorkStep.execute(AbstractSkipEmptyWorkStep.java:38)
-	at org.gradle.internal.execution.steps.legacy.MarkSnapshottingInputsStartedStep.execute(MarkSnapshottingInputsStartedStep.java:38)
-	at org.gradle.internal.execution.steps.LoadPreviousExecutionStateStep.execute(LoadPreviousExecutionStateStep.java:36)
-	at org.gradle.internal.execution.steps.LoadPreviousExecutionStateStep.execute(LoadPreviousExecutionStateStep.java:23)
-	at org.gradle.internal.execution.steps.HandleStaleOutputsStep.execute(HandleStaleOutputsStep.java:75)
-	at org.gradle.internal.execution.steps.HandleStaleOutputsStep.execute(HandleStaleOutputsStep.java:41)
-	at org.gradle.internal.execution.steps.AssignMutableWorkspaceStep.lambda$execute$0(AssignMutableWorkspaceStep.java:35)
-	at org.gradle.api.internal.tasks.execution.TaskExecution$4.withWorkspace(TaskExecution.java:297)
-	at org.gradle.internal.execution.steps.AssignMutableWorkspaceStep.execute(AssignMutableWorkspaceStep.java:31)
-	at org.gradle.internal.execution.steps.AssignMutableWorkspaceStep.execute(AssignMutableWorkspaceStep.java:22)
-	at org.gradle.internal.execution.steps.ChoosePipelineStep.execute(ChoosePipelineStep.java:40)
-	at org.gradle.internal.execution.steps.ChoosePipelineStep.execute(ChoosePipelineStep.java:23)
-	at org.gradle.internal.execution.steps.ExecuteWorkBuildOperationFiringStep.lambda$execute$2(ExecuteWorkBuildOperationFiringStep.java:67)
-	at org.gradle.internal.execution.steps.ExecuteWorkBuildOperationFiringStep.execute(ExecuteWorkBuildOperationFiringStep.java:67)
-	at org.gradle.internal.execution.steps.ExecuteWorkBuildOperationFiringStep.execute(ExecuteWorkBuildOperationFiringStep.java:39)
-	at org.gradle.internal.execution.steps.IdentityCacheStep.execute(IdentityCacheStep.java:46)
-	at org.gradle.internal.execution.steps.IdentityCacheStep.execute(IdentityCacheStep.java:34)
-	at org.gradle.internal.execution.steps.IdentifyStep.execute(IdentifyStep.java:44)
-	at org.gradle.internal.execution.steps.IdentifyStep.execute(IdentifyStep.java:31)
-	at org.gradle.internal.execution.impl.DefaultExecutionEngine$1.execute(DefaultExecutionEngine.java:64)
-	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeIfValid(ExecuteActionsTaskExecuter.java:132)
-	... 30 more
-Caused by: org.jetbrains.kotlin.gradle.tasks.CompilationErrorException: Compilation error. See log for more details
-	at org.jetbrains.kotlin.gradle.tasks.TasksUtilsKt.throwExceptionIfCompilationFailed(tasksUtils.kt:21)
-	at org.jetbrains.kotlin.compilerRunner.GradleKotlinCompilerWork.run(GradleKotlinCompilerWork.kt:115)
-	at org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction.execute(GradleCompilerRunnerWithWorkers.kt:74)
-	at org.gradle.workers.internal.DefaultWorkerServer.execute(DefaultWorkerServer.java:68)
-	at org.gradle.workers.internal.NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:64)
-	at org.gradle.workers.internal.NoIsolationWorkerFactory$1$1.create(NoIsolationWorkerFactory.java:61)
-	at org.gradle.internal.classloader.ClassLoaderUtils.executeInClassloader(ClassLoaderUtils.java:100)
-	at org.gradle.workers.internal.NoIsolationWorkerFactory$1.lambda$execute$0(NoIsolationWorkerFactory.java:61)
-	at org.gradle.workers.internal.AbstractWorker$1.call(AbstractWorker.java:44)
-	at org.gradle.workers.internal.AbstractWorker$1.call(AbstractWorker.java:41)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:209)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:204)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:59)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
-	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:53)
-	at org.gradle.workers.internal.AbstractWorker.executeWrappedInBuildOperation(AbstractWorker.java:41)
-	at org.gradle.workers.internal.NoIsolationWorkerFactory$1.execute(NoIsolationWorkerFactory.java:58)
-	at org.gradle.workers.internal.DefaultWorkerExecutor.lambda$submitWork$0(DefaultWorkerExecutor.java:176)
-	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.runExecution(DefaultConditionalExecutionQueue.java:194)
-	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.access$700(DefaultConditionalExecutionQueue.java:127)
-	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner$1.run(DefaultConditionalExecutionQueue.java:169)
-	at org.gradle.internal.Factories$1.create(Factories.java:33)
-	at org.gradle.internal.work.DefaultWorkerLeaseService.lambda$withLocksAcquired$0(DefaultWorkerLeaseService.java:269)
-	at org.gradle.internal.work.ResourceLockStatistics$1.measure(ResourceLockStatistics.java:42)
-	at org.gradle.internal.work.DefaultWorkerLeaseService.withLocksAcquired(DefaultWorkerLeaseService.java:267)
-	at org.gradle.internal.work.DefaultWorkerLeaseService.withLocks(DefaultWorkerLeaseService.java:259)
-	at org.gradle.internal.work.DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:127)
-	at org.gradle.internal.work.DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:132)
-	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.runBatch(DefaultConditionalExecutionQueue.java:164)
-	at org.gradle.internal.work.DefaultConditionalExecutionQueue$ExecutionRunner.run(DefaultConditionalExecutionQueue.java:133)
-	... 2 more
-
 
 Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
 
@@ -810,5 +292,5 @@ You can use '--warning-mode all' to show the individual deprecation warnings and
 
 For more on this, please refer to https://docs.gradle.org/9.2.0/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
 
-BUILD FAILED in 3m 40s
-329 actionable tasks: 19 executed, 310 up-to-date
+BUILD FAILED in 13s
+205 actionable tasks: 9 executed, 196 up-to-date
