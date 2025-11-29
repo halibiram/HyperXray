@@ -389,17 +389,24 @@ fun DashboardScreen(
             var txThroughput by remember { mutableStateOf(0.0) }
             var rxThroughput by remember { mutableStateOf(0.0) }
             
-            // Uptime değiştiğinde önceki değerleri sıfırla (yeni bağlantı başladı)
-            LaunchedEffect(hyperVpnStats.uptime) {
-                if (hyperVpnStats.uptime != previousUptime) {
-                    // Uptime değişti - yeni bağlantı veya bağlantı durumu değişti
-                    if (hyperVpnStats.uptime == 0L && previousUptime > 0L) {
+            // Bağlantı durumu değiştiğinde önceki değerleri sıfırla
+            // Sadece bağlantı başladığında (0 -> >0) veya kesildiğinde (>0 -> 0) tetikle
+            // Uptime'ın 0 olup olmadığını key olarak kullan (sadece 0 <-> >0 geçişlerinde tetiklenir)
+            val isConnectedKey = hyperVpnStats.uptime > 0L
+            
+            LaunchedEffect(isConnectedKey) {
+                val wasConnected = previousUptime > 0L
+                val isConnected = hyperVpnStats.uptime > 0L
+                
+                if (wasConnected != isConnected) {
+                    // Bağlantı durumu değişti
+                    if (!isConnected && wasConnected) {
                         // Bağlantı kesildi - değerleri sıfırla
                         previousTxBytes = 0L
                         previousRxBytes = 0L
                         txThroughput = 0.0
                         rxThroughput = 0.0
-                    } else if (hyperVpnStats.uptime > 0L && previousUptime == 0L) {
+                    } else if (isConnected && !wasConnected) {
                         // Yeni bağlantı başladı - önceki değerleri sıfırla
                         previousTxBytes = hyperVpnStats.txBytes
                         previousRxBytes = hyperVpnStats.rxBytes

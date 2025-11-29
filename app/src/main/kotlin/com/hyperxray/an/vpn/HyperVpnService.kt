@@ -144,8 +144,12 @@ class HyperVpnService : VpnService() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val handler = Handler(Looper.getMainLooper())
     private var tunFd: ParcelFileDescriptor? = null
+    private val tunFdLock = Any() // Synchronization lock for tunFd access
+    @Volatile
     private var isRunning = false
+    @Volatile
     private var isStopping = false
+    @Volatile
     private var isStarting = false
     private val warpManager = WarpManager.getInstance()
     private var startTime: Long = 0
@@ -433,13 +437,16 @@ class HyperVpnService : VpnService() {
     override fun onRevoke() {
         AiLogHelper.w(TAG, "VPN permission revoked (onRevoke)")
         serviceScope.launch {
-            // Use try-catch to avoid double-close errors
-            try {
-                tunFd?.close()
-            } catch (e: Exception) {
-                AiLogHelper.w(TAG, "Error closing tunFd in onRevoke: ${e.message}")
+            // Use synchronized block and try-catch to avoid double-close errors
+            synchronized(tunFdLock) {
+                try {
+                    tunFd?.close()
+                } catch (e: Exception) {
+                    AiLogHelper.w(TAG, "Error closing tunFd in onRevoke: ${e.message}")
+                } finally {
+                    tunFd = null
+                }
             }
-            tunFd = null
             stopVpn()
         }
         super.onRevoke()
@@ -556,13 +563,16 @@ class HyperVpnService : VpnService() {
         lastRecoveryTime = 0L
         
         // Close any existing tunFd before starting new connection
-        // Use try-catch to avoid double-close errors
-        try {
-            tunFd?.close()
-        } catch (e: Exception) {
-            AiLogHelper.w(TAG, "Error closing existing tunFd (may already be closed): ${e.message}")
+        // Use synchronized block and try-catch to avoid double-close errors
+        synchronized(tunFdLock) {
+            try {
+                tunFd?.close()
+            } catch (e: Exception) {
+                AiLogHelper.w(TAG, "Error closing existing tunFd (may already be closed): ${e.message}")
+            } finally {
+                tunFd = null
+            }
         }
-        tunFd = null
         
         serviceScope.launch {
             try {
@@ -717,7 +727,7 @@ class HyperVpnService : VpnService() {
                 // Establish VPN interface with timeout protection
                 AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Calling builder.establish() with 10s timeout protection...")
                 val establishStartTime = System.currentTimeMillis()
-                tunFd = try {
+                val establishedTunFd = try {
                     val future = CompletableFuture.supplyAsync({
                         builder.establish()
                     }, java.util.concurrent.Executors.newSingleThreadExecutor())
@@ -737,7 +747,11 @@ class HyperVpnService : VpnService() {
                 }
                 
                 val establishDuration = System.currentTimeMillis() - establishStartTime
-                val establishedTunFd = tunFd
+                
+                // Store tunFd in synchronized block
+                synchronized(tunFdLock) {
+                    tunFd = establishedTunFd
+                }
                 if (establishedTunFd == null) {
                     AiLogHelper.e(TAG, "❌ TUN ESTABLISH FAILED: builder.establish() returned null (duration: ${establishDuration}ms)")
                     Log.e(TAG, "Failed to establish VPN interface (TUN). builder.establish() returned null.")
@@ -834,8 +848,10 @@ class HyperVpnService : VpnService() {
                 
                 AiLogHelper.d(TAG, "✅ VPN START: Configs validated - WG: ${wgConfig.length} bytes, Xray: ${finalXrayConfig.length} bytes")
                 
-                // Get tunFd safely
-                val currentTunFd = tunFd
+                // Get tunFd safely with synchronization
+                val currentTunFd = synchronized(tunFdLock) {
+                    tunFd
+                }
                 if (currentTunFd == null) {
                     val errorMsg = "TUN file descriptor is null"
                     AiLogHelper.e(TAG, "❌ VPN START: $errorMsg")
@@ -861,7 +877,9 @@ class HyperVpnService : VpnService() {
                     } catch (closeErr: Exception) {
                         AiLogHelper.w(TAG, "Error closing tunFd after detach failure: ${closeErr.message}")
                     }
-                    tunFd = null
+                    synchronized(tunFdLock) {
+                        tunFd = null
+                    }
                     return@launch
                 }
                 
@@ -869,7 +887,9 @@ class HyperVpnService : VpnService() {
                 
                 // After detaching, the ParcelFileDescriptor is invalid, so clear the reference
                 // Native code now owns the file descriptor
-                tunFd = null
+                synchronized(tunFdLock) {
+                    tunFd = null
+                }
                 
                 AiLogHelper.i(TAG, "🚀 VPN START: Calling startHyperTunnel native function...")
                 AiLogHelper.d(TAG, "📋 VPN START: Native call params - tunFd: $fdInt, wgConfig: ${wgConfig.length} bytes, xrayConfig: ${finalXrayConfig.length} bytes")
@@ -1009,12 +1029,15 @@ class HyperVpnService : VpnService() {
                 // If detachFd() was called, tunFd is already null and fd ownership transferred to native
                 // If detachFd() wasn't called (exception before that), tunFd might still be valid
                 // Try to close only if tunFd is still valid (not detached)
-                try {
-                    tunFd?.close()
-                } catch (closeErr: Exception) {
-                    AiLogHelper.w(TAG, "Error closing tunFd after exception (may already be detached): ${closeErr.message}")
+                synchronized(tunFdLock) {
+                    try {
+                        tunFd?.close()
+                    } catch (closeErr: Exception) {
+                        AiLogHelper.w(TAG, "Error closing tunFd after exception (may already be detached): ${closeErr.message}")
+                    } finally {
+                        tunFd = null
+                    }
                 }
-                tunFd = null
             } finally {
                 isStarting = false
             }
@@ -1057,8 +1080,11 @@ class HyperVpnService : VpnService() {
                 
                 // Update state immediately (BEFORE stopping tunnel - don't wait)
                 // Save tunFd reference before nulling (for potential cleanup)
-                val tunFdToClose = tunFd
-                tunFd = null
+                val tunFdToClose = synchronized(tunFdLock) {
+                    val fd = tunFd
+                    tunFd = null
+                    fd
+                }
                 isRunning = false
                 startTime = 0
                 

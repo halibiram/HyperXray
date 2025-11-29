@@ -490,7 +490,7 @@ func TestConnectivity() error {
 			
 			// Verify local address matches physical IP (not VPN virtual IP)
 			physicalIP, err := GetLocalPhysicalIP()
-			if err == nil {
+			if err == nil && physicalIP != nil {
 				localTCPAddr, ok := localAddr.(*net.TCPAddr)
 				if ok && localTCPAddr.IP != nil {
 					if localTCPAddr.IP.Equal(physicalIP) {

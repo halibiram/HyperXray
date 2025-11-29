@@ -89,8 +89,10 @@ func (d *ProtectedXrayDialer) Dial(ctx context.Context, source xnet.Address, des
 		logWarn("[XrayDialer] ⚠️ Failed to get physical IP: %v", err)
 		logWarn("[XrayDialer] ⚠️ Will proceed without explicit source binding (may use VPN IP)")
 		physicalIP = nil
-	} else {
+	} else if physicalIP != nil {
 		logInfo("[XrayDialer] ✅ Physical IP found: %s", physicalIP.String())
+	} else {
+		logWarn("[XrayDialer] ⚠️ Physical IP is nil (cache miss), will proceed without binding")
 	}
 
 	// Use net.Dialer with Control callback for socket protection and source binding
