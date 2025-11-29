@@ -151,9 +151,40 @@ func (b *XrayBind) makeReceiveFunc() conn.ReceiveFunc {
 		}
 		b.mu.Unlock()
 		
+		// If connection is invalid, try to reconnect instead of returning error
+		// This prevents WireGuard from closing the connection immediately
 		if !connValid {
-			logWarn("[XrayBind] makeReceiveFunc: Connection invalid (state: %s), cannot read", connState)
-			return 0, fmt.Errorf("connection invalid: %s", connState)
+			logWarn("[XrayBind] makeReceiveFunc: Connection invalid (state: %s), attempting reconnect...", connState)
+			
+			// Try to reconnect (reconnect() handles its own locking)
+			reconnectErr := b.reconnect()
+			
+			if reconnectErr != nil {
+				logError("[XrayBind] makeReceiveFunc: Reconnect failed: %v", reconnectErr)
+				// Return timeout error instead of connection invalid error
+				// This allows WireGuard to retry instead of closing immediately
+				return 0, fmt.Errorf("read timeout (reconnect failed: %v)", reconnectErr)
+			}
+			
+			// Recheck connection after reconnect
+			b.mu.Lock()
+			connValid = b.udpConn != nil && !b.closed
+			if b.udpConn != nil {
+				if b.udpConn.IsConnected() {
+					connState = "connected"
+				} else {
+					connState = "not connected"
+				}
+			}
+			b.mu.Unlock()
+			
+			if !connValid {
+				logWarn("[XrayBind] makeReceiveFunc: Connection still invalid after reconnect")
+				// Return timeout to allow retry
+				return 0, fmt.Errorf("read timeout (connection still invalid)")
+			}
+			
+			logInfo("[XrayBind] makeReceiveFunc: ✅ Reconnected successfully, continuing read...")
 		}
 		
 		// Log read attempt periodically

@@ -114,7 +114,12 @@ class ServiceNotificationManager(private val service: Service) {
      * @param removeNotification If true, removes the notification
      */
     fun stopForeground(removeNotification: Boolean) {
-        service.stopForeground(removeNotification)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            service.stopForeground(android.app.Service.STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            service.stopForeground(removeNotification)
+        }
     }
     
     /**

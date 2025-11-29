@@ -67,7 +67,7 @@ import (
 
 	"github.com/hyperxray/native/bridge"
 	"github.com/hyperxray/native/dns"
-	"github.com/hyperxray/native/xray"
+	// REMOVED: "github.com/hyperxray/native/xray" - MultiInstanceManager removed
 )
 
 var (
@@ -75,9 +75,8 @@ var (
 	tunnelLock sync.Mutex
 	lastError  string
 	
-	// Multi-instance manager
-	multiManager     *xray.MultiInstanceManager
-	multiManagerLock sync.Mutex
+	// REMOVED: Multi-instance manager
+	// multiManager and multiManagerLock removed as part of architectural cleanup
 )
 
 // Error codes
@@ -255,9 +254,12 @@ func StartHyperTunnel(tunFd C.int, wgConfigJSON, xrayConfigJSON, warpEndpoint, w
 	defer tunnelLock.Unlock()
 
 	// Check if tunnel already running
+	// If tunnel exists, stop it first to allow restart
 	if tunnel != nil {
-		logError("Tunnel already running")
-		return ErrorTunnelAlreadyRunning
+		logInfo("Tunnel already exists, stopping it first to allow restart...")
+		tunnel.Stop()
+		tunnel = nil
+		logInfo("Previous tunnel stopped, proceeding with new tunnel creation")
 	}
 
 	// Validate TUN file descriptor
@@ -483,6 +485,25 @@ func GetTunnelStats() *C.char {
 	return C.CString(string(jsonBytes))
 }
 
+//export GetHandshakeRTT
+func GetHandshakeRTT() C.longlong {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in GetHandshakeRTT: %v", r)
+		}
+	}()
+
+	tunnelLock.Lock()
+	defer tunnelLock.Unlock()
+
+	if tunnel == nil {
+		return 50 // Default fallback
+	}
+
+	rtt := tunnel.GetHandshakeRTT()
+	return C.longlong(rtt)
+}
+
 //export GetLastError
 func GetLastError() *C.char {
 	return C.CString(lastError)
@@ -498,6 +519,130 @@ func GetXrayConfig() *C.char {
 	}
 	
 	return C.CString(tunnel.ExportXrayConfig())
+}
+
+//export IsXrayGrpcAvailable
+func IsXrayGrpcAvailable() C.bool {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in IsXrayGrpcAvailable: %v", r)
+		}
+	}()
+
+	tunnelLock.Lock()
+	defer tunnelLock.Unlock()
+
+	if tunnel == nil {
+		return C.bool(false)
+	}
+
+	xrayInstance := tunnel.GetXrayInstance()
+	if xrayInstance == nil {
+		return C.bool(false)
+	}
+
+	grpcClient := xrayInstance.GetGrpcClient()
+	return C.bool(grpcClient != nil)
+}
+
+//export GetXraySystemStats
+func GetXraySystemStats() *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in GetXraySystemStats: %v", r)
+		}
+	}()
+
+	tunnelLock.Lock()
+	defer tunnelLock.Unlock()
+
+	if tunnel == nil {
+		return C.CString(`{"error":"no tunnel running"}`)
+	}
+
+	xrayInstance := tunnel.GetXrayInstance()
+	if xrayInstance == nil {
+		return C.CString(`{"error":"xray instance not available"}`)
+	}
+
+	grpcClient := xrayInstance.GetGrpcClient()
+	if grpcClient == nil {
+		return C.CString(`{"error":"gRPC client not available"}`)
+	}
+
+	stats, err := grpcClient.GetSystemStats()
+	if err != nil {
+		logError("Failed to get system stats: %v", err)
+		return C.CString(fmt.Sprintf(`{"error":"failed to get stats: %v"}`, err))
+	}
+
+	// Convert to JSON
+	result := map[string]interface{}{
+		"numGoroutine": stats.NumGoroutine,
+		"numGC":        stats.NumGC,
+		"alloc":        stats.Alloc,
+		"totalAlloc":   stats.TotalAlloc,
+		"sys":          stats.Sys,
+		"mallocs":      stats.Mallocs,
+		"frees":        stats.Frees,
+		"liveObjects":  stats.LiveObjects,
+		"pauseTotalNs": stats.PauseTotalNs,
+		"uptime":       stats.Uptime,
+	}
+
+	jsonBytes, err := json.Marshal(result)
+	if err != nil {
+		logError("Failed to marshal system stats: %v", err)
+		return C.CString(`{"error":"failed to marshal stats"}`)
+	}
+
+	return C.CString(string(jsonBytes))
+}
+
+//export GetXrayTrafficStats
+func GetXrayTrafficStats() *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in GetXrayTrafficStats: %v", r)
+		}
+	}()
+
+	tunnelLock.Lock()
+	defer tunnelLock.Unlock()
+
+	if tunnel == nil {
+		return C.CString(`{"error":"no tunnel running"}`)
+	}
+
+	xrayInstance := tunnel.GetXrayInstance()
+	if xrayInstance == nil {
+		return C.CString(`{"error":"xray instance not available"}`)
+	}
+
+	grpcClient := xrayInstance.GetGrpcClient()
+	if grpcClient == nil {
+		return C.CString(`{"error":"gRPC client not available"}`)
+	}
+
+	uplink, downlink, err := grpcClient.QueryTrafficStats()
+	if err != nil {
+		logError("Failed to get traffic stats: %v", err)
+		return C.CString(fmt.Sprintf(`{"error":"failed to get traffic stats: %v"}`, err))
+	}
+
+	// Convert to JSON
+	result := map[string]interface{}{
+		"uplink":   uplink,
+		"downlink": downlink,
+	}
+
+	jsonBytes, err := json.Marshal(result)
+	if err != nil {
+		logError("Failed to marshal traffic stats: %v", err)
+		return C.CString(`{"error":"failed to marshal stats"}`)
+	}
+
+	return C.CString(string(jsonBytes))
 }
 
 //export NativeGeneratePublicKey
@@ -544,189 +689,22 @@ func SetSocketProtector(protector C.socket_protector_func) {
 }
 
 // ============================================================================
-// Multi-Instance Management Functions
+// REMOVED: Multi-Instance Management Functions
 // ============================================================================
-
-//export InitMultiInstanceManager
-func InitMultiInstanceManager(nativeLibDir, filesDir *C.char, maxInstances C.int) C.int {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in InitMultiInstanceManager: %v\n%s", r, debug.Stack())
-		}
-	}()
-
-	multiManagerLock.Lock()
-	defer multiManagerLock.Unlock()
-
-	nativeDir := C.GoString(nativeLibDir)
-	files := C.GoString(filesDir)
-	max := int(maxInstances)
-
-	logInfo("InitMultiInstanceManager: nativeLibDir=%s, filesDir=%s, maxInstances=%d", nativeDir, files, max)
-
-	multiManager = xray.NewMultiInstanceManager(nativeDir, files, max)
-	
-	logInfo("MultiInstanceManager initialized successfully")
-	return ErrorSuccess
-}
-
-//export StartMultiInstances
-func StartMultiInstances(count C.int, configJSON *C.char, excludedPortsJSON *C.char) *C.char {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in StartMultiInstances: %v\n%s", r, debug.Stack())
-		}
-	}()
-
-	multiManagerLock.Lock()
-	defer multiManagerLock.Unlock()
-
-	if multiManager == nil {
-		logError("MultiInstanceManager not initialized")
-		return C.CString(`{"error":"manager not initialized"}`)
-	}
-
-	config := C.GoString(configJSON)
-	excludedStr := C.GoString(excludedPortsJSON)
-	
-	var excludedPorts []int
-	if excludedStr != "" {
-		json.Unmarshal([]byte(excludedStr), &excludedPorts)
-	}
-
-	logInfo("StartMultiInstances: count=%d, configLen=%d, excludedPorts=%v", count, len(config), excludedPorts)
-
-	result, err := multiManager.StartInstances(int(count), config, excludedPorts)
-	if err != nil {
-		logError("StartMultiInstances failed: %v", err)
-		errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
-		return C.CString(string(errJSON))
-	}
-
-	logInfo("StartMultiInstances successful: %v", result)
-	resultJSON, _ := json.Marshal(map[string]interface{}{
-		"success":   true,
-		"instances": result,
-	})
-	return C.CString(string(resultJSON))
-}
-
-//export StopMultiInstance
-func StopMultiInstance(index C.int) C.int {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in StopMultiInstance: %v\n%s", r, debug.Stack())
-		}
-	}()
-
-	multiManagerLock.Lock()
-	defer multiManagerLock.Unlock()
-
-	if multiManager == nil {
-		logError("MultiInstanceManager not initialized")
-		return ErrorTunnelNotRunning
-	}
-
-	err := multiManager.StopInstance(int(index))
-	if err != nil {
-		logError("StopMultiInstance failed: %v", err)
-		return ErrorTunnelNotRunning
-	}
-
-	logInfo("StopMultiInstance %d successful", index)
-	return ErrorSuccess
-}
-
-//export StopAllMultiInstances
-func StopAllMultiInstances() C.int {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in StopAllMultiInstances: %v\n%s", r, debug.Stack())
-		}
-	}()
-
-	multiManagerLock.Lock()
-	defer multiManagerLock.Unlock()
-
-	if multiManager == nil {
-		logError("MultiInstanceManager not initialized")
-		return ErrorTunnelNotRunning
-	}
-
-	multiManager.StopAllInstances()
-	logInfo("StopAllMultiInstances successful")
-	return ErrorSuccess
-}
-
-//export GetMultiInstanceStatus
-func GetMultiInstanceStatus(index C.int) *C.char {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in GetMultiInstanceStatus: %v", r)
-		}
-	}()
-
-	multiManagerLock.Lock()
-	defer multiManagerLock.Unlock()
-
-	if multiManager == nil {
-		return C.CString(`{"error":"manager not initialized"}`)
-	}
-
-	info, err := multiManager.GetInstanceStatus(int(index))
-	if err != nil {
-		errJSON, _ := json.Marshal(map[string]string{"error": err.Error()})
-		return C.CString(string(errJSON))
-	}
-
-	infoJSON, _ := json.Marshal(info)
-	return C.CString(string(infoJSON))
-}
-
-//export GetAllMultiInstancesStatus
-func GetAllMultiInstancesStatus() *C.char {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in GetAllMultiInstancesStatus: %v", r)
-		}
-	}()
-
-	multiManagerLock.Lock()
-	defer multiManagerLock.Unlock()
-
-	if multiManager == nil {
-		return C.CString(`{"error":"manager not initialized"}`)
-	}
-
-	return C.CString(multiManager.GetAllInstancesStatusJSON())
-}
-
-//export GetMultiInstanceCount
-func GetMultiInstanceCount() C.int {
-	multiManagerLock.Lock()
-	defer multiManagerLock.Unlock()
-
-	if multiManager == nil {
-		return 0
-	}
-
-	return C.int(multiManager.GetInstanceCount())
-}
-
-//export IsMultiInstanceRunning
-func IsMultiInstanceRunning() C.int {
-	multiManagerLock.Lock()
-	defer multiManagerLock.Unlock()
-
-	if multiManager == nil {
-		return 0
-	}
-
-	if multiManager.IsRunning() {
-		return 1
-	}
-	return 0
-}
+// 
+// All multi-instance management functions have been removed as part of
+// architectural cleanup. Xray-core is now managed directly through
+// startHyperTunnel() which embeds Xray-core.
+//
+// Removed functions:
+// - InitMultiInstanceManager
+// - StartMultiInstances
+// - StopMultiInstance
+// - StopAllMultiInstances
+// - GetMultiInstanceStatus
+// - GetAllMultiInstancesStatus
+// - GetMultiInstanceCount
+// - IsMultiInstanceRunning
 
 // ============================================================================
 // DNS Cache Management Functions

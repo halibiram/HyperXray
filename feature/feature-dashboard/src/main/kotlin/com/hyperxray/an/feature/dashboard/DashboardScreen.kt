@@ -69,6 +69,7 @@ import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.hyperxray.an.core.network.vpn.HyperVpnStateManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -717,6 +718,11 @@ fun DashboardScreen(
         }
 
     item(key = "traffic") {
+        // HyperVpn stats'larını Traffic card'ında kullanabilmek için
+        val hyperVpnStats by (viewModel.hyperVpnStats ?: kotlinx.coroutines.flow.MutableStateFlow(
+            com.hyperxray.an.core.network.vpn.HyperVpnStateManager.TunnelStats()
+        )).collectAsState()
+
         AnimatedVisibility(
             visible = isServiceEnabled,
             enter = fadeIn() + expandVertically(),
@@ -728,24 +734,194 @@ fun DashboardScreen(
                 gradientColors = trafficGradient,
                 animationDelay = 100,
                 content = {
-                StatRow(
-                    label = stringResource(id = resources.stringStatsUplink),
-                    value = formatBytes(coreStats.uplink)
-                )
-                StatRow(
-                    label = stringResource(id = resources.stringStatsDownlink),
-                    value = formatBytes(coreStats.downlink)
-                )
-                StatRow(
-                    label = "Uplink Throughput",
-                    value = formatThroughput(coreStats.uplinkThroughput)
-                )
-                StatRow(
-                    label = "Downlink Throughput",
-                    value = formatThroughput(coreStats.downlinkThroughput)
-                )
-            }
-        )
+                    // WireGuard TX/RX/Total
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        // TX - Gönderilen
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "TX",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF808080)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = formatBytes(hyperVpnStats.txBytes),
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = trafficGradient[0]
+                            )
+                        }
+
+                        // RX - Alınan
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "RX",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF808080)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = formatBytes(hyperVpnStats.rxBytes),
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = trafficGradient[1]
+                            )
+                        }
+
+                        // Total - Toplam
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "Total",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF808080)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = formatBytes(hyperVpnStats.totalBytes),
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = trafficGradient[2]
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Throughput ve Uptime
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        // Throughput
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "Throughput",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF808080)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = formatThroughput(hyperVpnStats.throughput),
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = trafficGradient[0]
+                            )
+                        }
+
+                        // Uptime
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "Uptime",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF808080)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = formatUptime(hyperVpnStats.uptime.toInt()),
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = trafficGradient[1]
+                            )
+                        }
+
+                        // Latency
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "Latency",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF808080)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "${hyperVpnStats.latency}ms",
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = if (hyperVpnStats.latency < 100) successColor else warningColor
+                            )
+                        }
+                    }
+
+                    // Packet Loss (sadece varsa göster)
+                    if (hyperVpnStats.packetLoss > 0) {
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // Packet Loss
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = "Packet Loss",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF808080)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = String.format("%.2f%%", hyperVpnStats.packetLoss),
+                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = if (hyperVpnStats.packetLoss < 1.0) successColor else errorColor
+                                )
+                            }
+
+                            // Total Packets
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = "Packets",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF808080)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "${hyperVpnStats.totalPackets}",
+                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    color = trafficGradient[2]
+                                )
+                            }
+
+                            // Boş alan
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            )
         }
     }
 

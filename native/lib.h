@@ -33,6 +33,14 @@ JNIEXPORT jstring JNICALL Java_com_hyperxray_an_vpn_HyperVpnService_getTunnelSta
 
 /*
  * Class:     com_hyperxray_an_vpn_HyperVpnService
+ * Method:    getHandshakeRTT
+ * Signature: ()J
+ */
+JNIEXPORT jlong JNICALL Java_com_hyperxray_an_vpn_HyperVpnService_getHandshakeRTT
+  (JNIEnv *, jobject);
+
+/*
+ * Class:     com_hyperxray_an_vpn_HyperVpnService
  * Method:    nativeGeneratePublicKey
  * Signature: (Ljava/lang/String;)Ljava/lang/String;
  */

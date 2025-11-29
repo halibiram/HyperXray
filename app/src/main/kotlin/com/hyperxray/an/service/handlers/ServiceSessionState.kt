@@ -6,7 +6,6 @@ import com.hyperxray.an.prefs.Preferences
 import android.content.Context
 import com.hyperxray.an.service.managers.ServiceNotificationManager
 import com.hyperxray.an.service.managers.TunInterfaceManager
-import com.hyperxray.an.service.managers.XrayCoreManager
 import kotlinx.coroutines.CoroutineScope
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -20,7 +19,6 @@ data class ServiceSessionState(
     val notificationManager: ServiceNotificationManager,
     val logFileManager: LogFileManager,
     val tunInterfaceManager: TunInterfaceManager,
-    val xrayCoreManager: XrayCoreManager,
     val prefs: Preferences,
     val serviceScope: CoroutineScope,
     val telegramNotificationManager: TelegramNotificationManager?,

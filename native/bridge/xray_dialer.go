@@ -82,27 +82,69 @@ func (d *ProtectedXrayDialer) Dial(ctx context.Context, source xnet.Address, des
 
 	logInfo("[XrayDialer] Opening socket for %s %s", network, address)
 
-	// Use net.Dialer with Control callback for socket protection
+	// Get physical network IP for source binding
+	// This ensures packets use physical interface IP, not VPN virtual IP
+	physicalIP, err := GetLocalPhysicalIP()
+	if err != nil {
+		logWarn("[XrayDialer] ⚠️ Failed to get physical IP: %v", err)
+		logWarn("[XrayDialer] ⚠️ Will proceed without explicit source binding (may use VPN IP)")
+		physicalIP = nil
+	} else {
+		logInfo("[XrayDialer] ✅ Physical IP found: %s", physicalIP.String())
+	}
+
+	// Use net.Dialer with Control callback for socket protection and source binding
 	// This is the modern, platform-independent approach
 	dialer := net.Dialer{
 		Timeout:   30 * time.Second,
 		KeepAlive: 30 * time.Second,
 		Control: func(network, address string, c syscall.RawConn) error {
 			var protectErr error
+			var bindErr error
 			err := c.Control(func(fd uintptr) {
 				fdInt := int(fd)
-				logInfo("[XrayDialer] Protecting socket fd: %d...", fdInt)
+				
+				// CRITICAL: Protect socket FIRST, before any other operations
+				// On Android, socket must be protected immediately after creation
+				// to prevent it from being routed through VPN
+				logInfo("[XrayDialer] Protecting socket fd: %d (BEFORE bind)...", fdInt)
 				if !ProtectSocket(fdInt) {
 					protectErr = fmt.Errorf("failed to protect socket %d", fdInt)
 					logError("[XrayDialer] ❌ Protection result: FAILED (socket %d)", fdInt)
+					return // Don't continue if protection fails
 				} else {
 					logInfo("[XrayDialer] ✅ Protection result: SUCCESS (socket %d protected)", fdInt)
+				}
+				
+				// Then, bind to physical IP if available
+				// This ensures packets use physical interface, not VPN
+				// Note: Binding may fail on Android due to permissions, but protection is more important
+				if physicalIP != nil && network == "tcp" {
+					var bindAddr syscall.SockaddrInet4
+					copy(bindAddr.Addr[:], physicalIP.To4())
+					bindAddr.Port = 0 // Let OS choose port
+					
+					if err := syscall.Bind(fdInt, &bindAddr); err != nil {
+						bindErr = fmt.Errorf("failed to bind to physical IP %s: %w", physicalIP.String(), err)
+						logWarn("[XrayDialer] ⚠️ Bind failed (non-fatal): %v", bindErr)
+						// Bind failure is not fatal - socket protection is more important
+					} else {
+						logInfo("[XrayDialer] ✅ Socket bound to physical IP: %s", physicalIP.String())
+					}
 				}
 			})
 			if err != nil {
 				return err
 			}
-			return protectErr
+			// Protection error is fatal - return it
+			if protectErr != nil {
+				return protectErr
+			}
+			// Bind error is not fatal - just log it
+			if bindErr != nil {
+				logWarn("[XrayDialer] ⚠️ Bind failed but continuing (protection succeeded): %v", bindErr)
+			}
+			return nil
 		},
 	}
 

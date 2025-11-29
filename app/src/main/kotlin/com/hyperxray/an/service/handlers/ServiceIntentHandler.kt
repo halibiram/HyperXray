@@ -30,8 +30,8 @@ class ServiceIntentHandler(
         const val ACTION_ERROR: String = "com.hyperxray.an.ERROR"
         const val ACTION_STOP: String = "com.hyperxray.an.STOP"
         const val ACTION_LOG_UPDATE: String = "com.hyperxray.an.LOG_UPDATE"
-        const val ACTION_SOCKS5_READY: String = "com.hyperxray.an.SOCKS5_READY"
-        const val ACTION_INSTANCE_STATUS_UPDATE: String = "com.hyperxray.an.INSTANCE_STATUS_UPDATE"
+        // Legacy actions (not used in WireGuard over Xray, kept for backward compatibility in TProxyUtils)
+        // ACTION_SOCKS5_READY and ACTION_INSTANCE_STATUS_UPDATE are used in TProxyUtils with hardcoded strings
         const val EXTRA_LOG_DATA: String = "log_data"
         const val EXTRA_ERROR_MESSAGE: String = "error_message"
         const val EXTRA_INSTANCE_STATUS: String = "instance_status"

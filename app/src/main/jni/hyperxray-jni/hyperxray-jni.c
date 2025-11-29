@@ -24,21 +24,15 @@
 typedef int (*StartHyperTunnelFunc)(int, const char*, const char*, const char*, const char*, const char*, const char*);
 typedef int (*StopHyperTunnelFunc)(void);
 typedef char* (*GetTunnelStatsFunc)(void);
+typedef long long (*GetHandshakeRTTFunc)(void);
 typedef char* (*GetLastErrorFunc)(void);
 typedef char* (*NativeGeneratePublicKeyFunc)(const char*);
 typedef void (*FreeStringFunc)(char*);
 typedef bool (*SocketProtectorFunc)(int);
 typedef void (*SetSocketProtectorFunc)(SocketProtectorFunc);
 
-// Multi-instance function pointer types
-typedef int (*InitMultiInstanceManagerFunc)(const char*, const char*, int);
-typedef char* (*StartMultiInstancesFunc)(int, const char*, const char*);
-typedef int (*StopMultiInstanceFunc)(int);
-typedef int (*StopAllMultiInstancesFunc)(void);
-typedef char* (*GetMultiInstanceStatusFunc)(int);
-typedef char* (*GetAllMultiInstancesStatusFunc)(void);
-typedef int (*GetMultiInstanceCountFunc)(void);
-typedef int (*IsMultiInstanceRunningFunc)(void);
+// REMOVED: Multi-instance function pointer types
+// These have been removed as part of architectural cleanup
 
 // DNS function pointer types
 typedef int (*InitDNSCacheFunc)(const char*);
@@ -55,6 +49,11 @@ typedef int (*GetDNSServerPortFunc)(void);
 typedef char* (*GetDNSServerStatsFunc)(void);
 typedef char* (*DNSResolveFunc)(const char*);
 
+// Xray gRPC stats function pointer types
+typedef bool (*IsXrayGrpcAvailableFunc)(void);
+typedef char* (*GetXraySystemStatsFunc)(void);
+typedef char* (*GetXrayTrafficStatsFunc)(void);
+
 // Global handle to Go library
 static void* goLibHandle = NULL;
 static int goLibraryLoaded = 0;
@@ -63,20 +62,14 @@ static int goLibraryLoaded = 0;
 static StartHyperTunnelFunc go_StartHyperTunnel = NULL;
 static StopHyperTunnelFunc go_StopHyperTunnel = NULL;
 static GetTunnelStatsFunc go_GetTunnelStats = NULL;
+static GetHandshakeRTTFunc go_GetHandshakeRTT = NULL;
 static GetLastErrorFunc go_GetLastError = NULL;
 static NativeGeneratePublicKeyFunc go_NativeGeneratePublicKey = NULL;
 static FreeStringFunc go_FreeString = NULL;
 static SetSocketProtectorFunc go_SetSocketProtector = NULL;
 
-// Multi-instance function pointers
-static InitMultiInstanceManagerFunc go_InitMultiInstanceManager = NULL;
-static StartMultiInstancesFunc go_StartMultiInstances = NULL;
-static StopMultiInstanceFunc go_StopMultiInstance = NULL;
-static StopAllMultiInstancesFunc go_StopAllMultiInstances = NULL;
-static GetMultiInstanceStatusFunc go_GetMultiInstanceStatus = NULL;
-static GetAllMultiInstancesStatusFunc go_GetAllMultiInstancesStatus = NULL;
-static GetMultiInstanceCountFunc go_GetMultiInstanceCount = NULL;
-static IsMultiInstanceRunningFunc go_IsMultiInstanceRunning = NULL;
+// REMOVED: Multi-instance function pointers
+// These have been removed as part of architectural cleanup
 
 // DNS function pointers
 static InitDNSCacheFunc go_InitDNSCache = NULL;
@@ -92,6 +85,11 @@ static IsDNSServerRunningFunc go_IsDNSServerRunning = NULL;
 static GetDNSServerPortFunc go_GetDNSServerPort = NULL;
 static GetDNSServerStatsFunc go_GetDNSServerStats = NULL;
 static DNSResolveFunc go_DNSResolve = NULL;
+
+// Xray gRPC stats function pointers
+static IsXrayGrpcAvailableFunc go_IsXrayGrpcAvailable = NULL;
+static GetXraySystemStatsFunc go_GetXraySystemStats = NULL;
+static GetXrayTrafficStatsFunc go_GetXrayTrafficStats = NULL;
 
 
 // Socket protector globals (must be declared before use)
@@ -190,6 +188,13 @@ static int loadGoLibrary(JNIEnv *env) {
         LOGD("Found GetTunnelStats");
     }
     
+    go_GetHandshakeRTT = (GetHandshakeRTTFunc)dlsym(goLibHandle, "GetHandshakeRTT");
+    if (go_GetHandshakeRTT == NULL) {
+        LOGD("GetHandshakeRTT not found (optional): %s", dlerror());
+    } else {
+        LOGD("Found GetHandshakeRTT");
+    }
+    
     go_GetLastError = (GetLastErrorFunc)dlsym(goLibHandle, "GetLastError");
     if (go_GetLastError == NULL) {
         LOGD("GetLastError not found (optional)");
@@ -218,64 +223,8 @@ static int loadGoLibrary(JNIEnv *env) {
         LOGD("Found SetSocketProtector");
     }
     
-    // Resolve multi-instance symbols
-    LOGD("Resolving multi-instance symbols...");
-    
-    go_InitMultiInstanceManager = (InitMultiInstanceManagerFunc)dlsym(goLibHandle, "InitMultiInstanceManager");
-    if (go_InitMultiInstanceManager == NULL) {
-        LOGD("InitMultiInstanceManager not found (optional): %s", dlerror());
-    } else {
-        LOGD("Found InitMultiInstanceManager");
-    }
-    
-    go_StartMultiInstances = (StartMultiInstancesFunc)dlsym(goLibHandle, "StartMultiInstances");
-    if (go_StartMultiInstances == NULL) {
-        LOGD("StartMultiInstances not found (optional): %s", dlerror());
-    } else {
-        LOGD("Found StartMultiInstances");
-    }
-    
-    go_StopMultiInstance = (StopMultiInstanceFunc)dlsym(goLibHandle, "StopMultiInstance");
-    if (go_StopMultiInstance == NULL) {
-        LOGD("StopMultiInstance not found (optional): %s", dlerror());
-    } else {
-        LOGD("Found StopMultiInstance");
-    }
-    
-    go_StopAllMultiInstances = (StopAllMultiInstancesFunc)dlsym(goLibHandle, "StopAllMultiInstances");
-    if (go_StopAllMultiInstances == NULL) {
-        LOGD("StopAllMultiInstances not found (optional): %s", dlerror());
-    } else {
-        LOGD("Found StopAllMultiInstances");
-    }
-    
-    go_GetMultiInstanceStatus = (GetMultiInstanceStatusFunc)dlsym(goLibHandle, "GetMultiInstanceStatus");
-    if (go_GetMultiInstanceStatus == NULL) {
-        LOGD("GetMultiInstanceStatus not found (optional): %s", dlerror());
-    } else {
-        LOGD("Found GetMultiInstanceStatus");
-    }
-    
-    go_GetAllMultiInstancesStatus = (GetAllMultiInstancesStatusFunc)dlsym(goLibHandle, "GetAllMultiInstancesStatus");
-    if (go_GetAllMultiInstancesStatus == NULL) {
-        LOGD("GetAllMultiInstancesStatus not found (optional): %s", dlerror());
-    } else {
-        LOGD("Found GetAllMultiInstancesStatus");
-    }
-    
-    go_GetMultiInstanceCount = (GetMultiInstanceCountFunc)dlsym(goLibHandle, "GetMultiInstanceCount");
-    if (go_GetMultiInstanceCount == NULL) {
-        LOGD("GetMultiInstanceCount not found (optional): %s", dlerror());
-    } else {
-        LOGD("Found GetMultiInstanceCount");
-    }
-    
-    go_IsMultiInstanceRunning = (IsMultiInstanceRunningFunc)dlsym(goLibHandle, "IsMultiInstanceRunning");
-    if (go_IsMultiInstanceRunning == NULL) {
-        LOGD("IsMultiInstanceRunning not found (optional): %s", dlerror());
-    } else {
-        LOGD("Found IsMultiInstanceRunning");
-    }
+    // REMOVED: Multi-instance symbol resolution
+    // These symbols have been removed as part of architectural cleanup
     
     // Resolve DNS symbols
     LOGD("Resolving DNS symbols...");
@@ -318,6 +267,18 @@ static int loadGoLibrary(JNIEnv *env) {
     
     go_DNSResolve = (DNSResolveFunc)dlsym(goLibHandle, "DNSResolve");
     if (go_DNSResolve != NULL) LOGD("Found DNSResolve");
+    
+    // Resolve Xray gRPC stats symbols
+    LOGD("Resolving Xray gRPC stats symbols...");
+    
+    go_IsXrayGrpcAvailable = (IsXrayGrpcAvailableFunc)dlsym(goLibHandle, "IsXrayGrpcAvailable");
+    if (go_IsXrayGrpcAvailable != NULL) LOGD("Found IsXrayGrpcAvailable");
+    
+    go_GetXraySystemStats = (GetXraySystemStatsFunc)dlsym(goLibHandle, "GetXraySystemStats");
+    if (go_GetXraySystemStats != NULL) LOGD("Found GetXraySystemStats");
+    
+    go_GetXrayTrafficStats = (GetXrayTrafficStatsFunc)dlsym(goLibHandle, "GetXrayTrafficStats");
+    if (go_GetXrayTrafficStats != NULL) LOGD("Found GetXrayTrafficStats");
     
     // Check if at least StartHyperTunnel is available
     if (go_StartHyperTunnel == NULL) {
@@ -583,6 +544,29 @@ Java_com_hyperxray_an_vpn_HyperVpnService_getTunnelStats(
 }
 
 /**
+ * Get WireGuard handshake RTT in milliseconds
+ * 
+ * Java signature: private external fun getHandshakeRTT(): Long
+ */
+JNIEXPORT jlong JNICALL
+Java_com_hyperxray_an_vpn_HyperVpnService_getHandshakeRTT(
+    JNIEnv *env __attribute__((unused)),
+    jobject thiz __attribute__((unused))
+) {
+    LOGD("getHandshakeRTT called");
+    
+    if (!goLibraryLoaded || go_GetHandshakeRTT == NULL) {
+        LOGD("Go library not loaded or getHandshakeRTT not available, returning default");
+        return 50L; // Default fallback
+    }
+    
+    long long rtt = go_GetHandshakeRTT();
+    LOGD("Go GetHandshakeRTT returned: %lld ms", rtt);
+    
+    return (jlong)rtt;
+}
+
+/**
  * Generate public key from private key
  * 
  * Java signature: private external fun nativeGeneratePublicKey(privateKeyBase64: String): String
@@ -758,20 +742,14 @@ Java_com_hyperxray_an_vpn_HyperVpnService_loadGoLibraryWithPath(
     // Resolve other symbols (copy-paste from loadGoLibrary)
     go_StopHyperTunnel = (StopHyperTunnelFunc)dlsym(goLibHandle, "StopHyperTunnel");
     go_GetTunnelStats = (GetTunnelStatsFunc)dlsym(goLibHandle, "GetTunnelStats");
+    go_GetHandshakeRTT = (GetHandshakeRTTFunc)dlsym(goLibHandle, "GetHandshakeRTT");
     go_GetLastError = (GetLastErrorFunc)dlsym(goLibHandle, "GetLastError");
     go_NativeGeneratePublicKey = (NativeGeneratePublicKeyFunc)dlsym(goLibHandle, "NativeGeneratePublicKey");
     go_FreeString = (FreeStringFunc)dlsym(goLibHandle, "FreeString");
     go_SetSocketProtector = (SetSocketProtectorFunc)dlsym(goLibHandle, "SetSocketProtector");
     
-    // Multi-instance
-    go_InitMultiInstanceManager = (InitMultiInstanceManagerFunc)dlsym(goLibHandle, "InitMultiInstanceManager");
-    go_StartMultiInstances = (StartMultiInstancesFunc)dlsym(goLibHandle, "StartMultiInstances");
-    go_StopMultiInstance = (StopMultiInstanceFunc)dlsym(goLibHandle, "StopMultiInstance");
-    go_StopAllMultiInstances = (StopAllMultiInstancesFunc)dlsym(goLibHandle, "StopAllMultiInstances");
-    go_GetMultiInstanceStatus = (GetMultiInstanceStatusFunc)dlsym(goLibHandle, "GetMultiInstanceStatus");
-    go_GetAllMultiInstancesStatus = (GetAllMultiInstancesStatusFunc)dlsym(goLibHandle, "GetAllMultiInstancesStatus");
-    go_GetMultiInstanceCount = (GetMultiInstanceCountFunc)dlsym(goLibHandle, "GetMultiInstanceCount");
-    go_IsMultiInstanceRunning = (IsMultiInstanceRunningFunc)dlsym(goLibHandle, "IsMultiInstanceRunning");
+    // REMOVED: Multi-instance symbol resolution
+    // These symbols have been removed as part of architectural cleanup
     
     // DNS
     go_InitDNSCache = (InitDNSCacheFunc)dlsym(goLibHandle, "InitDNSCache");
@@ -794,222 +772,23 @@ Java_com_hyperxray_an_vpn_HyperVpnService_loadGoLibraryWithPath(
 
 /*
  * ============================================================================
- * MULTI-INSTANCE JNI FUNCTIONS
+ * REMOVED: MULTI-INSTANCE JNI FUNCTIONS
  * ============================================================================
- */
-
-/**
- * Initialize multi-instance manager
  * 
- * Java signature: private external fun initMultiInstanceManager(nativeLibDir: String, filesDir: String, maxInstances: Int): Int
- */
-JNIEXPORT jint JNICALL
-Java_com_hyperxray_an_vpn_HyperVpnService_initMultiInstanceManager(
-    JNIEnv *env,
-    jobject thiz __attribute__((unused)),
-    jstring nativeLibDir,
-    jstring filesDir,
-    jint maxInstances
-) {
-    LOGI("initMultiInstanceManager called with maxInstances=%d", maxInstances);
-    
-    if (!goLibraryLoaded) {
-        if (loadGoLibrary(env) != 0) {
-            LOGE("Failed to load Go library");
-            return -100;
-        }
-    }
-    
-    if (go_InitMultiInstanceManager == NULL) {
-        LOGE("InitMultiInstanceManager function not available");
-        return -101;
-    }
-    
-    const char* nativeLibDirC = (*env)->GetStringUTFChars(env, nativeLibDir, NULL);
-    const char* filesDirC = (*env)->GetStringUTFChars(env, filesDir, NULL);
-    
-    int result = go_InitMultiInstanceManager(
-        nativeLibDirC ? nativeLibDirC : "",
-        filesDirC ? filesDirC : "",
-        (int)maxInstances
-    );
-    
-    if (nativeLibDirC) (*env)->ReleaseStringUTFChars(env, nativeLibDir, nativeLibDirC);
-    if (filesDirC) (*env)->ReleaseStringUTFChars(env, filesDir, filesDirC);
-    
-    LOGI("initMultiInstanceManager returned: %d", result);
-    return result;
-}
-
-/**
- * Start multiple Xray instances
+ * All multi-instance JNI functions have been removed as part of
+ * architectural cleanup. Xray-core is now managed directly through
+ * startHyperTunnel() which embeds Xray-core.
  * 
- * Java signature: private external fun startMultiInstances(count: Int, configJSON: String, excludedPortsJSON: String): String
+ * Removed functions:
+ * - Java_com_hyperxray_an_vpn_HyperVpnService_initMultiInstanceManager
+ * - Java_com_hyperxray_an_vpn_HyperVpnService_startMultiInstances
+ * - Java_com_hyperxray_an_vpn_HyperVpnService_stopMultiInstance
+ * - Java_com_hyperxray_an_vpn_HyperVpnService_stopAllMultiInstances
+ * - Java_com_hyperxray_an_vpn_HyperVpnService_getMultiInstanceStatus
+ * - Java_com_hyperxray_an_vpn_HyperVpnService_getAllMultiInstancesStatus
+ * - Java_com_hyperxray_an_vpn_HyperVpnService_getMultiInstanceCount
+ * - Java_com_hyperxray_an_vpn_HyperVpnService_isMultiInstanceRunning
  */
-JNIEXPORT jstring JNICALL
-Java_com_hyperxray_an_vpn_HyperVpnService_startMultiInstances(
-    JNIEnv *env,
-    jobject thiz __attribute__((unused)),
-    jint count,
-    jstring configJSON,
-    jstring excludedPortsJSON
-) {
-    LOGI("startMultiInstances called with count=%d", count);
-    
-    if (!goLibraryLoaded || go_StartMultiInstances == NULL) {
-        LOGE("Go library not loaded or startMultiInstances not available");
-        return (*env)->NewStringUTF(env, "{\"error\":\"library not loaded\"}");
-    }
-    
-    const char* configC = (*env)->GetStringUTFChars(env, configJSON, NULL);
-    const char* excludedC = excludedPortsJSON != NULL ? 
-        (*env)->GetStringUTFChars(env, excludedPortsJSON, NULL) : NULL;
-    
-    char* result = go_StartMultiInstances(
-        (int)count,
-        configC ? configC : "",
-        excludedC ? excludedC : "[]"
-    );
-    
-    if (configC) (*env)->ReleaseStringUTFChars(env, configJSON, configC);
-    if (excludedC) (*env)->ReleaseStringUTFChars(env, excludedPortsJSON, excludedC);
-    
-    jstring jResult = (*env)->NewStringUTF(env, result ? result : "{}");
-    
-    if (result && go_FreeString) {
-        go_FreeString(result);
-    }
-    
-    return jResult;
-}
-
-/**
- * Stop a specific Xray instance
- * 
- * Java signature: private external fun stopMultiInstance(index: Int): Int
- */
-JNIEXPORT jint JNICALL
-Java_com_hyperxray_an_vpn_HyperVpnService_stopMultiInstance(
-    JNIEnv *env __attribute__((unused)),
-    jobject thiz __attribute__((unused)),
-    jint index
-) {
-    LOGI("stopMultiInstance called for index=%d", index);
-    
-    if (!goLibraryLoaded || go_StopMultiInstance == NULL) {
-        LOGE("Go library not loaded or stopMultiInstance not available");
-        return -100;
-    }
-    
-    int result = go_StopMultiInstance((int)index);
-    LOGI("stopMultiInstance returned: %d", result);
-    return result;
-}
-
-/**
- * Stop all Xray instances
- * 
- * Java signature: private external fun stopAllMultiInstances(): Int
- */
-JNIEXPORT jint JNICALL
-Java_com_hyperxray_an_vpn_HyperVpnService_stopAllMultiInstances(
-    JNIEnv *env __attribute__((unused)),
-    jobject thiz __attribute__((unused))
-) {
-    LOGI("stopAllMultiInstances called");
-    
-    if (!goLibraryLoaded || go_StopAllMultiInstances == NULL) {
-        LOGE("Go library not loaded or stopAllMultiInstances not available");
-        return -100;
-    }
-    
-    int result = go_StopAllMultiInstances();
-    LOGI("stopAllMultiInstances returned: %d", result);
-    return result;
-}
-
-/**
- * Get status of a specific instance
- * 
- * Java signature: private external fun getMultiInstanceStatus(index: Int): String
- */
-JNIEXPORT jstring JNICALL
-Java_com_hyperxray_an_vpn_HyperVpnService_getMultiInstanceStatus(
-    JNIEnv *env,
-    jobject thiz __attribute__((unused)),
-    jint index
-) {
-    if (!goLibraryLoaded || go_GetMultiInstanceStatus == NULL) {
-        return (*env)->NewStringUTF(env, "{\"error\":\"library not loaded\"}");
-    }
-    
-    char* status = go_GetMultiInstanceStatus((int)index);
-    jstring jResult = (*env)->NewStringUTF(env, status ? status : "{}");
-    
-    if (status && go_FreeString) {
-        go_FreeString(status);
-    }
-    
-    return jResult;
-}
-
-/**
- * Get status of all instances
- * 
- * Java signature: private external fun getAllMultiInstancesStatus(): String
- */
-JNIEXPORT jstring JNICALL
-Java_com_hyperxray_an_vpn_HyperVpnService_getAllMultiInstancesStatus(
-    JNIEnv *env,
-    jobject thiz __attribute__((unused))
-) {
-    if (!goLibraryLoaded || go_GetAllMultiInstancesStatus == NULL) {
-        return (*env)->NewStringUTF(env, "{}");
-    }
-    
-    char* status = go_GetAllMultiInstancesStatus();
-    jstring jResult = (*env)->NewStringUTF(env, status ? status : "{}");
-    
-    if (status && go_FreeString) {
-        go_FreeString(status);
-    }
-    
-    return jResult;
-}
-
-/**
- * Get count of running instances
- * 
- * Java signature: private external fun getMultiInstanceCount(): Int
- */
-JNIEXPORT jint JNICALL
-Java_com_hyperxray_an_vpn_HyperVpnService_getMultiInstanceCount(
-    JNIEnv *env __attribute__((unused)),
-    jobject thiz __attribute__((unused))
-) {
-    if (!goLibraryLoaded || go_GetMultiInstanceCount == NULL) {
-        return 0;
-    }
-    
-    return go_GetMultiInstanceCount();
-}
-
-/**
- * Check if any multi-instance is running
- * 
- * Java signature: private external fun isMultiInstanceRunning(): Boolean
- */
-JNIEXPORT jboolean JNICALL
-Java_com_hyperxray_an_vpn_HyperVpnService_isMultiInstanceRunning(
-    JNIEnv *env __attribute__((unused)),
-    jobject thiz __attribute__((unused))
-) {
-    if (!goLibraryLoaded || go_IsMultiInstanceRunning == NULL) {
-        return JNI_FALSE;
-    }
-    
-    return go_IsMultiInstanceRunning() ? JNI_TRUE : JNI_FALSE;
-}
 
 /*
  * ============================================================================
@@ -1492,4 +1271,111 @@ void callAiLogHelper(const char* tag, const char* level, const char* message) {
     if (attached) {
         (*g_jvm)->DetachCurrentThread(g_jvm);
     }
+}
+
+/**
+ * Check if Xray gRPC is available
+ * 
+ * Java signature: private external fun isXrayGrpcAvailableNative(): Boolean
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_hyperxray_an_core_monitor_XrayStatsManager_isXrayGrpcAvailableNative(
+    JNIEnv* env,
+    jobject thiz __attribute__((unused))
+) {
+    if (!goLibraryLoaded) {
+        LOGD("Go library not loaded, attempting to load...");
+        if (loadGoLibrary(env) != 0) {
+            LOGE("Failed to load Go library");
+            return JNI_FALSE;
+        }
+    }
+    
+    if (go_IsXrayGrpcAvailable == NULL) {
+        LOGD("IsXrayGrpcAvailable function not available");
+        return JNI_FALSE;
+    }
+    
+    bool result = go_IsXrayGrpcAvailable();
+    return result ? JNI_TRUE : JNI_FALSE;
+}
+
+/**
+ * Get Xray system stats from native gRPC client
+ * 
+ * Java signature: private external fun getXraySystemStatsNative(): String?
+ */
+JNIEXPORT jstring JNICALL
+Java_com_hyperxray_an_core_monitor_XrayStatsManager_getXraySystemStatsNative(
+    JNIEnv* env,
+    jobject thiz __attribute__((unused))
+) {
+    if (!goLibraryLoaded) {
+        LOGD("Go library not loaded, attempting to load...");
+        if (loadGoLibrary(env) != 0) {
+            LOGE("Failed to load Go library");
+            return NULL;
+        }
+    }
+    
+    if (go_GetXraySystemStats == NULL) {
+        LOGD("GetXraySystemStats function not available");
+        return NULL;
+    }
+    
+    char* result = go_GetXraySystemStats();
+    if (result == NULL) {
+        return NULL;
+    }
+    
+    jstring jresult = (*env)->NewStringUTF(env, result);
+    
+    // Free the C string
+    if (go_FreeString != NULL) {
+        go_FreeString(result);
+    } else {
+        free(result);
+    }
+    
+    return jresult;
+}
+
+/**
+ * Get Xray traffic stats from native gRPC client
+ * 
+ * Java signature: private external fun getXrayTrafficStatsNative(): String?
+ */
+JNIEXPORT jstring JNICALL
+Java_com_hyperxray_an_core_monitor_XrayStatsManager_getXrayTrafficStatsNative(
+    JNIEnv* env,
+    jobject thiz __attribute__((unused))
+) {
+    if (!goLibraryLoaded) {
+        LOGD("Go library not loaded, attempting to load...");
+        if (loadGoLibrary(env) != 0) {
+            LOGE("Failed to load Go library");
+            return NULL;
+        }
+    }
+    
+    if (go_GetXrayTrafficStats == NULL) {
+        LOGD("GetXrayTrafficStats function not available");
+        return NULL;
+    }
+    
+    char* result = go_GetXrayTrafficStats();
+    if (result == NULL) {
+        return NULL;
+    }
+    
+    jstring jresult = (*env)->NewStringUTF(env, result);
+    
+    // Free the C string
+    if (go_FreeString != NULL) {
+        go_FreeString(result);
+    } else {
+        free(result);
+    }
+    
+    return jresult;
 }

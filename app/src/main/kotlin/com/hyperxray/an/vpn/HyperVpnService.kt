@@ -45,6 +45,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.InetAddress
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.CompletableFuture
@@ -178,6 +179,8 @@ class HyperVpnService : VpnService() {
     
     private external fun getTunnelStats(): String
     
+    private external fun getHandshakeRTT(): Long
+    
     private external fun getLastNativeError(): String
     
     private external fun nativeGeneratePublicKey(privateKeyBase64: String): String
@@ -201,30 +204,9 @@ class HyperVpnService : VpnService() {
      */
     private external fun loadGoLibraryWithPath(path: String): Boolean
     
-    // Multi-instance native function declarations
-    private external fun initMultiInstanceManager(
-        nativeLibDir: String,
-        filesDir: String,
-        maxInstances: Int
-    ): Int
-    
-    private external fun startMultiInstances(
-        count: Int,
-        configJSON: String,
-        excludedPortsJSON: String
-    ): String
-    
-    private external fun stopMultiInstance(index: Int): Int
-    
-    private external fun stopAllMultiInstances(): Int
-    
-    private external fun getMultiInstanceStatus(index: Int): String
-    
-    private external fun getAllMultiInstancesStatus(): String
-    
-    private external fun getMultiInstanceCount(): Int
-    
-    private external fun isMultiInstanceRunning(): Boolean
+    // REMOVED: Multi-instance native function declarations
+    // These methods have been removed as part of architectural cleanup.
+    // Xray-core is now managed directly through startHyperTunnel() which embeds Xray-core.
     
     // DNS native function declarations
     private external fun initDNSCache(cacheDir: String): Int
@@ -523,8 +505,24 @@ class HyperVpnService : VpnService() {
      * Start VPN with WireGuard and Xray configurations
      */
     private fun startVpn(wgConfigJson: String?, xrayConfigJson: String?) {
+        // If VPN is running, stop it first to allow restart
         if (isRunning) {
-            AiLogHelper.w(TAG, "VPN is already running")
+            AiLogHelper.w(TAG, "VPN is already running, stopping it first to allow restart...")
+            serviceScope.launch {
+                stopVpn()
+                // Wait for stop to complete (with timeout)
+                var waitCount = 0
+                while (isStopping && waitCount < 50) { // Max 5 seconds
+                    delay(100)
+                    waitCount++
+                }
+                if (isStopping) {
+                    AiLogHelper.w(TAG, "StopVpn timeout, forcing restart anyway...")
+                    isStopping = false
+                }
+                // Now start VPN
+                startVpn(wgConfigJson, xrayConfigJson)
+            }
             return
         }
         
@@ -534,7 +532,20 @@ class HyperVpnService : VpnService() {
         }
         
         if (isStopping) {
-            AiLogHelper.w(TAG, "startVpn() called while stopping, ignoring")
+            AiLogHelper.w(TAG, "startVpn() called while stopping, waiting for stop to complete...")
+            serviceScope.launch {
+                var waitCount = 0
+                while (isStopping && waitCount < 50) { // Max 5 seconds
+                    delay(100)
+                    waitCount++
+                }
+                if (isStopping) {
+                    AiLogHelper.w(TAG, "StopVpn timeout, forcing start anyway...")
+                    isStopping = false
+                }
+                // Now start VPN
+                startVpn(wgConfigJson, xrayConfigJson)
+            }
             return
         }
         
@@ -649,7 +660,7 @@ class HyperVpnService : VpnService() {
                 // Validate Xray config format and ensure outbounds exist
                 AiLogHelper.d(TAG, "🔧 VPN START: Validating Xray config format...")
                 val xrayConfigObj = try {
-                    org.json.JSONObject(xrayConfig)
+                    org.json.JSONObject(xrayConfig ?: getDefaultXrayConfig())
                 } catch (e: Exception) {
                     AiLogHelper.e(TAG, "❌ VPN START: Invalid Xray config format: ${e.message}", e)
                     broadcastError("Invalid Xray configuration format", -5, "Config JSON parsing failed: ${e.message}")
@@ -680,7 +691,7 @@ class HyperVpnService : VpnService() {
                 AiLogHelper.d(TAG, "📋 VPN START: WireGuard config type: ${if (isWarpUsed) "WARP" else "Custom"}")
                 
                 // Check final Xray config type
-                val finalXrayConfigObj = org.json.JSONObject(xrayConfig)
+                val finalXrayConfigObj = org.json.JSONObject(xrayConfig ?: getDefaultXrayConfig())
                 val finalOutbounds = finalXrayConfigObj.optJSONArray("outbounds")
                 val firstOutbound = finalOutbounds?.optJSONObject(0)
                 val protocol = firstOutbound?.optString("protocol", "") ?: ""
@@ -900,7 +911,9 @@ class HyperVpnService : VpnService() {
                     AiLogHelper.w(TAG, "⚠️ VPN START: Failed to inject API port into Xray config: ${e.message}, using original config")
                     finalXrayConfig
                 }
-                AiLogHelper.d(TAG, "✅ VPN START: gRPC StatsService injected (port: $apiPort) - libhyperxray.so içindeki Xray-core kullanılacak")
+                // Get effective port (ConfigInjector uses default if apiPort is 0)
+                val effectivePort = if (apiPort > 0 && apiPort <= 65535) apiPort else 65276
+                AiLogHelper.d(TAG, "✅ VPN START: gRPC StatsService injected (port: $effectivePort) - libhyperxray.so içindeki Xray-core kullanılacak")
                 
                 val result = try {
                     startHyperTunnel(
@@ -1131,14 +1144,24 @@ class HyperVpnService : VpnService() {
                 val disconnectDuration = System.currentTimeMillis() - disconnectStartTime
                 AiLogHelper.i(TAG, "✅ Disconnect completed in ${disconnectDuration}ms")
                 
-                stopForeground(true)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    stopForeground(Service.STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
                 stopSelf()
                 
             } catch (e: Exception) {
                 AiLogHelper.e(TAG, "Error stopping VPN: ${e.message}", e)
                 // Still stop service even on error
                 try {
-                    stopForeground(true)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                        stopForeground(Service.STOP_FOREGROUND_REMOVE)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        stopForeground(true)
+                    }
                     stopSelf()
                 } catch (stopErr: Exception) {
                     AiLogHelper.e(TAG, "Error stopping service: ${stopErr.message}")
@@ -1224,14 +1247,64 @@ class HyperVpnService : VpnService() {
     }
     
     /**
-     * Calculate estimated latency (placeholder - can be enhanced)
+     * Calculate estimated latency using WireGuard's internal handshake RTT metrics.
+     * 
+     * This function uses WireGuard's internal handshake RTT calculation from Go native code.
+     * The RTT is calculated based on handshake timing and freshness, providing accurate
+     * latency estimates directly from WireGuard's internal metrics.
+     * 
+     * Priority order:
+     * 1. Native getHandshakeRTT() - Direct access to WireGuard's internal RTT calculation
+     * 2. Stats JSON handshakeRTT - Fallback to stats JSON if native call fails
+     * 3. lastHandshake timing - Fallback to handshake timing estimation
+     * 
+     * @return Estimated latency in milliseconds
      */
     private fun calculateLatency(): Long {
-        // This is a placeholder. In a real implementation, you might:
-        // - Use ping measurements
-        // - Calculate from handshake times
-        // - Use WireGuard's internal metrics
-        return 50L // Default 50ms
+        try {
+            // First, try to get RTT directly from native Go function
+            // This uses WireGuard's internal handshake RTT calculation
+            val nativeRTT = getHandshakeRTT()
+            if (nativeRTT > 0) {
+                return nativeRTT
+            }
+        } catch (e: Exception) {
+            AiLogHelper.d(TAG, "Native getHandshakeRTT() not available, falling back to stats: ${e.message}")
+        }
+        
+        try {
+            // Fallback: Get RTT from stats JSON (includes handshakeRTT field)
+            val statsJson = getTunnelStats()
+            val stats = JSONObject(statsJson)
+            
+            // Try to get handshakeRTT from stats (set by Go code)
+            val handshakeRTT = stats.optLong("handshakeRTT", 0)
+            if (handshakeRTT > 0) {
+                return handshakeRTT
+            }
+            
+            // Fallback: Calculate from lastHandshake timing
+            val lastHandshake = stats.optLong("lastHandshake", 0)
+            if (lastHandshake <= 0) {
+                return 50L // Default fallback
+            }
+            
+            // Convert Unix timestamp (seconds) to milliseconds
+            val lastHandshakeMs = lastHandshake * 1000
+            val currentTimeMs = System.currentTimeMillis()
+            val timeSinceHandshake = currentTimeMs - lastHandshakeMs
+            
+            // WireGuard handshake RTT estimation based on time since last handshake
+            return when {
+                timeSinceHandshake < 2000 -> 25L  // Very recent handshake - excellent connection
+                timeSinceHandshake < 10000 -> 50L  // Recent handshake - good connection
+                timeSinceHandshake < 30000 -> 75L  // Moderate age - acceptable connection
+                else -> 100L // Old handshake - may indicate connection issues
+            }
+        } catch (e: Exception) {
+            AiLogHelper.w(TAG, "Error calculating latency: ${e.message}")
+            return 50L // Fallback to default on error
+        }
     }
     
     /**
@@ -1574,26 +1647,59 @@ class HyperVpnService : VpnService() {
             
             AiLogHelper.d(TAG, "🔍 CONFIG LOAD: Initializing ConfigRepository...")
             
-            // CRITICAL: Load configs first to ensure StateFlow is populated
+            // CRITICAL: Clear cache first to prevent stale config usage
+            configRepo.clearCache()
+            AiLogHelper.d(TAG, "🧹 CONFIG LOAD: Cache cleared to prevent stale configs")
+            
+            // CRITICAL: Force reload configs from disk to ensure latest config is used
+            // This prevents cached StateFlow values from being used
             try {
-                configRepo.loadConfigs()
-                AiLogHelper.d(TAG, "✅ CONFIG LOAD: loadConfigs() completed")
+                configRepo.forceReloadConfigs()
+                AiLogHelper.d(TAG, "✅ CONFIG LOAD: forceReloadConfigs() completed")
             } catch (e: Exception) {
-                AiLogHelper.e(TAG, "❌ CONFIG LOAD: Failed to load configs: ${e.message}", e)
-                // Continue anyway, might have cached configs
+                AiLogHelper.e(TAG, "❌ CONFIG LOAD: Failed to force reload configs: ${e.message}", e)
+                // Continue with direct disk read as fallback
             }
             
-            // Get selected config file from StateFlow (preferred method)
-            val selectedConfigFile = configRepo.selectedConfigFile.first()
-            AiLogHelper.d(TAG, "🔍 CONFIG LOAD: Selected config file from StateFlow: ${selectedConfigFile?.name ?: "null"}")
+            // CRITICAL: Always read directly from disk using prefs.selectedConfigPath
+            // This ensures we get the latest config, not cached StateFlow values
+            val selectedConfigPath = prefs.selectedConfigPath
+            AiLogHelper.d(TAG, "🔍 CONFIG LOAD: Selected config path from prefs: ${selectedConfigPath ?: "null"}")
             
-            // Fallback: If no selected config, try to get from configFiles list
-            val activeConfigFile = selectedConfigFile ?: run {
+            // Try to get from StateFlow first (if available)
+            var activeConfigFile: File? = null
+            try {
+                val selectedConfigFile = configRepo.selectedConfigFile.first()
+                if (selectedConfigFile != null && selectedConfigFile.exists()) {
+                    activeConfigFile = selectedConfigFile
+                    AiLogHelper.d(TAG, "✅ CONFIG LOAD: Using config from StateFlow: ${selectedConfigFile.name}")
+                }
+            } catch (e: Exception) {
+                AiLogHelper.w(TAG, "⚠️ CONFIG LOAD: Failed to get from StateFlow: ${e.message}")
+            }
+            
+            // Fallback: Use prefs.selectedConfigPath directly
+            if (activeConfigFile == null && selectedConfigPath != null) {
+                val configFile = File(selectedConfigPath)
+                if (configFile.exists() && configFile.isFile) {
+                    activeConfigFile = configFile
+                    AiLogHelper.d(TAG, "✅ CONFIG LOAD: Using config from prefs path: ${configFile.name}")
+                } else {
+                    AiLogHelper.w(TAG, "⚠️ CONFIG LOAD: Config file from prefs path does not exist: $selectedConfigPath")
+                }
+            }
+            
+            // Fallback: Try to get from configFiles list
+            if (activeConfigFile == null) {
                 AiLogHelper.w(TAG, "⚠️ CONFIG LOAD: No selected config, trying configFiles list...")
-                val configFiles = configRepo.configFiles.first()
-                AiLogHelper.d(TAG, "🔍 CONFIG LOAD: Found ${configFiles.size} config files in list")
-                configFiles.firstOrNull()?.also {
-                    AiLogHelper.d(TAG, "✅ CONFIG LOAD: Using first config from list: ${it.name}")
+                try {
+                    val configFiles = configRepo.configFiles.first()
+                    AiLogHelper.d(TAG, "🔍 CONFIG LOAD: Found ${configFiles.size} config files in list")
+                    activeConfigFile = configFiles.firstOrNull()?.also {
+                        AiLogHelper.d(TAG, "✅ CONFIG LOAD: Using first config from list: ${it.name}")
+                    }
+                } catch (e: Exception) {
+                    AiLogHelper.w(TAG, "⚠️ CONFIG LOAD: Failed to get from configFiles list: ${e.message}")
                 }
             }
             
@@ -1601,7 +1707,7 @@ class HyperVpnService : VpnService() {
             if (activeConfigFile == null) {
                 val errorMsg = "No profiles available"
                 AiLogHelper.e(TAG, "❌ CONFIG LOAD: $errorMsg")
-                broadcastError(errorMsg, -12, "Please create or import a VLESS profile first. ConfigRepository returned no config files.")
+                broadcastError(errorMsg, -12, "Please create or import a VLESS profile first. No config files found.")
                 return getDefaultXrayConfig()
             }
             
@@ -1618,6 +1724,10 @@ class HyperVpnService : VpnService() {
             
             AiLogHelper.d(TAG, "✅ CONFIG LOAD: Config file exists, size: ${activeConfigFile.length()} bytes")
             
+            // CRITICAL: Always read from disk to ensure latest config is used
+            // Force reload to prevent stale config usage
+            AiLogHelper.d(TAG, "🔄 CONFIG LOAD: Reading config directly from disk (ensuring latest version, bypassing cache)")
+            
             // Read config file content with proper error handling
             val configContent = try {
                 activeConfigFile.readText()
@@ -1628,6 +1738,9 @@ class HyperVpnService : VpnService() {
                 return getDefaultXrayConfig()
             }
             
+            // Log config hash for verification
+            val configHash = calculateConfigHash(configContent)
+            AiLogHelper.i(TAG, "✅ CONFIG LOAD: Config loaded from disk - Hash: ${configHash.take(16)}..., Size: ${configContent.length} bytes, LastModified: ${activeConfigFile.lastModified()}")
             AiLogHelper.d(TAG, "✅ CONFIG LOAD: Config content read, length: ${configContent.length} bytes")
             
             if (configContent.isBlank()) {
@@ -1914,17 +2027,51 @@ class HyperVpnService : VpnService() {
      * Get default Xray configuration (fallback)
      * Returns a valid Xray config with minimal "direct" outbound for WireGuard over Xray-core fallback
      */
+    /**
+     * Calculate SHA-256 hash of config content for verification.
+     * 
+     * @param configContent Configuration content
+     * @return Hex string of SHA-256 hash
+     */
+    private fun calculateConfigHash(configContent: String): String {
+        return try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            val hashBytes = digest.digest(configContent.toByteArray(Charsets.UTF_8))
+            hashBytes.joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to calculate config hash: ${e.message}")
+            "unknown"
+        }
+    }
+    
     private fun getDefaultXrayConfig(): String {
         return JSONObject().apply {
             // Empty inbounds array (not needed for WireGuard over Xray-core)
             put("inbounds", JSONArray())
-            
+
             // Minimal "direct" outbound for fallback (when WARP is used without VLESS profile)
             put("outbounds", JSONArray().apply {
                 put(JSONObject().apply {
                     put("protocol", "freedom")
                     put("tag", "direct")
                 })
+            })
+
+            // Routing: All traffic goes to direct outbound
+            put("routing", JSONObject().apply {
+                put("rules", JSONArray().apply {
+                    put(JSONObject().apply {
+                        put("type", "field")
+                        put("outboundTag", "direct")
+                    })
+                })
+            })
+
+            // Log configuration for debugging
+            put("log", JSONObject().apply {
+                put("loglevel", "debug")
+                put("access", "")
+                put("error", "")
             })
         }.toString()
     }

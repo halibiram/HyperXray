@@ -105,7 +105,25 @@ class ServiceEventObserver {
     
     private val logUpdateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            val logData = intent.getStringExtra(HyperVpnService.EXTRA_LOG_DATA) ?: ""
+            // Handle Parcel$LazyValue issue on Android by using getExtras() and safe casting
+            val logData = try {
+                val extras = intent.extras
+                if (extras != null) {
+                    val value = extras.get(HyperVpnService.EXTRA_LOG_DATA)
+                    when (value) {
+                        is String -> value
+                        else -> value?.toString() ?: ""
+                    }
+                } else {
+                    ""
+                }
+            } catch (e: ClassCastException) {
+                Log.w(TAG, "Failed to get log data from intent: ${e.message}")
+                ""
+            } catch (e: Exception) {
+                Log.w(TAG, "Error reading log data: ${e.message}")
+                ""
+            }
             Log.d(TAG, "Log update event received")
             _eventChannel.trySend(ServiceEvent.LogUpdate(logData))
         }

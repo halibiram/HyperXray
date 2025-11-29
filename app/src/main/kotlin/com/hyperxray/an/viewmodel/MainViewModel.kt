@@ -196,9 +196,13 @@ class MainViewModel(
         Log.d(TAG, "MainViewModel initialized.")
         
         // Initialize XrayStatsManager - needs viewModelScope which is only available here
+        // Use default port 65276 if apiPort is 0 (same as ConfigInjector)
         xrayStatsManager = XrayStatsManager(
             scope = viewModelScope,
-            apiPortProvider = { prefs.apiPort }
+            apiPortProvider = { 
+                val port = prefs.apiPort
+                if (port > 0 && port <= 65535) port else 65276
+            }
         )
         
         // Initialize coreStatsState after XrayStatsManager is created

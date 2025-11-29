@@ -21,6 +21,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicReference
+import org.json.JSONObject
 
 /**
  * Manages Xray-core statistics collection via gRPC.
@@ -34,6 +35,33 @@ class XrayStatsManager(
     private val activeInstancesProvider: (suspend () -> Map<Int, Int>)? = null
 ) {
     private val TAG = "XrayStatsManager"
+    
+    companion object {
+        @Volatile
+        private var libraryLoaded = false
+        
+        init {
+            // Load native library when class is first accessed
+            try {
+                System.loadLibrary("hyperxray-jni")
+                libraryLoaded = true
+                Log.d("XrayStatsManager", "✅ Native library (hyperxray-jni) loaded successfully")
+            } catch (e: UnsatisfiedLinkError) {
+                libraryLoaded = false
+                Log.e("XrayStatsManager", "❌ Failed to load native library: ${e.message}", e)
+            } catch (e: Exception) {
+                libraryLoaded = false
+                Log.e("XrayStatsManager", "❌ Unexpected error loading native library: ${e.message}", e)
+            }
+        }
+        
+        fun isLibraryLoaded(): Boolean = libraryLoaded
+    }
+    
+    // Native function declarations for gRPC stats
+    private external fun isXrayGrpcAvailableNative(): Boolean
+    private external fun getXraySystemStatsNative(): String?
+    private external fun getXrayTrafficStatsNative(): String?
     
     private var coreStatsClient: CoreStatsClient? = null
     private val coreStatsClientMutex = Mutex() // For suspend functions
@@ -242,8 +270,71 @@ class XrayStatsManager(
     
     /**
      * Updates core statistics from single instance (legacy mode).
+     * Tries native gRPC client first, falls back to CoreStatsClient if not available.
      */
     private suspend fun updateCoreStatsSingleInstance() {
+        // Try native gRPC client first
+        val nativeAvailable = try {
+            if (!isLibraryLoaded()) {
+                Log.d(TAG, "Native library not loaded, skipping native gRPC check")
+                false
+            } else {
+                Log.d(TAG, "Checking native gRPC availability...")
+                val available = isXrayGrpcAvailableNative()
+                Log.d(TAG, "Native gRPC available: $available")
+                available
+            }
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w(TAG, "Native gRPC check failed (UnsatisfiedLinkError): ${e.message}, falling back to CoreStatsClient", e)
+            false
+        } catch (e: Exception) {
+            Log.w(TAG, "Native gRPC check failed: ${e.message}, falling back to CoreStatsClient", e)
+            false
+        }
+        
+        if (nativeAvailable) {
+            // Use native gRPC client
+            Log.d(TAG, "Using native gRPC client for stats")
+            try {
+                val systemStatsJson = withTimeoutOrNull(3000L) {
+                    Log.d(TAG, "Calling getXraySystemStatsNative()...")
+                    getXraySystemStatsNative()
+                }
+                val trafficStatsJson = withTimeoutOrNull(3000L) {
+                    Log.d(TAG, "Calling getXrayTrafficStatsNative()...")
+                    getXrayTrafficStatsNative()
+                }
+                Log.d(TAG, "Native stats received - systemStats: ${systemStatsJson != null}, trafficStats: ${trafficStatsJson != null}")
+                
+                if (systemStatsJson != null && trafficStatsJson != null) {
+                    // Parse JSON responses
+                    val systemStats = parseSystemStatsFromJson(systemStatsJson)
+                    val trafficStats = parseTrafficStatsFromJson(trafficStatsJson)
+                    
+                    if (systemStats != null && trafficStats != null) {
+                        // Reset consecutive failures on success
+                        consecutiveFailures = 0
+                        synchronized(coreStatsClientLock) {
+                            if (clientState != ClientState.READY) {
+                                clientState = ClientState.READY
+                            }
+                        }
+                        
+                        updateStatsState(systemStats, trafficStats)
+                        Log.d(TAG, "Stats updated from native gRPC client")
+                        return
+                    } else {
+                        Log.w(TAG, "Failed to parse native stats JSON, falling back to CoreStatsClient")
+                    }
+                } else {
+                    Log.w(TAG, "Native stats returned null, falling back to CoreStatsClient")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Native gRPC call failed: ${e.message}, falling back to CoreStatsClient", e)
+            }
+        }
+        
+        // Fallback to CoreStatsClient
         // Synchronize access to coreStatsClient to prevent race conditions
         val client = coreStatsClientMutex.withLock {
             // Check if we can recreate client (cooldown and state checks)
@@ -857,5 +948,63 @@ private fun formatBytes(bytes: Long): String {
 
 private fun formatThroughput(throughput: Double): String {
     return com.hyperxray.an.common.formatThroughput(throughput)
+}
+
+/**
+ * Parses system stats from JSON string returned by native gRPC client.
+ */
+private fun parseSystemStatsFromJson(jsonStr: String): SysStatsResponse? {
+    val TAG = "XrayStatsManager"
+    return try {
+        val json = JSONObject(jsonStr)
+        
+        // Check for error field
+        if (json.has("error")) {
+            Log.w(TAG, "Native stats returned error: ${json.getString("error")}")
+            return null
+        }
+        
+        val builder = SysStatsResponse.newBuilder()
+        
+        if (json.has("numGoroutine")) builder.setNumGoroutine(json.getInt("numGoroutine"))
+        if (json.has("numGC")) builder.setNumGC(json.getInt("numGC"))
+        if (json.has("alloc")) builder.setAlloc(json.getLong("alloc"))
+        if (json.has("totalAlloc")) builder.setTotalAlloc(json.getLong("totalAlloc"))
+        if (json.has("sys")) builder.setSys(json.getLong("sys"))
+        if (json.has("mallocs")) builder.setMallocs(json.getLong("mallocs"))
+        if (json.has("frees")) builder.setFrees(json.getLong("frees"))
+        if (json.has("liveObjects")) builder.setLiveObjects(json.getLong("liveObjects"))
+        if (json.has("pauseTotalNs")) builder.setPauseTotalNs(json.getLong("pauseTotalNs"))
+        if (json.has("uptime")) builder.setUptime(json.getInt("uptime"))
+        
+        builder.build()
+    } catch (e: Exception) {
+        Log.e(TAG, "Failed to parse system stats JSON: ${e.message}", e)
+        null
+    }
+}
+
+/**
+ * Parses traffic stats from JSON string returned by native gRPC client.
+ */
+private fun parseTrafficStatsFromJson(jsonStr: String): TrafficState? {
+    val TAG = "XrayStatsManager"
+    return try {
+        val json = JSONObject(jsonStr)
+        
+        // Check for error field
+        if (json.has("error")) {
+            Log.w(TAG, "Native traffic stats returned error: ${json.getString("error")}")
+            return null
+        }
+        
+        val uplink = if (json.has("uplink")) json.getLong("uplink") else 0L
+        val downlink = if (json.has("downlink")) json.getLong("downlink") else 0L
+        
+        TrafficState(uplink, downlink)
+    } catch (e: Exception) {
+        Log.e(TAG, "Failed to parse traffic stats JSON: ${e.message}", e)
+        null
+    }
 }
 

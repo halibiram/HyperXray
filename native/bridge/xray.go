@@ -29,12 +29,14 @@ func (w *XrayLogWriter) Handle(msg log.Message) {
 
 // XrayWrapper manages Xray-core instance
 type XrayWrapper struct {
-	instance *core.Instance
-	handler  outbound.Manager
-	ctx      context.Context
-	cancel   context.CancelFunc
-	running  bool
-	mu       sync.Mutex
+	instance  *core.Instance
+	handler   outbound.Manager
+	ctx       context.Context
+	cancel    context.CancelFunc
+	running   bool
+	mu        sync.Mutex
+	grpcClient *XrayGrpcClient
+	apiPort   int
 }
 
 // ensureDebugLogging adds debug log settings to config
@@ -63,6 +65,51 @@ func ensureDebugLogging(configJSON string) string {
 	return string(newConfig)
 }
 
+// parseApiPortFromConfig extracts API port from Xray config JSON
+// Returns 0 if API port is not found (not an error, just means gRPC is not configured)
+func parseApiPortFromConfig(configJSON string) (int, error) {
+	var config map[string]interface{}
+	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
+		return 0, fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	// Check if "api" section exists
+	apiSection, ok := config["api"].(map[string]interface{})
+	if !ok {
+		logDebug("[Xray] No API section found in config (gRPC not configured)")
+		return 0, nil // Not an error, just means gRPC is not configured
+	}
+
+	// Get "listen" field
+	listen, ok := apiSection["listen"].(string)
+	if !ok {
+		logDebug("[Xray] No listen field in API section")
+		return 0, nil
+	}
+
+	// Parse "127.0.0.1:PORT" format
+	// Extract port number after the colon
+	parts := strings.Split(listen, ":")
+	if len(parts) != 2 {
+		logWarn("[Xray] Invalid listen format: %s (expected 127.0.0.1:PORT)", listen)
+		return 0, nil
+	}
+
+	var port int
+	if _, err := fmt.Sscanf(parts[1], "%d", &port); err != nil {
+		logWarn("[Xray] Failed to parse port from listen: %s, error: %v", listen, err)
+		return 0, nil
+	}
+
+	if port <= 0 || port > 65535 {
+		logWarn("[Xray] Invalid port number: %d", port)
+		return 0, nil
+	}
+
+	logInfo("[Xray] ✅ Parsed API port from config: %d", port)
+	return port, nil
+}
+
 // NewXrayWrapper creates Xray instance from JSON config
 func NewXrayWrapper(configJSON string) (*XrayWrapper, error) {
 	logInfo("[Xray] ========================================")
@@ -70,12 +117,52 @@ func NewXrayWrapper(configJSON string) (*XrayWrapper, error) {
 	logInfo("[Xray] ========================================")
 	logDebug("[Xray] Config length: %d bytes", len(configJSON))
 	
+	// ===== PRE-FLIGHT VALIDATION =====
+	// Step 1: Validate config is not empty
+	if len(configJSON) == 0 {
+		logError("[Xray] ❌ Config is empty!")
+		return nil, fmt.Errorf("config is empty")
+	}
+	
+	// Step 2: Validate config is valid JSON
+	var testConfig map[string]interface{}
+	if err := json.Unmarshal([]byte(configJSON), &testConfig); err != nil {
+		logError("[Xray] ❌ Config is not valid JSON: %v", err)
+		return nil, fmt.Errorf("invalid JSON config: %w", err)
+	}
+	
+	// Step 3: Validate config has required fields
+	outbounds, hasOutbounds := testConfig["outbounds"].([]interface{})
+	outbound, hasOutbound := testConfig["outbound"].([]interface{})
+	if !hasOutbounds && !hasOutbound {
+		logError("[Xray] ❌ Config missing 'outbounds' or 'outbound' field!")
+		return nil, fmt.Errorf("config missing required 'outbounds' or 'outbound' field")
+	}
+	
+	if hasOutbounds && len(outbounds) == 0 {
+		logError("[Xray] ❌ Config has empty 'outbounds' array!")
+		return nil, fmt.Errorf("config has empty 'outbounds' array")
+	}
+	if hasOutbound && len(outbound) == 0 {
+		logError("[Xray] ❌ Config has empty 'outbound' array!")
+		return nil, fmt.Errorf("config has empty 'outbound' array")
+	}
+	
+	logInfo("[Xray] ✅ Config validation passed")
+	
 	// Enable Xray internal logging FIRST
 	logInfo("[Xray] Enabling Xray internal debug logging...")
 	log.RegisterHandler(&XrayLogWriter{})
 	
 	// Modify config to enable debug logging if not present
 	configJSON = ensureDebugLogging(configJSON)
+	
+	// Parse API port from config (for gRPC client)
+	apiPort, err := parseApiPortFromConfig(configJSON)
+	if err != nil {
+		logWarn("[Xray] Failed to parse API port: %v (continuing without gRPC)", err)
+		apiPort = 0
+	}
 	
 	// Parse JSON config
 	jsonConfig := &conf.Config{}
@@ -87,12 +174,98 @@ func NewXrayWrapper(configJSON string) (*XrayWrapper, error) {
 	logInfo("[Xray] JSON parsed: %d inbounds, %d outbounds", 
 		len(jsonConfig.InboundConfigs), len(jsonConfig.OutboundConfigs))
 	
-	// Log outbound details
+	// Log outbound details with full parsing info
 	logInfo("[Xray] Found %d outbound(s):", len(jsonConfig.OutboundConfigs))
 	for i, ob := range jsonConfig.OutboundConfigs {
 		logInfo("[Xray]   Outbound[%d]: protocol=%s, tag=%s", i, ob.Protocol, ob.Tag)
-		if ob.Settings != nil {
-			logDebug("[Xray]     Settings: %+v", ob.Settings)
+		
+		// Parse and log VLESS/VMess specific settings
+		if ob.Protocol == "vless" || ob.Protocol == "vmess" {
+			// Try to extract server address and port from settings
+			if ob.Settings != nil {
+				// Settings is typically a JSON object, try to parse it
+				if settingsBytes, err := json.Marshal(ob.Settings); err == nil {
+					var settingsMap map[string]interface{}
+					if err := json.Unmarshal(settingsBytes, &settingsMap); err == nil {
+						// Check for vnext (VLESS) or servers (VMess)
+						if vnext, ok := settingsMap["vnext"].([]interface{}); ok && len(vnext) > 0 {
+							if server, ok := vnext[0].(map[string]interface{}); ok {
+								address := ""
+								port := 0
+								if addr, ok := server["address"].(string); ok {
+									address = addr
+								}
+								if p, ok := server["port"].(float64); ok {
+									port = int(p)
+								}
+								logInfo("[Xray]     Server: %s:%d", address, port)
+							}
+						}
+						if servers, ok := settingsMap["servers"].([]interface{}); ok && len(servers) > 0 {
+							if server, ok := servers[0].(map[string]interface{}); ok {
+								address := ""
+								port := 0
+								if addr, ok := server["address"].(string); ok {
+									address = addr
+								}
+								if p, ok := server["port"].(float64); ok {
+									port = int(p)
+								}
+								logInfo("[Xray]     Server: %s:%d", address, port)
+							}
+						}
+					}
+				}
+				logDebug("[Xray]     Settings: %+v", ob.Settings)
+			}
+		}
+		
+		// Log stream settings (TLS, REALITY, etc.) from original JSON
+		// Parse original config JSON to extract streamSettings
+		var originalConfig map[string]interface{}
+		if err := json.Unmarshal([]byte(configJSON), &originalConfig); err == nil {
+			if outbounds, ok := originalConfig["outbounds"].([]interface{}); ok && i < len(outbounds) {
+				if outbound, ok := outbounds[i].(map[string]interface{}); ok {
+					if streamSettings, ok := outbound["streamSettings"].(map[string]interface{}); ok {
+						network := ""
+						security := ""
+						if n, ok := streamSettings["network"].(string); ok {
+							network = n
+						}
+						if s, ok := streamSettings["security"].(string); ok {
+							security = s
+						}
+						logInfo("[Xray]     Stream: network=%s, security=%s", network, security)
+						
+						// Log REALITY settings if present
+						if reality, ok := streamSettings["realitySettings"].(map[string]interface{}); ok {
+							if serverName, ok := reality["serverName"].(string); ok {
+								logInfo("[Xray]     REALITY serverName: %s", serverName)
+							}
+							if publicKey, ok := reality["publicKey"].(string); ok {
+								pkLen := len(publicKey)
+								if pkLen > 20 {
+									pkLen = 20
+								}
+								logInfo("[Xray]     REALITY publicKey: %s...", publicKey[:pkLen])
+							}
+							if shortId, ok := reality["shortId"].(string); ok {
+								logInfo("[Xray]     REALITY shortId: %s", shortId)
+							}
+						}
+						
+						// Log TLS settings if present
+						if tls, ok := streamSettings["tlsSettings"].(map[string]interface{}); ok {
+							if serverName, ok := tls["serverName"].(string); ok {
+								logInfo("[Xray]     TLS serverName: %s", serverName)
+							}
+							if fingerprint, ok := tls["fingerprint"].(string); ok {
+								logInfo("[Xray]     TLS fingerprint: %s", fingerprint)
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 	
@@ -133,9 +306,11 @@ func NewXrayWrapper(configJSON string) (*XrayWrapper, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	
 	return &XrayWrapper{
-		instance: instance,
-		ctx:      ctx,
-		cancel:   cancel,
+		instance:   instance,
+		ctx:        ctx,
+		cancel:     cancel,
+		apiPort:    apiPort,
+		grpcClient: nil, // Will be created in Start() if apiPort > 0
 	}, nil
 }
 
@@ -153,6 +328,7 @@ func (x *XrayWrapper) Start() error {
 	logInfo("[Xray] Starting Xray-core...")
 	logInfo("[Xray] ========================================")
 	
+	// ===== PRE-FLIGHT CHECKS =====
 	// Check instance exists
 	if x.instance == nil {
 		logError("[Xray] ❌ Instance is nil! Cannot start.")
@@ -162,9 +338,11 @@ func (x *XrayWrapper) Start() error {
 	logDebug("[Xray] Instance exists, calling Start()...")
 	
 	// Actually start Xray
+	// All logs from Xray will be captured via XrayLogWriter and forwarded to Android Logcat
 	err := x.instance.Start()
 	if err != nil {
 		logError("[Xray] ❌ Start() FAILED: %v", err)
+		logError("[Xray] ❌ This error should be visible in Android Logcat")
 		return fmt.Errorf("xray start failed: %w", err)
 	}
 	
@@ -185,6 +363,22 @@ func (x *XrayWrapper) Start() error {
 	logDebug("[Xray] Outbound manager ready for routing")
 	
 	x.running = true
+	
+	// Initialize gRPC client if API port is configured
+	if x.apiPort > 0 {
+		logInfo("[Xray] Initializing gRPC client for API port %d...", x.apiPort)
+		grpcClient, err := NewXrayGrpcClient(x.apiPort)
+		if err != nil {
+			// gRPC client is optional - log warning but don't fail
+			logWarn("[Xray] ⚠️ Failed to create gRPC client: %v (continuing without gRPC stats)", err)
+			logWarn("[Xray] ⚠️ gRPC stats will not be available, but Xray-core will continue running")
+		} else {
+			x.grpcClient = grpcClient
+			logInfo("[Xray] ✅ gRPC client initialized successfully")
+		}
+	} else {
+		logDebug("[Xray] No API port configured, skipping gRPC client initialization")
+	}
 	
 	logInfo("[Xray] ========================================")
 	logInfo("[Xray] ✅ XRAY-CORE IS NOW RUNNING!")
@@ -321,6 +515,17 @@ func (x *XrayWrapper) Stop() error {
 	logInfo("[Xray] Stopping Xray-core...")
 	x.cancel()
 	
+	// Close gRPC client if it exists
+	if x.grpcClient != nil {
+		logInfo("[Xray] Closing gRPC client...")
+		if err := x.grpcClient.Close(); err != nil {
+			logWarn("[Xray] Error closing gRPC client: %v", err)
+		} else {
+			logInfo("[Xray] ✅ gRPC client closed")
+		}
+		x.grpcClient = nil
+	}
+	
 	if err := x.instance.Close(); err != nil {
 		logError("[Xray] Close error: %v", err)
 		return err
@@ -386,6 +591,13 @@ func (x *XrayWrapper) IsRunning() bool {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	return x.running
+}
+
+// GetGrpcClient returns the gRPC client if available
+func (x *XrayWrapper) GetGrpcClient() *XrayGrpcClient {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	return x.grpcClient
 }
 
 // XrayUDPConn wraps Xray connection as UDP-like
@@ -502,13 +714,21 @@ func (c *XrayUDPConn) readLoop() {
 	errorCount := 0
 	
 	for {
-		if c.closed {
+		c.mu.Lock()
+		closed := c.closed
+		c.mu.Unlock()
+		
+		if closed {
 			logInfo("[XrayUDP] readLoop() exiting: connection closed")
 			return
 		}
 		
 		// Check if connection is still valid
-		if c.conn == nil {
+		c.mu.Lock()
+		conn := c.conn
+		c.mu.Unlock()
+		
+		if conn == nil {
 			logWarn("[XrayUDP] readLoop: Connection is nil, attempting reconnect...")
 			if err := c.reconnect(); err != nil {
 				errorCount++
@@ -528,10 +748,10 @@ func (c *XrayUDPConn) readLoop() {
 			logDebug("[XrayUDP] readLoop: Attempting to read (readCount: %d, errorCount: %d)...", readCount, errorCount)
 		}
 		
-		// Check connection state before read
+		// Check connection state before read (conn already defined above)
 		c.mu.Lock()
 		connValid := c.conn != nil && !c.closed
-		conn := c.conn
+		conn = c.conn
 		c.mu.Unlock()
 		
 		if !connValid || conn == nil {
@@ -546,57 +766,64 @@ func (c *XrayUDPConn) readLoop() {
 			continue
 		}
 		
-		n, err := c.conn.Read(buf)
+		// Read with timeout to prevent blocking forever
+		readDeadline := time.Now().Add(30 * time.Second)
+		if err := conn.SetReadDeadline(readDeadline); err != nil {
+			logWarn("[XrayUDP] readLoop: Failed to set read deadline: %v", err)
+		}
+		
+		n, err := conn.Read(buf)
 		if err != nil {
-			if c.closed {
-				logInfo("[XrayUDP] readLoop() exiting: connection closed during read")
+			// Check if closed flag was set (not just connection error)
+			c.mu.Lock()
+			wasClosed := c.closed
+			c.mu.Unlock()
+			
+			if wasClosed {
+				logInfo("[XrayUDP] readLoop() exiting: connection closed during read (closed flag set)")
 				return
 			}
+			
+			// Check if it's a timeout (expected for UDP)
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// Timeout is expected for UDP - continue reading
+				if readCount == 0 || readCount%100 == 0 {
+					logDebug("[XrayUDP] readLoop: Read timeout (expected for UDP, readCount: %d), continuing...", readCount)
+				}
+				continue
+			}
+			
 			errorCount++
 			
 			// Detailed error logging
 			errStr := err.Error()
+			errType := "unknown"
 			if strings.Contains(errStr, "closed pipe") {
-				logError("[XrayUDP] readLoop: ❌ Read error #%d: %v (readCount: %d, errorCount: %d) - Connection was closed by Xray-core", errorCount, err, readCount, errorCount)
+				errType = "closed pipe"
 			} else if strings.Contains(errStr, "EOF") {
-				logError("[XrayUDP] readLoop: ❌ Read error #%d: %v (readCount: %d, errorCount: %d) - Connection closed (EOF)", errorCount, err, readCount, errorCount)
-			} else {
-				logError("[XrayUDP] readLoop: ❌ Read error #%d: %v (readCount: %d, errorCount: %d)", errorCount, err, readCount, errorCount)
+				errType = "EOF"
+			} else if strings.Contains(errStr, "connection reset") {
+				errType = "connection reset"
+			} else if strings.Contains(errStr, "broken pipe") {
+				errType = "broken pipe"
 			}
 			
-			// Log connection state
-			c.mu.Lock()
-			connState := "nil"
-			if c.conn != nil {
-				connState = "valid"
-				if localAddr := c.conn.LocalAddr(); localAddr != nil {
-					localStr := localAddr.String()
-					if localStr == "0.0.0.0:0" || localStr == "[::]:0" {
-						connState += fmt.Sprintf(" (local: %v - INVALID!)", localAddr)
-					} else {
-						connState += fmt.Sprintf(" (local: %v)", localAddr)
-					}
-				}
-				if remoteAddr := c.conn.RemoteAddr(); remoteAddr != nil {
-					remoteStr := remoteAddr.String()
-					if remoteStr == "0.0.0.0:0" || remoteStr == "[::]:0" {
-						connState += fmt.Sprintf(" (remote: %v - INVALID!)", remoteAddr)
-					} else {
-						connState += fmt.Sprintf(" (remote: %v)", remoteAddr)
-					}
-				}
-			}
-			c.mu.Unlock()
-			logDebug("[XrayUDP] readLoop: Connection state: %s", connState)
+			logError("[XrayUDP] readLoop: ❌ Read error #%d (type: %s): %v (readCount: %d, errorCount: %d)", errorCount, errType, err, readCount, errorCount)
 			
-			// Attempt to reconnect
-			if err := c.reconnect(); err != nil {
-				logError("[XrayUDP] readLoop: Reconnect failed: %v", err)
-				time.Sleep(1 * time.Second)
+			// For EOF and closed pipe, Xray-core may have closed the connection
+			// This is normal for UDP over TCP - connection may close after each packet
+			// Try to reconnect and continue
+			if errType == "EOF" || errType == "closed pipe" || errType == "connection reset" {
+				logWarn("[XrayUDP] readLoop: Connection closed by Xray-core (type: %s), attempting reconnect...", errType)
+				if reconnectErr := c.reconnect(); reconnectErr != nil {
+					logError("[XrayUDP] readLoop: Reconnect failed: %v", reconnectErr)
+					time.Sleep(1 * time.Second)
+					continue
+				}
+				logInfo("[XrayUDP] readLoop: Reconnected successfully, continuing...")
 				continue
 			}
-			logInfo("[XrayUDP] readLoop: Reconnected after error, continuing...")
-			continue
+			
 		}
 		
 		readCount++
@@ -638,14 +865,15 @@ func (c *XrayUDPConn) readLoop() {
 }
 
 // Write sends data through Xray
+// For UDP over TCP (VLESS), we may need to open a new connection for each packet
+// or keep the connection alive. Xray-core handles this internally.
 func (c *XrayUDPConn) Write(data []byte) (int, error) {
 	if len(data) == 0 {
 		return 0, nil
 	}
 	
-	// Check connection state before writing
+	// Check if closed
 	c.mu.Lock()
-	conn := c.conn
 	closed := c.closed
 	c.mu.Unlock()
 	
@@ -653,68 +881,63 @@ func (c *XrayUDPConn) Write(data []byte) (int, error) {
 		return 0, fmt.Errorf("connection is closed")
 	}
 	
-	// Try to write, reconnect if needed
-	var n int
-	var err error
-	maxRetries := 2
+	// Get or create connection
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
 	
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		// Get current connection (may change during reconnect)
+	// If connection is nil or invalid, reconnect
+	if conn == nil {
+		logDebug("[XrayUDP] Write: Connection is nil, reconnecting before write...")
+		if err := c.reconnect(); err != nil {
+			logError("[XrayUDP] Write: Reconnect failed: %v", err)
+			return 0, fmt.Errorf("not connected: %w", err)
+		}
 		c.mu.Lock()
 		conn = c.conn
 		c.mu.Unlock()
-		
 		if conn == nil {
-			if attempt < maxRetries-1 {
-				logWarn("[XrayUDP] Write: Connection is nil, attempting reconnect before write (attempt %d/%d)...", attempt+1, maxRetries)
-				// Release lock before reconnect to avoid deadlock
-				if reconnectErr := c.reconnect(); reconnectErr != nil {
-					logError("[XrayUDP] Write: Reconnect failed: %v", reconnectErr)
-					return 0, fmt.Errorf("not connected: %w", reconnectErr)
-				}
-				continue
-			} else {
-				return 0, fmt.Errorf("connection is nil after reconnect attempts")
-			}
-		}
-		
-		// Log write attempt for large packets
-		if len(data) > 100 && attempt == 0 {
-			logDebug("[XrayUDP] Write: Attempting to write %d bytes to %s:%d...", len(data), c.address, c.port)
-		}
-		
-		// Attempt write
-		n, err = conn.Write(data)
-		if err == nil {
-			if len(data) > 100 {
-				logInfo("[XrayUDP] Write: ✅ Sent %d bytes to %s:%d", n, c.address, c.port)
-			} else {
-				logDebug("[XrayUDP] Write: ✅ Sent %d bytes", n)
-			}
-			return n, nil
-		}
-		
-		// Handle write error
-		errStr := err.Error()
-		if strings.Contains(errStr, "closed pipe") || strings.Contains(errStr, "broken pipe") {
-			logError("[XrayUDP] Write: ❌ Write error #%d: %v - Connection was closed (attempt %d/%d)", attempt+1, err, attempt+1, maxRetries)
-		} else {
-			logError("[XrayUDP] Write: ❌ Write error #%d: %v (attempt %d/%d)", attempt+1, err, attempt+1, maxRetries)
-		}
-		
-		// If this is not the last attempt, try to reconnect
-		if attempt < maxRetries-1 {
-			logInfo("[XrayUDP] Write: Attempting reconnect before retry...")
-			if reconnectErr := c.reconnect(); reconnectErr != nil {
-				logError("[XrayUDP] Write: Reconnect failed: %v", reconnectErr)
-				return 0, fmt.Errorf("write failed and reconnect failed: %w", err)
-			}
-			logInfo("[XrayUDP] Write: Reconnected, retrying write...")
+			return 0, fmt.Errorf("connection is nil after reconnect")
 		}
 	}
 	
-	// All retries failed
-	return 0, fmt.Errorf("write failed after %d attempts: %w", maxRetries, err)
+	// Log write attempt for large packets
+	if len(data) > 100 {
+		logDebug("[XrayUDP] Write: Attempting to write %d bytes to %s:%d...", len(data), c.address, c.port)
+	}
+	
+	// Attempt write
+	n, err := conn.Write(data)
+	if err != nil {
+		// If write fails, try to reconnect and retry once
+		logWarn("[XrayUDP] Write: Write failed: %v, attempting reconnect...", err)
+		if reconnectErr := c.reconnect(); reconnectErr != nil {
+			logError("[XrayUDP] Write: Reconnect failed: %v", reconnectErr)
+			return 0, fmt.Errorf("write failed and reconnect failed: %w", err)
+		}
+		
+		// Retry write after reconnect
+		c.mu.Lock()
+		conn = c.conn
+		c.mu.Unlock()
+		if conn == nil {
+			return 0, fmt.Errorf("connection is nil after reconnect")
+		}
+		
+		n, err = conn.Write(data)
+		if err != nil {
+			logError("[XrayUDP] Write: ❌ Write failed after reconnect: %v", err)
+			return 0, fmt.Errorf("write failed: %w", err)
+		}
+	}
+	
+	if len(data) > 100 {
+		logInfo("[XrayUDP] Write: ✅ Sent %d bytes to %s:%d", n, c.address, c.port)
+	} else {
+		logDebug("[XrayUDP] Write: ✅ Sent %d bytes", n)
+	}
+	
+	return n, nil
 }
 
 // Read receives data from Xray
@@ -742,6 +965,13 @@ func (c *XrayUDPConn) Close() error {
 // GetAddress returns endpoint address
 func (c *XrayUDPConn) GetAddress() string {
 	return fmt.Sprintf("%s:%d", c.address, c.port)
+}
+
+// IsConnected checks if connection is valid and connected
+func (c *XrayUDPConn) IsConnected() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.conn != nil && !c.closed
 }
 
 // reconnect attempts to reconnect the XrayUDP connection
@@ -834,16 +1064,10 @@ func (c *XrayUDPConn) reconnect() error {
 	logInfo("[XrayUDP] Reconnect - Connection type: %s", connType)
 	
 	// Restart read loop
-	logInfo("[XrayUDP] Restarting readLoop() goroutine after reconnect...")
-	go c.readLoop()
-	logInfo("[XrayUDP] ✅ readLoop() goroutine restarted")
+	// Note: readLoop() should already be running in a separate goroutine
+	// It will detect the new connection and continue reading
+	logInfo("[XrayUDP] ✅ Reconnect complete, readLoop() should continue with new connection")
 	
 	return nil
 }
 
-// IsConnected checks if connection is valid
-func (c *XrayUDPConn) IsConnected() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.conn != nil && !c.closed
-}

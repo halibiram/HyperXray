@@ -253,12 +253,23 @@ object ConfigInjector {
     @Throws(JSONException::class)
     fun injectApiPort(configContent: String, apiPort: Int): String {
         val startTime = System.currentTimeMillis()
-        AiLogHelper.d(TAG, "🔧 CONFIG API PORT: Injecting API port: $apiPort")
+        
+        // Use default port if apiPort is 0 or invalid
+        val effectivePort = if (apiPort > 0 && apiPort <= 65535) {
+            apiPort
+        } else {
+            // Default API port for Xray-core gRPC StatsService
+            val defaultPort = 65276
+            AiLogHelper.w(TAG, "⚠️ CONFIG API PORT: Invalid API port ($apiPort), using default: $defaultPort")
+            defaultPort
+        }
+        
+        AiLogHelper.d(TAG, "🔧 CONFIG API PORT: Injecting API port: $effectivePort")
         val jsonObject = JSONObject(configContent)
         
         val apiObject = JSONObject()
         apiObject.put("tag", "api")
-        apiObject.put("listen", "127.0.0.1:$apiPort")
+        apiObject.put("listen", "127.0.0.1:$effectivePort")
         val servicesArray = org.json.JSONArray()
         servicesArray.put("StatsService")
         apiObject.put("services", servicesArray)
@@ -267,7 +278,7 @@ object ConfigInjector {
 
         val finalConfig = jsonObject.toString(2)
         val duration = System.currentTimeMillis() - startTime
-        AiLogHelper.d(TAG, "✅ CONFIG API PORT: API port injected (port: $apiPort, duration: ${duration}ms)")
+        AiLogHelper.d(TAG, "✅ CONFIG API PORT: API port injected (port: $effectivePort, duration: ${duration}ms)")
         return finalConfig
     }
 }

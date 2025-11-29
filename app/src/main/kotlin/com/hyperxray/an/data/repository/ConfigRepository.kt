@@ -439,6 +439,32 @@ class ConfigRepository(
         _configFiles.value = currentList
         prefs.configFilesOrder = currentList.map { it.name }
     }
+    
+    /**
+     * Clear cached StateFlow values to force reload from disk.
+     * This is useful when config files might have changed externally
+     * or when stale cache is causing issues.
+     */
+    fun clearCache() {
+        Log.d(TAG, "Clearing ConfigRepository cache")
+        _configFiles.value = emptyList()
+        _selectedConfigFile.value = null
+        AiLogHelper.d(TAG, "🧹 CACHE CLEAR: ConfigRepository cache cleared")
+    }
+    
+    /**
+     * Force reload configs from disk, clearing cache first.
+     * This ensures we get the latest config files and selected config.
+     */
+    suspend fun forceReloadConfigs() {
+        withContext(Dispatchers.IO) {
+            Log.d(TAG, "Force reloading configs from disk")
+            AiLogHelper.d(TAG, "🔄 FORCE RELOAD: Clearing cache and reloading configs")
+            clearCache()
+            loadConfigs()
+            AiLogHelper.i(TAG, "✅ FORCE RELOAD: Configs reloaded from disk")
+        }
+    }
 
     companion object {
         private const val TAG = "ConfigRepository"

@@ -11,8 +11,9 @@ import com.hyperxray.an.core.network.dns.SystemDnsCacheServer
 import com.hyperxray.an.ui.screens.log.extractDnsQuery
 import com.hyperxray.an.ui.screens.log.extractSniffedDomain
 import com.hyperxray.an.ui.screens.log.extractSNI
-import com.hyperxray.an.xray.runtime.MultiXrayCoreManager
-import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
+// DEPRECATED: MultiXrayCoreManager removed - using single instance XrayCoreManager
+// import com.hyperxray.an.xray.runtime.MultiXrayCoreManager
+// import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
 import com.hyperxray.an.viewmodel.CoreStatsState
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.notification.TelegramNotificationManager
@@ -245,15 +246,6 @@ object TProxyUtils {
     // ============================================================================
     // Process Management Utilities
     // ============================================================================
-    
-    /**
-     * Creates ProcessBuilder for Xray execution using Android linker.
-     * DEPRECATED: This method is no longer used. Xray-core is embedded in libhyperxray.so.
-     */
-    fun getProcessBuilder(context: Context, xrayPath: String): ProcessBuilder {
-        Log.w(TAG, "getProcessBuilder() is deprecated - Xray-core is embedded in libhyperxray.so")
-        throw UnsupportedOperationException("libxray.so is no longer used - Xray-core is embedded in libhyperxray.so")
-    }
     
     // ============================================================================
     // DNS & Network Utilities
@@ -942,63 +934,17 @@ object TProxyUtils {
     
     /**
      * Broadcast instance status to MainViewModel for dashboard updates.
+     * 
+     * DEPRECATED: Multi-instance support removed. This function is kept for compatibility
+     * but does nothing. Use XrayCoreManager for single-instance status.
      */
+    @Deprecated("Multi-instance support removed. Use XrayCoreManager instead.", ReplaceWith(""))
     fun broadcastInstanceStatus(
         context: Context,
-        multiXrayCoreManager: MultiXrayCoreManager?
+        multiXrayCoreManager: Any? // Changed to Any? to avoid import
     ) {
-        multiXrayCoreManager?.let { manager ->
-            val statusMap = manager.instancesStatus.value
-            val hasRunning = statusMap.values.any { it is XrayRuntimeStatus.Running }
-            
-            val intent = Intent("com.hyperxray.an.INSTANCE_STATUS_UPDATE")
-            intent.setPackage(context.packageName)
-            intent.putExtra("instance_count", statusMap.size)
-            intent.putExtra("has_running", hasRunning)
-            
-            statusMap.forEach { (instanceIndex, status) ->
-                when (status) {
-                    is XrayRuntimeStatus.Running -> {
-                        intent.putExtra("instance_${instanceIndex}_pid", status.processId)
-                        intent.putExtra("instance_${instanceIndex}_port", status.apiPort)
-                        intent.putExtra("instance_${instanceIndex}_status_type", "Running")
-                    }
-                    is XrayRuntimeStatus.Starting -> {
-                        intent.putExtra("instance_${instanceIndex}_pid", 0L)
-                        intent.putExtra("instance_${instanceIndex}_port", 0)
-                        intent.putExtra("instance_${instanceIndex}_status_type", "Starting")
-                    }
-                    is XrayRuntimeStatus.Stopping -> {
-                        intent.putExtra("instance_${instanceIndex}_pid", 0L)
-                        intent.putExtra("instance_${instanceIndex}_port", 0)
-                        intent.putExtra("instance_${instanceIndex}_status_type", "Stopping")
-                    }
-                    is XrayRuntimeStatus.Error -> {
-                        intent.putExtra("instance_${instanceIndex}_pid", 0L)
-                        intent.putExtra("instance_${instanceIndex}_port", 0)
-                        intent.putExtra("instance_${instanceIndex}_status_type", "Error")
-                        intent.putExtra("instance_${instanceIndex}_error_message", status.message)
-                    }
-                    is XrayRuntimeStatus.ProcessExited -> {
-                        intent.putExtra("instance_${instanceIndex}_pid", 0L)
-                        intent.putExtra("instance_${instanceIndex}_port", 0)
-                        intent.putExtra("instance_${instanceIndex}_status_type", "ProcessExited")
-                        intent.putExtra("instance_${instanceIndex}_exit_code", status.exitCode)
-                        status.message?.let { 
-                            intent.putExtra("instance_${instanceIndex}_exit_message", it)
-                        }
-                    }
-                    is XrayRuntimeStatus.Stopped -> {
-                        intent.putExtra("instance_${instanceIndex}_pid", 0L)
-                        intent.putExtra("instance_${instanceIndex}_port", 0)
-                        intent.putExtra("instance_${instanceIndex}_status_type", "Stopped")
-                    }
-                }
-            }
-            
-            context.sendBroadcast(intent)
-            Log.v(TAG, "Broadcasted instance status: ${statusMap.size} total instances (Running: ${statusMap.values.count { it is XrayRuntimeStatus.Running }})")
-        }
+        // No-op: Multi-instance support removed
+        Log.d(TAG, "broadcastInstanceStatus() called but multi-instance support is removed")
     }
     
     /**
@@ -1356,93 +1302,58 @@ object TProxyUtils {
     /**
      * Process sticky routing from Xray logs.
      */
+    /**
+     * Process sticky routing from log line.
+     * 
+     * DEPRECATED: Multi-instance sticky routing removed. This function is kept for compatibility
+     * but does nothing since we now use a single instance.
+     */
+    @Deprecated("Multi-instance sticky routing removed. Single instance does not need sticky routing.", ReplaceWith(""))
     fun processStickyRoutingFromLog(
         logLine: String,
         prefs: Preferences,
-        multiXrayCoreManager: MultiXrayCoreManager?,
+        multiXrayCoreManager: Any?, // Changed to Any? to avoid import
         serviceScope: CoroutineScope,
         isActive: Boolean
     ) {
-        if (!prefs.stickyRoutingEnabled || multiXrayCoreManager == null) {
-            return
-        }
-        
-        try {
-            val domain = extractSNI(logLine) ?: extractSniffedDomain(logLine)
-            
-            val ipPattern = Regex("""\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b""")
-            val ipMatch = ipPattern.find(logLine)
-            val ip = ipMatch?.groupValues?.get(1)
-            
-            if (domain != null || ip != null) {
-                serviceScope.launch {
-                    try {
-                        multiXrayCoreManager?.getInstanceForConnection(domain, ip)?.let { (instanceIndex, apiPort) ->
-                            Log.d(TAG, "Sticky routing: domain=$domain, ip=$ip -> instance $instanceIndex, port $apiPort")
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error processing sticky routing from log: ${e.message}")
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Error extracting domain/IP for sticky routing: ${e.message}")
-        }
+        // No-op: Sticky routing not needed for single instance
+        Log.d(TAG, "processStickyRoutingFromLog() called but sticky routing is removed (single instance)")
     }
     
     /**
      * Update sticky routing cache for domain-IP mapping.
+     * 
+     * DEPRECATED: Multi-instance sticky routing removed. This function is kept for compatibility
+     * but does nothing since we now use a single instance.
      */
+    @Deprecated("Multi-instance sticky routing removed. Single instance does not need sticky routing.", ReplaceWith(""))
     fun updateStickyRoutingForDomainIp(
         domain: String,
         ip: String,
         prefs: Preferences,
-        multiXrayCoreManager: MultiXrayCoreManager?,
+        multiXrayCoreManager: Any?, // Changed to Any? to avoid import
         serviceScope: CoroutineScope
     ) {
-        if (!prefs.stickyRoutingEnabled || multiXrayCoreManager == null) {
-            return
-        }
-        
-        serviceScope.launch {
-            try {
-                multiXrayCoreManager?.getInstanceForConnection(domain, ip)?.let { (instanceIndex, apiPort) ->
-                    Log.d(TAG, "Sticky routing updated: domain=$domain, ip=$ip -> instance $instanceIndex, port $apiPort")
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Error updating sticky routing for domain-IP: ${e.message}")
-            }
-        }
+        // No-op: Sticky routing not needed for single instance
+        Log.d(TAG, "updateStickyRoutingForDomainIp() called but sticky routing is removed (single instance)")
     }
     
     /**
      * Periodic cleanup of stale routing cache entries.
+     * 
+     * DEPRECATED: Multi-instance routing cache removed. This function is kept for compatibility
+     * but does nothing since we now use a single instance.
      */
+    @Deprecated("Multi-instance routing cache removed. Single instance does not need routing cache cleanup.", ReplaceWith(""))
     fun startRoutingCacheCleanup(
         prefs: Preferences,
-        multiXrayCoreManager: MultiXrayCoreManager?,
+        multiXrayCoreManager: Any?, // Changed to Any? to avoid import
         isStopping: Boolean,
         serviceScope: CoroutineScope,
         isActive: Boolean
     ) {
-        if (!prefs.stickyRoutingEnabled || multiXrayCoreManager == null) {
-            return
-        }
-        
-        serviceScope.launch {
-            while (isActive && !isStopping) {
-                try {
-                    delay(3600000L)
-                    multiXrayCoreManager?.cleanupRoutingCache()
-                } catch (e: CancellationException) {
-                    // Job cancellation is expected when service is stopping
-                    // Re-throw to properly propagate cancellation
-                    throw e
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error in routing cache cleanup: ${e.message}")
-                }
-            }
-        }
+        // No-op: Routing cache cleanup not needed for single instance
+        Log.d(TAG, "startRoutingCacheCleanup() called but routing cache cleanup is removed (single instance)")
     }
     
     // ============================================================================

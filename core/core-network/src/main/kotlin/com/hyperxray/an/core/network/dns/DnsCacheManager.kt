@@ -982,6 +982,47 @@ object DnsCacheManager {
     }
     
     /**
+     * Clear cache entry for a specific domain.
+     * Used when domain changes to force fresh DNS resolution.
+     * 
+     * @param hostname Domain name to clear from cache
+     */
+    fun clearCache(hostname: String) {
+        if (!isInitialized || cacheFile == null) {
+            return
+        }
+        
+        try {
+            val normalizedHostname = hostname.lowercase().trim()
+            var removed = false
+            
+            cacheLock.write {
+                if (cache.remove(normalizedHostname) != null) {
+                    removed = true
+                    Log.d(TAG, "Cleared DNS cache entry for: $hostname")
+                }
+            }
+            
+            if (removed) {
+                // Trigger debounced save
+                try {
+                    saveTriggerChannel.trySend(Unit)
+                } catch (e: Exception) {
+                    // Fallback to immediate save
+                    saveScope.launch {
+                        saveCacheToFileSync()
+                    }
+                }
+                
+                // Update metrics
+                updateMetrics()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to clear cache entry for $hostname: ${e.message}")
+        }
+    }
+    
+    /**
      * Shutdown and cleanup debounced save job and metrics update job
      */
     fun shutdown() {

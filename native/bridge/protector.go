@@ -197,6 +197,7 @@ func getIPFromProcNet(iface string) (net.IP, error) {
 }
 
 // getPhysicalIPFromInterfaces fallback method using net.Interfaces()
+// This is the primary method on Android since /proc/net/route requires root
 func getPhysicalIPFromInterfaces() (net.IP, error) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
@@ -204,6 +205,11 @@ func getPhysicalIPFromInterfaces() (net.IP, error) {
 	}
 	
 	logDebug("[ProtectedDialer] Found %d network interfaces", len(interfaces))
+	
+	// Prefer WiFi interface (wlan0, wlan1, etc.) over mobile data (rmnet, etc.)
+	// WiFi interfaces typically have better connectivity
+	var wifiIP net.IP
+	var mobileIP net.IP
 	
 	for _, iface := range interfaces {
 		// Skip loopback interfaces
@@ -255,10 +261,31 @@ func getPhysicalIPFromInterfaces() (net.IP, error) {
 				continue
 			}
 			
-			// Found valid physical IP!
-			logInfo("[ProtectedDialer] ✅ Selected physical source IP: %s (interface: %s)", ip.String(), iface.Name)
-			return ip, nil
+			// Prefer WiFi interfaces (wlan0, wlan1, etc.)
+			if strings.HasPrefix(iface.Name, "wlan") {
+				if wifiIP == nil {
+					wifiIP = ip
+					logDebug("[ProtectedDialer] Found WiFi IP: %s (interface: %s)", ip.String(), iface.Name)
+				}
+			} else {
+				// Mobile data or other interfaces
+				if mobileIP == nil {
+					mobileIP = ip
+					logDebug("[ProtectedDialer] Found mobile IP: %s (interface: %s)", ip.String(), iface.Name)
+				}
+			}
 		}
+	}
+	
+	// Prefer WiFi over mobile data
+	if wifiIP != nil {
+		logInfo("[ProtectedDialer] ✅ Selected physical source IP: %s (WiFi interface)", wifiIP.String())
+		return wifiIP, nil
+	}
+	
+	if mobileIP != nil {
+		logInfo("[ProtectedDialer] ✅ Selected physical source IP: %s (mobile interface)", mobileIP.String())
+		return mobileIP, nil
 	}
 	
 	return nil, fmt.Errorf("no physical network interface found")

@@ -215,8 +215,9 @@ private fun getLocalIpAddress(): String? {
             val addrs = intf.inetAddresses
             while (addrs.hasMoreElements()) {
                 val addr = addrs.nextElement()
-                if (!addr.isLoopbackAddress && addr.hostAddress.indexOf(':') < 0) {
-                    return addr.hostAddress
+                val hostAddress = addr.hostAddress
+                if (!addr.isLoopbackAddress && hostAddress != null && hostAddress.indexOf(':') < 0) {
+                    return hostAddress
                 }
             }
         }
