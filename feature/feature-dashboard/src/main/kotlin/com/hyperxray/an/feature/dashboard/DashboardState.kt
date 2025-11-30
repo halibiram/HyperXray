@@ -93,6 +93,47 @@ data class WarpAccountInfo(
 )
 
 /**
+ * Android system memory statistics for dashboard display.
+ * Includes Android system memory info and Go runtime memory stats from native Xray-core.
+ */
+data class AndroidMemoryStats(
+    // Process memory (PSS - Proportional Set Size)
+    val totalPss: Long = 0L,           // Total PSS in bytes
+    val nativeHeap: Long = 0L,         // Native heap PSS in bytes
+    val dalvikHeap: Long = 0L,         // Dalvik heap PSS in bytes
+    val otherPss: Long = 0L,           // Other PSS in bytes
+    
+    // Runtime memory (Java heap)
+    val usedMemory: Long = 0L,         // Used memory in bytes
+    val maxMemory: Long = 0L,          // Max memory in bytes
+    val freeMemory: Long = 0L,         // Free memory in bytes
+    
+    // System memory
+    val systemTotalMem: Long = 0L,     // Total system memory in bytes
+    val systemAvailMem: Long = 0L,    // Available system memory in bytes
+    val systemUsedMem: Long = 0L,     // Used system memory in bytes
+    val systemThreshold: Long = 0L,    // Low memory threshold in bytes
+    val systemLowMemory: Boolean = false, // Is system in low memory state
+    
+    // Go runtime memory (from native Xray-core via gRPC)
+    val goAlloc: Long = 0L,            // Go runtime allocated memory in bytes
+    val goTotalAlloc: Long = 0L,       // Go runtime total allocated memory in bytes
+    val goSys: Long = 0L,              // Go runtime system memory in bytes
+    val goMallocs: Long = 0L,          // Go runtime total mallocs
+    val goFrees: Long = 0L,            // Go runtime total frees
+    val goLiveObjects: Long = 0L,      // Go runtime live objects (mallocs - frees)
+    val goPauseTotalNs: Long = 0L,     // Go runtime total GC pause time in nanoseconds
+    
+    // Percentages
+    val processMemoryUsagePercent: Int = 0,  // Process memory usage % of system total
+    val runtimeMemoryUsagePercent: Int = 0,  // Runtime memory usage % of max
+    val systemMemoryUsagePercent: Int = 0,   // System memory usage %
+    
+    // Metadata
+    val updateTimestamp: Long = 0L     // Last update timestamp
+)
+
+/**
  * ViewModel interface for Dashboard screen.
  * This allows the feature module to work without depending on MainViewModel from app module.
  */
@@ -112,6 +153,9 @@ interface DashboardViewModel {
     
     // WARP Account state (optional - may be null if not available)
     val warpAccountInfo: StateFlow<WarpAccountInfo>?
+    
+    // Android Memory Stats (optional - may be null if not available)
+    val androidMemoryStats: StateFlow<AndroidMemoryStats>?
     
     fun updateCoreStats()
     fun updateTelemetryStats()

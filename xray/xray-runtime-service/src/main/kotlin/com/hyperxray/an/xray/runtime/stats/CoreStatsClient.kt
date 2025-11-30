@@ -167,7 +167,7 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
                 Log.d("CoreStatsClient", "Starting getSystemStats RPC call with deadline")
                 getStubWithDeadline().getSysStats(request, object : io.grpc.stub.StreamObserver<SysStatsResponse> {
                     override fun onNext(value: SysStatsResponse) {
-                        Log.d("CoreStatsClient", "getSystemStats received response: uptime=${value.uptime}s, numGoroutine=${value.numGoroutine}")
+                        Log.d("CoreStatsClient", "getSystemStats received response: uptime=${value.uptime}s, numGoroutine=${value.numGoroutine}, numGC=${value.numGC}, alloc=${value.alloc}, totalAlloc=${value.totalAlloc}, sys=${value.sys}, mallocs=${value.mallocs}, frees=${value.frees}, liveObjects=${value.liveObjects}, pauseTotalNs=${value.pauseTotalNs}")
                         continuation.resume(value)
                     }
                     
@@ -219,7 +219,7 @@ class CoreStatsClient(private val channel: ManagedChannel) : Closeable {
             Log.e("CoreStatsClient", "getSystemStats runCatching failed: ${e.message}", e)
         }.getOrNull().let { result ->
             if (result != null) {
-                Log.d("CoreStatsClient", "getSystemStats successful: returning response with uptime=${result.uptime}s")
+                Log.d("CoreStatsClient", "getSystemStats successful: returning response with uptime=${result.uptime}s, alloc=${result.alloc}, sys=${result.sys}, mallocs=${result.mallocs}, frees=${result.frees}")
             } else {
                 Log.w("CoreStatsClient", "getSystemStats returned null")
             }

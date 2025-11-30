@@ -53,6 +53,7 @@ typedef char* (*DNSResolveFunc)(const char*);
 typedef bool (*IsXrayGrpcAvailableFunc)(void);
 typedef char* (*GetXraySystemStatsFunc)(void);
 typedef char* (*GetXrayTrafficStatsFunc)(void);
+typedef char* (*GetXrayLogsFunc)(int);
 
 // Global handle to Go library
 static void* goLibHandle = NULL;
@@ -90,6 +91,7 @@ static DNSResolveFunc go_DNSResolve = NULL;
 static IsXrayGrpcAvailableFunc go_IsXrayGrpcAvailable = NULL;
 static GetXraySystemStatsFunc go_GetXraySystemStats = NULL;
 static GetXrayTrafficStatsFunc go_GetXrayTrafficStats = NULL;
+static GetXrayLogsFunc go_GetXrayLogs = NULL;
 
 
 // Socket protector globals (must be declared before use)
@@ -279,6 +281,9 @@ static int loadGoLibrary(JNIEnv *env) {
     
     go_GetXrayTrafficStats = (GetXrayTrafficStatsFunc)dlsym(goLibHandle, "GetXrayTrafficStats");
     if (go_GetXrayTrafficStats != NULL) LOGD("Found GetXrayTrafficStats");
+    
+    go_GetXrayLogs = (GetXrayLogsFunc)dlsym(goLibHandle, "GetXrayLogs");
+    if (go_GetXrayLogs != NULL) LOGD("Found GetXrayLogs");
     
     // Check if at least StartHyperTunnel is available
     if (go_StartHyperTunnel == NULL) {
@@ -1364,6 +1369,47 @@ Java_com_hyperxray_an_core_monitor_XrayStatsManager_getXrayTrafficStatsNative(
     }
     
     char* result = go_GetXrayTrafficStats();
+    if (result == NULL) {
+        return NULL;
+    }
+    
+    jstring jresult = (*env)->NewStringUTF(env, result);
+    
+    // Free the C string
+    if (go_FreeString != NULL) {
+        go_FreeString(result);
+    } else {
+        free(result);
+    }
+    
+    return jresult;
+}
+
+/**
+ * Get Xray logs from native log channel
+ * 
+ * Java signature: private external fun getXrayLogsNative(maxCount: Int): String?
+ */
+JNIEXPORT jstring JNICALL
+Java_com_hyperxray_an_core_monitor_XrayLogManager_getXrayLogsNative(
+    JNIEnv* env,
+    jobject thiz __attribute__((unused)),
+    jint maxCount
+) {
+    if (!goLibraryLoaded) {
+        LOGD("Go library not loaded, attempting to load...");
+        if (loadGoLibrary(env) != 0) {
+            LOGE("Failed to load Go library");
+            return NULL;
+        }
+    }
+    
+    if (go_GetXrayLogs == NULL) {
+        LOGD("GetXrayLogs function not available");
+        return NULL;
+    }
+    
+    char* result = go_GetXrayLogs((int)maxCount);
     if (result == NULL) {
         return NULL;
     }

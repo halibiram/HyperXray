@@ -67,9 +67,25 @@ class ServiceNotificationManager(private val service: Service) {
         contentTitle: String,
         contentText: String
     ) {
-        val i = Intent(service, MainActivity::class.java)
+        // Use consistent request code to reuse same PendingIntent
+        // FIXED: With singleTop launch mode, use CLEAR_TOP + SINGLE_TOP flags
+        // - FLAG_ACTIVITY_CLEAR_TOP: Clears activities above target in task stack
+        // - FLAG_ACTIVITY_SINGLE_TOP: Ensures onNewIntent() is called if Activity is at top
+        // - System automatically adds FLAG_ACTIVITY_NEW_TASK for notification intents
+        // This combination ensures existing Activity instance is reused via onNewIntent()
+        val appContext = service.applicationContext
+        val i = Intent(appContext, MainActivity::class.java).apply {
+            action = Intent.ACTION_MAIN
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            // singleTop + CLEAR_TOP + SINGLE_TOP = reuse existing instance, call onNewIntent()
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        Log.d(TAG, "Creating notification Intent with flags: ${Integer.toHexString(i.flags)} (CLEAR_TOP=${(i.flags and Intent.FLAG_ACTIVITY_CLEAR_TOP) != 0}, SINGLE_TOP=${(i.flags and Intent.FLAG_ACTIVITY_SINGLE_TOP) != 0})")
         val pi = PendingIntent.getActivity(
-            service, 0, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            appContext, 
+            0, // Consistent request code
+            i, 
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         
         // Create persistent notification to prevent system from killing the service
@@ -213,9 +229,25 @@ class ServiceNotificationManager(private val service: Service) {
      * Internal method to update notification.
      */
     private fun updateNotificationInternal(title: String, text: String, channelName: String) {
-        val i = Intent(service, MainActivity::class.java)
+        // Use consistent request code to reuse same PendingIntent
+        // FIXED: With singleTop launch mode, use CLEAR_TOP + SINGLE_TOP flags
+        // - FLAG_ACTIVITY_CLEAR_TOP: Clears activities above target in task stack
+        // - FLAG_ACTIVITY_SINGLE_TOP: Ensures onNewIntent() is called if Activity is at top
+        // - System automatically adds FLAG_ACTIVITY_NEW_TASK for notification intents
+        // This combination ensures existing Activity instance is reused via onNewIntent()
+        val appContext = service.applicationContext
+        val i = Intent(appContext, MainActivity::class.java).apply {
+            action = Intent.ACTION_MAIN
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            // singleTop + CLEAR_TOP + SINGLE_TOP = reuse existing instance, call onNewIntent()
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        Log.d(TAG, "Creating notification Intent with flags: ${Integer.toHexString(i.flags)} (CLEAR_TOP=${(i.flags and Intent.FLAG_ACTIVITY_CLEAR_TOP) != 0}, SINGLE_TOP=${(i.flags and Intent.FLAG_ACTIVITY_SINGLE_TOP) != 0})")
         val pi = PendingIntent.getActivity(
-            service, 0, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            appContext, 
+            0, // Consistent request code
+            i, 
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         
         val notification = NotificationCompat.Builder(service, channelName)

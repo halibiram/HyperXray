@@ -97,6 +97,23 @@ class XrayStatsManager(
         SHUTTING_DOWN   // Client is being shut down, ignore recreate requests
     }
     
+    // Native availability state machine
+    private enum class NativeAvailabilityState {
+        LIB_NOT_LOADED,      // Native library not loaded
+        TUNNEL_NOT_RUNNING,  // No active native tunnel
+        GRPC_NOT_READY_YET,  // Tunnel up, but gRPC not available yet (within grace period)
+        GRPC_AVAILABLE,      // gRPC is available and working
+        GRPC_FAILED          // gRPC failed after repeated attempts (beyond grace period)
+    }
+    
+    @Volatile
+    private var nativeAvailabilityState: NativeAvailabilityState = NativeAvailabilityState.LIB_NOT_LOADED
+    
+    @Volatile
+    private var firstGrpcCheckTime: Long = 0L
+    
+    private val GRPC_GRACE_PERIOD_MS = 10000L // 10 seconds grace period for gRPC to become available
+    
     // Throughput calculation state
     private var lastUplink: Long = 0L
     private var lastDownlink: Long = 0L
@@ -155,6 +172,47 @@ class XrayStatsManager(
             
             // Then start the regular polling loop
             while (isActive && isMonitoring) {
+                // CRITICAL: Check native process health before each stats update
+                // This prevents client from trying to connect to a dead process
+                val nativeAvailable = try {
+                    if (isLibraryLoaded()) {
+                        isXrayGrpcAvailableNative()
+                    } else {
+                        false
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Native process health check failed in monitoring loop: ${e.message}")
+                    false
+                }
+                
+                if (!nativeAvailable) {
+                    // Only log periodically to avoid log spam
+                    val now = System.currentTimeMillis()
+                    if (now % 10000 < 500) { // Log roughly every 10 seconds
+                        Log.w(TAG, "⚠️ Native process not available in monitoring loop - invalidating client")
+                        Log.w(TAG, "⚠️ State: $nativeAvailabilityState")
+                        Log.w(TAG, "⚠️ Possible causes:")
+                        Log.w(TAG, "⚠️   1. Xray-core not started or crashed")
+                        Log.w(TAG, "⚠️   2. gRPC client not created (check API port in config)")
+                        Log.w(TAG, "⚠️   3. gRPC service not ready yet (timing issue)")
+                    }
+                    synchronized(coreStatsClientLock) {
+                        if (coreStatsClient != null) {
+                            try {
+                                coreStatsClient?.close()
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Error closing client in monitoring loop: ${e.message}", e)
+                            }
+                            coreStatsClient = null
+                            clientState = ClientState.FAILED
+                            lastClientCloseTime = System.currentTimeMillis()
+                        }
+                    }
+                    // Wait longer before retrying when native process is dead
+                    delay(5000L)
+                    continue
+                }
+                
                 // Dynamic interval based on current throughput
                 // High traffic -> fast polling (1s), low traffic -> slow polling (2s)
                 val currentStats = _statsState.value
@@ -273,23 +331,81 @@ class XrayStatsManager(
      * Tries native gRPC client first, falls back to CoreStatsClient if not available.
      */
     private suspend fun updateCoreStatsSingleInstance() {
-        // Try native gRPC client first
+        // CRITICAL: Check native process health first with state machine
+        // This provides better diagnostics and retry logic
         val nativeAvailable = try {
             if (!isLibraryLoaded()) {
-                Log.d(TAG, "Native library not loaded, skipping native gRPC check")
+                nativeAvailabilityState = NativeAvailabilityState.LIB_NOT_LOADED
+                Log.d(TAG, "Native library not loaded, state: $nativeAvailabilityState")
                 false
             } else {
                 Log.d(TAG, "Checking native gRPC availability...")
                 val available = isXrayGrpcAvailableNative()
-                Log.d(TAG, "Native gRPC available: $available")
+                
+                // Update state machine based on availability
+                val now = System.currentTimeMillis()
+                if (available) {
+                    nativeAvailabilityState = NativeAvailabilityState.GRPC_AVAILABLE
+                    firstGrpcCheckTime = 0L // Reset grace period timer
+                    Log.d(TAG, "✅ Native gRPC available, state: $nativeAvailabilityState")
+                } else {
+                    // Check if we're still within grace period
+                    if (firstGrpcCheckTime == 0L) {
+                        firstGrpcCheckTime = now
+                        nativeAvailabilityState = NativeAvailabilityState.GRPC_NOT_READY_YET
+                        Log.d(TAG, "⏳ gRPC not ready yet, starting grace period (state: $nativeAvailabilityState)")
+                    } else {
+                        val timeSinceFirstCheck = now - firstGrpcCheckTime
+                        if (timeSinceFirstCheck < GRPC_GRACE_PERIOD_MS) {
+                            nativeAvailabilityState = NativeAvailabilityState.GRPC_NOT_READY_YET
+                            Log.d(TAG, "⏳ gRPC not ready yet, grace period: ${GRPC_GRACE_PERIOD_MS - timeSinceFirstCheck}ms remaining (state: $nativeAvailabilityState)")
+                        } else {
+                            nativeAvailabilityState = NativeAvailabilityState.GRPC_FAILED
+                            Log.w(TAG, "⚠️ gRPC failed after grace period (${timeSinceFirstCheck}ms > ${GRPC_GRACE_PERIOD_MS}ms), state: $nativeAvailabilityState")
+                        }
+                    }
+                }
+                
                 available
             }
         } catch (e: UnsatisfiedLinkError) {
-            Log.w(TAG, "Native gRPC check failed (UnsatisfiedLinkError): ${e.message}, falling back to CoreStatsClient", e)
+            nativeAvailabilityState = NativeAvailabilityState.LIB_NOT_LOADED
+            Log.w(TAG, "Native gRPC check failed (UnsatisfiedLinkError): ${e.message}, state: $nativeAvailabilityState", e)
             false
         } catch (e: Exception) {
-            Log.w(TAG, "Native gRPC check failed: ${e.message}, falling back to CoreStatsClient", e)
+            nativeAvailabilityState = NativeAvailabilityState.GRPC_FAILED
+            Log.w(TAG, "Native gRPC check failed: ${e.message}, state: $nativeAvailabilityState", e)
             false
+        }
+        
+        // CRITICAL FIX: If native process is not available, handle based on state
+        if (!nativeAvailable) {
+            // Only invalidate client if we're beyond grace period
+            if (nativeAvailabilityState == NativeAvailabilityState.GRPC_FAILED || 
+                nativeAvailabilityState == NativeAvailabilityState.LIB_NOT_LOADED) {
+                Log.w(TAG, "⚠️ Native process not available (state: $nativeAvailabilityState) - invalidating client")
+                synchronized(coreStatsClientLock) {
+                    if (coreStatsClient != null) {
+                        Log.w(TAG, "Closing CoreStatsClient because native process is not available")
+                        try {
+                            coreStatsClient?.close()
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error closing client during native process death: ${e.message}", e)
+                        }
+                        coreStatsClient = null
+                        clientState = ClientState.FAILED
+                        lastClientCloseTime = System.currentTimeMillis()
+                        consecutiveFailures++
+                    }
+                }
+                // Don't try to create new client if native process is dead
+                // Wait for native process to restart
+                return
+            } else {
+                // Still within grace period - allow retry but don't invalidate client yet
+                Log.d(TAG, "⏳ gRPC not ready yet (state: $nativeAvailabilityState), will retry...")
+                // Continue to fallback CoreStatsClient if available
+            }
         }
         
         if (nativeAvailable) {
@@ -335,6 +451,37 @@ class XrayStatsManager(
         }
         
         // Fallback to CoreStatsClient
+        // CRITICAL: Before creating client, verify native process is still available
+        // Re-check native process health to avoid creating client for dead process
+        val nativeStillAvailable = try {
+            if (isLibraryLoaded()) {
+                isXrayGrpcAvailableNative()
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Native process health check failed: ${e.message}")
+            false
+        }
+        
+        if (!nativeStillAvailable) {
+            Log.w(TAG, "⚠️ Native process not available before creating CoreStatsClient - skipping client creation")
+            synchronized(coreStatsClientLock) {
+                if (coreStatsClient != null) {
+                    Log.w(TAG, "Invalidating existing client because native process is not available")
+                    try {
+                        coreStatsClient?.close()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error closing client: ${e.message}", e)
+                    }
+                    coreStatsClient = null
+                    clientState = ClientState.FAILED
+                    lastClientCloseTime = System.currentTimeMillis()
+                }
+            }
+            return
+        }
+        
         // Synchronize access to coreStatsClient to prevent race conditions
         val client = coreStatsClientMutex.withLock {
             // Check if we can recreate client (cooldown and state checks)
@@ -420,6 +567,37 @@ class XrayStatsManager(
         
         if (statsResult == null) {
             Log.w(TAG, "Stats query failed (timeout/exception/disabled)")
+            
+            // CRITICAL: Check if native process died during query
+            val nativeStillAvailable = try {
+                if (isLibraryLoaded()) {
+                    isXrayGrpcAvailableNative()
+                } else {
+                    false
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Native process health check failed after stats query: ${e.message}")
+                false
+            }
+            
+            if (!nativeStillAvailable) {
+                Log.w(TAG, "⚠️ Native process died during stats query - invalidating client immediately")
+                synchronized(coreStatsClientLock) {
+                    if (coreStatsClient != null) {
+                        try {
+                            coreStatsClient?.close()
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error closing client after native process death: ${e.message}", e)
+                        }
+                        coreStatsClient = null
+                        clientState = ClientState.FAILED
+                        lastClientCloseTime = System.currentTimeMillis()
+                        consecutiveFailures++
+                    }
+                }
+                return
+            }
+            
             if (!isServiceEnabled) {
                 closeCoreStatsClient()
                 consecutiveFailures = 0
@@ -460,32 +638,51 @@ class XrayStatsManager(
             }
         }
         
+        // Traffic query can fail, but we should still update system stats
+        // updateStatsState accepts nullable traffic parameter
         if (trafficResult == null) {
-            Log.w(TAG, "Traffic query failed (timeout/exception/disabled)")
-            if (!isServiceEnabled) {
-                closeCoreStatsClient()
-                consecutiveFailures = 0
-            } else {
-                consecutiveFailures++
-                // FIXED: Increased threshold from 5 to 10 to prevent premature client closure
-                // Also, don't close client immediately - let it retry with backoff
-                if (consecutiveFailures >= 10) {
-                    Log.w(TAG, "Multiple consecutive failures ($consecutiveFailures), closing client for retry")
-                    synchronized(coreStatsClientLock) {
-                        clientState = ClientState.FAILED
-                    }
-                    closeCoreStatsClient()
-                    consecutiveFailures = 0 // Reset to allow immediate retry after backoff
+            Log.w(TAG, "Traffic query failed (timeout/exception/disabled), but updating system stats anyway")
+            
+            // CRITICAL: Check if native process died during traffic query
+            val nativeStillAvailable = try {
+                if (isLibraryLoaded()) {
+                    isXrayGrpcAvailableNative()
+                } else {
+                    false
                 }
+            } catch (e: Exception) {
+                Log.w(TAG, "Native process health check failed after traffic query: ${e.message}")
+                false
             }
-            return
-        }
-        
-        // FIXED: Reset consecutiveFailures on successful traffic query
-        consecutiveFailures = 0
-        synchronized(coreStatsClientLock) {
-            if (clientState != ClientState.READY) {
-                clientState = ClientState.READY
+            
+            if (!nativeStillAvailable) {
+                Log.w(TAG, "⚠️ Native process died during traffic query - invalidating client immediately")
+                synchronized(coreStatsClientLock) {
+                    if (coreStatsClient != null) {
+                        try {
+                            coreStatsClient?.close()
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error closing client after native process death: ${e.message}", e)
+                        }
+                        coreStatsClient = null
+                        clientState = ClientState.FAILED
+                        lastClientCloseTime = System.currentTimeMillis()
+                        consecutiveFailures++
+                    }
+                }
+                // Still update stats with system stats only (traffic will be null)
+                // This allows UI to show partial data
+            }
+            
+            // Don't increment consecutiveFailures for traffic query failures
+            // Only increment if system stats also failed
+        } else {
+            // FIXED: Reset consecutiveFailures on successful traffic query
+            consecutiveFailures = 0
+            synchronized(coreStatsClientLock) {
+                if (clientState != ClientState.READY) {
+                    clientState = ClientState.READY
+                }
             }
         }
         
@@ -495,6 +692,7 @@ class XrayStatsManager(
             return
         }
         
+        // Update stats state even if traffic is null (system stats are more important)
         updateStatsState(statsResult, trafficResult)
     }
     
@@ -794,6 +992,14 @@ class XrayStatsManager(
         }
         lastStatsTime = now
         
+        val newAlloc = stats?.alloc ?: currentState.alloc
+        val newTotalAlloc = stats?.totalAlloc ?: currentState.totalAlloc
+        val newSys = stats?.sys ?: currentState.sys
+        val newMallocs = stats?.mallocs ?: currentState.mallocs
+        val newFrees = stats?.frees ?: currentState.frees
+        val newLiveObjects = stats?.liveObjects ?: currentState.liveObjects
+        val newPauseTotalNs = stats?.pauseTotalNs ?: currentState.pauseTotalNs
+        
         _statsState.value = CoreStatsState(
             uplink = newUplink,
             downlink = newDownlink,
@@ -801,16 +1007,17 @@ class XrayStatsManager(
             downlinkThroughput = downlinkThroughput,
             numGoroutine = stats?.numGoroutine ?: currentState.numGoroutine,
             numGC = stats?.numGC ?: currentState.numGC,
-            alloc = stats?.alloc ?: currentState.alloc,
-            totalAlloc = stats?.totalAlloc ?: currentState.totalAlloc,
-            sys = stats?.sys ?: currentState.sys,
-            mallocs = stats?.mallocs ?: currentState.mallocs,
-            frees = stats?.frees ?: currentState.frees,
-            liveObjects = stats?.liveObjects ?: currentState.liveObjects,
-            pauseTotalNs = stats?.pauseTotalNs ?: currentState.pauseTotalNs,
+            alloc = newAlloc,
+            totalAlloc = newTotalAlloc,
+            sys = newSys,
+            mallocs = newMallocs,
+            frees = newFrees,
+            liveObjects = newLiveObjects,
+            pauseTotalNs = newPauseTotalNs,
             uptime = stats?.uptime ?: currentState.uptime
         )
         Log.d(TAG, "Core stats updated - Uplink: ${formatBytes(newUplink)}, Downlink: ${formatBytes(newDownlink)}, Uplink Throughput: ${formatThroughput(uplinkThroughput)}, Downlink Throughput: ${formatThroughput(downlinkThroughput)}")
+        Log.d(TAG, "Go runtime stats - alloc=${formatBytes(newAlloc)}, totalAlloc=${formatBytes(newTotalAlloc)}, sys=${formatBytes(newSys)}, mallocs=${newMallocs}, frees=${newFrees}, liveObjects=${newLiveObjects}, pauseTotalNs=${newPauseTotalNs}ns")
     }
     
     /**

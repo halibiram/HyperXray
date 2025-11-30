@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -419,13 +420,27 @@ func (t *HyperTunnel) Start() error {
 	logInfo("[Tunnel] ▶▶▶ STEP 2: Testing UDP path to WARP endpoint...")
 	logInfo("[Tunnel] ")
 	
-	udpTestErr := t.xrayInstance.TestUDPConnectivity(t.wgConfig.Endpoint)
-	if udpTestErr != nil {
-		logWarn("[Tunnel] ⚠️ UDP test warning: %v", udpTestErr)
-		logWarn("[Tunnel] ⚠️ Will proceed but WireGuard may have issues")
-		// Don't fail - WireGuard might still work
-	} else {
-		logInfo("[Tunnel] ✅ UDP path verified!")
+	// Run UDP test in goroutine with timeout to avoid blocking tunnel startup
+	udpTestDone := make(chan error, 1)
+	go func() {
+		udpTestErr := t.xrayInstance.TestUDPConnectivity(t.wgConfig.Endpoint)
+		udpTestDone <- udpTestErr
+	}()
+	
+	// Wait max 2 seconds for UDP test, then continue
+	select {
+	case udpTestErr := <-udpTestDone:
+		if udpTestErr != nil {
+			logWarn("[Tunnel] ⚠️ UDP test warning: %v", udpTestErr)
+			logWarn("[Tunnel] ⚠️ Will proceed but WireGuard may have issues")
+			// Don't fail - WireGuard might still work
+		} else {
+			logInfo("[Tunnel] ✅ UDP path verified!")
+		}
+	case <-time.After(2 * time.Second):
+		logDebug("[Tunnel] UDP test still in progress (continuing startup)")
+		logWarn("[Tunnel] ⚠️ UDP test timeout - proceeding without verification")
+		logWarn("[Tunnel] ⚠️ WireGuard may have issues if UDP path is not working")
 	}
 	
 	// ===== STEP 3: CREATE XRAY BIND =====
@@ -807,15 +822,38 @@ func (t *HyperTunnel) updateStats() {
 // parseHandshakeFromIpc parses last handshake time from IPC response
 func (t *HyperTunnel) parseHandshakeFromIpc(ipc string) {
 	// Parse last_handshake_time_sec from IPC response
-	// This is a simplified parser
+	// WireGuard IPC format is multi-line, e.g.:
+	// public_key=...
+	// endpoint=...
+	// last_handshake_time_sec=1234567890
+	// last_handshake_time_nsec=123456789
+	// ...
+	
+	// Search for last_handshake_time_sec line in multi-line IPC response
 	var lastHandshakeSec int64
-	fmt.Sscanf(ipc, "last_handshake_time_sec=%d", &lastHandshakeSec)
+	lines := strings.Split(ipc, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "last_handshake_time_sec=") {
+			// Extract the value after the equals sign
+			parts := strings.Split(line, "=")
+			if len(parts) >= 2 {
+				_, err := fmt.Sscanf(parts[1], "%d", &lastHandshakeSec)
+				if err == nil && lastHandshakeSec > 0 {
+					break // Found valid handshake time
+				}
+			}
+		}
+	}
 
 	if lastHandshakeSec > 0 {
 		handshakeTime := time.Unix(lastHandshakeSec, 0)
 		
+		// Check if this is a new handshake (different from previous)
+		isNewHandshake := t.lastHandshake.IsZero() || !handshakeTime.Equal(t.lastHandshake)
+		
 		// Calculate RTT based on handshake timing
-		if !t.lastHandshake.IsZero() {
+		if !t.lastHandshake.IsZero() && isNewHandshake {
 			// Calculate RTT: time since last handshake indicates connection quality
 			// WireGuard handshakes occur periodically, fresh handshakes indicate low latency
 			timeSinceHandshake := time.Since(handshakeTime)
@@ -837,22 +875,46 @@ func (t *HyperTunnel) parseHandshakeFromIpc(ipc string) {
 			
 			t.handshakeRTT = estimatedRTT
 			t.stats.HandshakeRTT = estimatedRTT
-		} else {
+		} else if isNewHandshake {
 			// First handshake - use default RTT
 			t.handshakeRTT = 50
 			t.stats.HandshakeRTT = 50
-			logInfo("[Tunnel] ✅ First WireGuard handshake completed!")
+			logInfo("[Tunnel] ✅ First WireGuard handshake completed! (timestamp: %d)", lastHandshakeSec)
 		}
 		
 		t.stats.LastHandshake = lastHandshakeSec
 		t.lastHandshake = handshakeTime
+	} else {
+		// No handshake found in IPC response - log for debugging
+		logDebug("[Tunnel] ⚠️ No handshake found in IPC response (may be normal if handshake not completed yet)")
+		logDebug("[Tunnel] IPC response preview (first 200 chars): %s", 
+			func() string {
+				if len(ipc) > 200 {
+					return ipc[:200] + "..."
+				}
+				return ipc
+			}())
 	}
 }
 
 // parseHandshake parses handshake timestamp from WireGuard IPC output
 func parseHandshake(ipc string) int64 {
+	// Search for last_handshake_time_sec line in multi-line IPC response
 	var lastHandshakeSec int64
-	fmt.Sscanf(ipc, "last_handshake_time_sec=%d", &lastHandshakeSec)
+	lines := strings.Split(ipc, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "last_handshake_time_sec=") {
+			// Extract the value after the equals sign
+			parts := strings.Split(line, "=")
+			if len(parts) >= 2 {
+				fmt.Sscanf(parts[1], "%d", &lastHandshakeSec)
+				if lastHandshakeSec > 0 {
+					break // Found valid handshake time
+				}
+			}
+		}
+	}
 	return lastHandshakeSec
 }
 

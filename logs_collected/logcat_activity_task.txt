@@ -1,0 +1,2 @@
+--------- beginning of system
+11-30 14:36:43.718 D/ActivityManager( 3500): Logging startService for com.miui.powerkeeper, stopped=false, firstLaunch=false, intent=Intent { act=miui.intent.action.powerkeeper_alarm xflg=0x4 cmp=com.miui.powerkeeper/.PowerKeeperBackgroundService }, r.app=ProcessRecord{e1d8ec1 12733:com.miui.powerkeeper/1000}

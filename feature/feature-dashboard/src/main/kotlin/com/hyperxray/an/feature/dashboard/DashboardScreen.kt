@@ -106,11 +106,17 @@ fun DashboardScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
-        // Poll only DNS cache and telemetry stats with fixed intervals
-        // Core stats are handled by XrayStatsManager's internal monitoring loop
-        // This prevents double polling race conditions and conflicting gRPC calls
+    // CRITICAL: Use lifecycle-aware LaunchedEffect to ensure stats are refreshed
+    // when screen becomes visible (especially after process death or bring-to-front)
+    LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            // Immediately refresh stats when screen becomes visible
+            // This ensures cards update correctly after process death or bring-to-front
+            viewModel.updateCoreStats()
+            viewModel.updateTelemetryStats()
+            viewModel.updateDnsCacheStats()
+            
+            // Then continue with regular polling
             while (true) {
                 // Only update DNS cache and telemetry stats here
                 // updateCoreStats() is removed to prevent double polling
@@ -707,6 +713,10 @@ fun DashboardScreen(
     }
 
     item(key = "memory_stats") {
+        val androidMemoryStats by (viewModel.androidMemoryStats ?: kotlinx.coroutines.flow.MutableStateFlow(
+            com.hyperxray.an.feature.dashboard.AndroidMemoryStats()
+        )).collectAsState()
+        
         AnimatedVisibility(
             visible = isServiceEnabled,
             enter = fadeIn() + expandVertically(),
@@ -718,36 +728,202 @@ fun DashboardScreen(
                 gradientColors = memoryGradient,
                 animationDelay = 300,
                 content = {
-                StatRow(
-                    label = stringResource(id = resources.stringStatsAlloc),
-                    value = formatBytes(coreStats.alloc)
-                )
-                StatRow(
-                    label = "Total Alloc",
-                    value = formatBytes(coreStats.totalAlloc)
-                )
-                StatRow(
-                    label = "Sys",
-                    value = formatBytes(coreStats.sys)
-                )
-                StatRow(
-                    label = "Mallocs",
-                    value = formatNumber(coreStats.mallocs)
-                )
-                StatRow(
-                    label = "Frees",
-                    value = formatNumber(coreStats.frees)
-                )
-                StatRow(
-                    label = "Live Objects",
-                    value = formatNumber(coreStats.liveObjects)
-                )
-                StatRow(
-                    label = "GC Pause Total",
-                    value = formatUptime((coreStats.pauseTotalNs / 1_000_000_000).toInt())
-                )
-            }
-        )
+                    // Go Runtime Memory Section (from native Xray-core)
+                    // Show Go runtime stats from androidMemoryStats which gets data from native Xray
+                    if (androidMemoryStats.goAlloc > 0L || androidMemoryStats.goSys > 0L) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Go Runtime",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = memoryGradient.first(),
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            )
+                            StatRow(
+                                label = stringResource(id = resources.stringStatsAlloc),
+                                value = formatBytes(androidMemoryStats.goAlloc)
+                            )
+                            StatRow(
+                                label = "Total Alloc",
+                                value = formatBytes(androidMemoryStats.goTotalAlloc)
+                            )
+                            StatRow(
+                                label = "Sys",
+                                value = formatBytes(androidMemoryStats.goSys)
+                            )
+                            StatRow(
+                                label = "Mallocs",
+                                value = formatNumber(androidMemoryStats.goMallocs)
+                            )
+                            StatRow(
+                                label = "Frees",
+                                value = formatNumber(androidMemoryStats.goFrees)
+                            )
+                            StatRow(
+                                label = "Live Objects",
+                                value = formatNumber(androidMemoryStats.goLiveObjects)
+                            )
+                            StatRow(
+                                label = "GC Pause Total",
+                                value = formatUptime((androidMemoryStats.goPauseTotalNs / 1_000_000_000).toInt())
+                            )
+                        }
+                    } else {
+                        // Fallback to coreStats if androidMemoryStats doesn't have Go runtime data yet
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Go Runtime",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = memoryGradient.first(),
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            )
+                            StatRow(
+                                label = stringResource(id = resources.stringStatsAlloc),
+                                value = formatBytes(coreStats.alloc)
+                            )
+                            StatRow(
+                                label = "Total Alloc",
+                                value = formatBytes(coreStats.totalAlloc)
+                            )
+                            StatRow(
+                                label = "Sys",
+                                value = formatBytes(coreStats.sys)
+                            )
+                            StatRow(
+                                label = "Mallocs",
+                                value = formatNumber(coreStats.mallocs)
+                            )
+                            StatRow(
+                                label = "Frees",
+                                value = formatNumber(coreStats.frees)
+                            )
+                            StatRow(
+                                label = "Live Objects",
+                                value = formatNumber(coreStats.liveObjects)
+                            )
+                            StatRow(
+                                label = "GC Pause Total",
+                                value = formatUptime((coreStats.pauseTotalNs / 1_000_000_000).toInt())
+                            )
+                        }
+                    }
+                    
+                    // Android System Memory Section
+                    if (androidMemoryStats.totalPss > 0L) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Android System",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = memoryGradient.first(),
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            )
+                            StatRow(
+                                label = "Total PSS",
+                                value = formatBytes(androidMemoryStats.totalPss)
+                            )
+                            StatRow(
+                                label = "Native Heap",
+                                value = formatBytes(androidMemoryStats.nativeHeap)
+                            )
+                            StatRow(
+                                label = "Dalvik Heap",
+                                value = formatBytes(androidMemoryStats.dalvikHeap)
+                            )
+                            StatRow(
+                                label = "Other PSS",
+                                value = formatBytes(androidMemoryStats.otherPss)
+                            )
+                            StatRow(
+                                label = "Process Memory Usage",
+                                value = "${androidMemoryStats.processMemoryUsagePercent}%"
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Java Runtime",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = memoryGradient.first(),
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            )
+                            StatRow(
+                                label = "Used Memory",
+                                value = formatBytes(androidMemoryStats.usedMemory)
+                            )
+                            StatRow(
+                                label = "Max Memory",
+                                value = formatBytes(androidMemoryStats.maxMemory)
+                            )
+                            StatRow(
+                                label = "Free Memory",
+                                value = formatBytes(androidMemoryStats.freeMemory)
+                            )
+                            StatRow(
+                                label = "Runtime Usage",
+                                value = "${androidMemoryStats.runtimeMemoryUsagePercent}%"
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "System Memory",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = memoryGradient.first(),
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            )
+                            StatRow(
+                                label = "Total System",
+                                value = formatBytes(androidMemoryStats.systemTotalMem)
+                            )
+                            StatRow(
+                                label = "Available",
+                                value = formatBytes(androidMemoryStats.systemAvailMem)
+                            )
+                            StatRow(
+                                label = "Used",
+                                value = formatBytes(androidMemoryStats.systemUsedMem)
+                            )
+                            StatRow(
+                                label = "System Usage",
+                                value = "${androidMemoryStats.systemMemoryUsagePercent}%"
+                            )
+                            if (androidMemoryStats.systemLowMemory) {
+                                StatRow(
+                                    label = "Low Memory",
+                                    value = "⚠️ Yes"
+                                )
+                            }
+                        }
+                    }
+                }
+            )
         }
     }
     }

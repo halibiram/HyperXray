@@ -1,0 +1,122 @@
+--------- beginning of main
+11-30 14:36:39.289 I/MiSensorServiceImpl( 3500): New_Feature_Aon Als Strm data :83.642082 ! pendingVirtualAlsValues is 0
+11-30 14:36:39.289 I/MiSensorServiceImpl( 3500): New_Feature_Aon fov last use data 83.642082
+11-30 14:36:39.309 I/vendor.qti.hardware.display.composer-service( 1838): Sensor: notify citsensorservice to trigger cwb, misForced = 0
+11-30 14:36:39.309 I/SDM     ( 1838): CWB config passed by cwb_client : tappoint 1  CWB_ROI : (480.000000 159.000000 721.000000 400.000000) for display-0
+11-30 14:36:39.342 I/SDM     ( 1838): HWDeviceDRM::SetupConcurrentWriteback: Tear down the Concurrent Writeback topology
+11-30 14:36:39.346 I/SDM     ( 1838): NotifyCWBStatus: Notify the client about buffer (0x7db9420) status 0 for display-0.
+11-30 14:36:39.346 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:36:39.383 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:39.383 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:39.392 D/DnsCacheManager(18066): 📊 Synced latency from SharedPreferences: avgHitLatency=0,000ms, avgMissLatency=0,062ms
+11-30 14:36:39.395 I/MiSensorServiceImpl( 3500): New_Feature_Aon Als Strm data :83.642082 ! pendingVirtualAlsValues is 0
+11-30 14:36:39.395 I/MiSensorServiceImpl( 3500): New_Feature_Aon fov last use data 83.642082
+11-30 14:36:39.395 I/MiSensorServiceImpl( 3500): LightFovOptimizationSensor::screen_angle: -0.133998 0.573679 9.774680 86.824234 83.642082 0.000000 0 83.642082 0 83.642082
+11-30 14:36:39.483 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:39.483 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:39.501 I/MiSensorServiceImpl( 3500): New_Feature_Aon Als Strm data :83.642082 ! pendingVirtualAlsValues is 0
+11-30 14:36:39.501 I/MiSensorServiceImpl( 3500): New_Feature_Aon fov last use data 83.642082
+11-30 14:36:39.525 I/vendor.qti.hardware.display.composer-service( 1838): Sensor: notify citsensorservice to trigger cwb, misForced = 0
+11-30 14:36:39.525 I/SDM     ( 1838): CWB config passed by cwb_client : tappoint 1  CWB_ROI : (480.000000 159.000000 721.000000 400.000000) for display-0
+11-30 14:36:39.556 I/SDM     ( 1838): HWDeviceDRM::SetupConcurrentWriteback: Tear down the Concurrent Writeback topology
+11-30 14:36:39.560 I/SDM     ( 1838): NotifyCWBStatus: Notify the client about buffer (0x7db59b0) status 0 for display-0.
+11-30 14:36:39.560 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+--------- beginning of system
+11-30 14:36:39.583 D/Aurogon ( 3500):  packageName = com.google.android.gms isAllowWakeUpList 
+11-30 14:36:39.584 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:39.584 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:39.585 W/WakeLock( 5969): GCM_HB_ALARM release without a matched acquire! [CONTEXT service_id=259 ]
+11-30 14:36:39.585 W/WakeLock( 5969): GCM_HB_ALARM counter does not exist
+11-30 14:36:39.585 D/ConnectivityService( 3500): reportNetworkConnectivity(131, false) by 10165
+11-30 14:36:39.585 I/AlarmManager( 5969): setExactAndAllowWhileIdle [name: GCM_CONN_ALARM type: 2 triggerAtMillis: 9711875]
+11-30 14:36:39.585 E/AlarmManager( 3500): not align this alarm: Alarm{e61c0f6 type 2 origWhen 9711875 whenElapsed 9711875 com.google.android.gms}, reason=0
+11-30 14:36:39.586 D/NetworkMonitor/131( 5472): Forcing reevaluation for UID 10165. Dns signal count: 0
+11-30 14:36:39.586 W/WakeLock( 5969): GCM_CONN_ALARM release without a matched acquire! [CONTEXT service_id=259 ]
+11-30 14:36:39.586 W/WakeLock( 5969): GCM_CONN_ALARM counter does not exist
+11-30 14:36:39.586 D/NetworkMonitor/131( 5472): Network would not satisfy default request, resolving private DNS
+11-30 14:36:39.586 D/ConnectivityService( 3500): [131 CELLULAR|VPN] validation passed
+11-30 14:36:39.607 I/MiSensorServiceImpl( 3500): New_Feature_Aon Als Strm data :83.642082 ! pendingVirtualAlsValues is 0
+11-30 14:36:39.607 I/MiSensorServiceImpl( 3500): New_Feature_Aon fov last use data 83.642082
+11-30 14:36:39.608 I/MiSensorServiceImpl( 3500): LightFovOptimizationSensor::screen_angle: -0.074178 0.819542 9.796216 86.079132 83.642082 0.000000 0 83.642082 0 83.642082
+11-30 14:36:39.672 I/ThermalObserver( 3500): Gallery hdr is disable by thermal.
+11-30 14:36:39.682 D/DnsCacheManager(16217): 📊 Synced latency from SharedPreferences: avgHitLatency=0,000ms, avgMissLatency=0,062ms
+11-30 14:36:39.682 D/MainViewModelDashboardAdapter(16217): 📊 toFeatureState: avgHitLatencyMs=0.0, avgMissLatencyMs=0.062344
+11-30 14:36:39.683 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:39.683 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:39.714 I/MiSensorServiceImpl( 3500): New_Feature_Aon Als Strm data :83.642082 ! pendingVirtualAlsValues is 0
+11-30 14:36:39.714 I/MiSensorServiceImpl( 3500): New_Feature_Aon fov last use data 83.642082
+11-30 14:36:39.737 I/vendor.qti.hardware.display.composer-service( 1838): Sensor: notify citsensorservice to trigger cwb, misForced = 0
+11-30 14:36:39.738 I/SDM     ( 1838): CWB config passed by cwb_client : tappoint 1  CWB_ROI : (480.000000 159.000000 721.000000 400.000000) for display-0
+11-30 14:36:39.769 I/SDM     ( 1838): HWDeviceDRM::SetupConcurrentWriteback: Tear down the Concurrent Writeback topology
+11-30 14:36:39.774 I/SDM     ( 1838): NotifyCWBStatus: Notify the client about buffer (0x7db3540) status 0 for display-0.
+11-30 14:36:39.774 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:36:39.783 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:39.783 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:39.820 I/MiSensorServiceImpl( 3500): New_Feature_Aon Als Strm data :83.642082 ! pendingVirtualAlsValues is 0
+11-30 14:36:39.820 I/MiSensorServiceImpl( 3500): New_Feature_Aon fov last use data 83.642082
+11-30 14:36:39.820 I/MiSensorServiceImpl( 3500): LightFovOptimizationSensor::screen_angle: -0.226720 0.638884 9.785448 86.485039 83.642082 0.000000 0 83.642082 0 83.642082
+11-30 14:36:39.883 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:39.883 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:39.893 D/DnsCacheManager(18066): 📊 Synced latency from SharedPreferences: avgHitLatency=0,000ms, avgMissLatency=0,062ms
+11-30 14:36:39.927 I/MiSensorServiceImpl( 3500): New_Feature_Aon Als Strm data :83.642082 ! pendingVirtualAlsValues is 0
+11-30 14:36:39.927 I/MiSensorServiceImpl( 3500): New_Feature_Aon fov last use data 83.642082
+11-30 14:36:39.951 I/vendor.qti.hardware.display.composer-service( 1838): Sensor: notify citsensorservice to trigger cwb, misForced = 0
+11-30 14:36:39.951 I/SDM     ( 1838): CWB config passed by cwb_client : tappoint 1  CWB_ROI : (480.000000 159.000000 721.000000 400.000000) for display-0
+11-30 14:36:39.953 D/QtiLinkBandwidthEstimator-0( 5787): handleMessage: 2
+11-30 14:36:39.953 D/QtiLinkBandwidthEstimator-0( 5787): MSG_TRAFFIC_STATS_POLL
+11-30 14:36:39.954 D/QtiLinkBandwidthEstimator-0( 5787): isDataPacketsCaluclationOnEachSimSeperately : true
+11-30 14:36:39.954 D/QtiLinkBandwidthEstimator-1( 5787): handleMessage: 2
+11-30 14:36:39.954 D/QtiLinkBandwidthEstimator-1( 5787): MSG_TRAFFIC_STATS_POLL
+11-30 14:36:39.954 D/QtiLinkBandwidthEstimator-1( 5787): isDataPacketsCaluclationOnEachSimSeperately : true
+11-30 14:36:39.961 W/binder:1924_4( 1924): type=1400 audit(0.0:141263): avc:  denied  { search } for  name="mcd" dev="dm-56" ino=1400 scontext=u:r:surfaceflinger:s0 tcontext=u:object_r:mcd_data_file:s0 tclass=dir permissive=0
+11-30 14:36:39.961 W/binder:1924_4( 1924): type=1400 audit(0.0:141264): avc:  denied  { search } for  name="mcd" dev="dm-56" ino=1400 scontext=u:r:surfaceflinger:s0 tcontext=u:object_r:mcd_data_file:s0 tclass=dir permissive=0
+11-30 14:36:39.965 W/binder:1924_4( 1924): type=1400 audit(0.0:141265): avc:  denied  { search } for  name="mcd" dev="dm-56" ino=1400 scontext=u:r:surfaceflinger:s0 tcontext=u:object_r:mcd_data_file:s0 tclass=dir permissive=0
+11-30 14:36:39.971 D/QLM-Service( 7768): check_headroom_zone: Timer EVT, Temp: 50961
+11-30 14:36:39.984 I/SDM     ( 1838): HWDeviceDRM::SetupConcurrentWriteback: Tear down the Concurrent Writeback topology
+11-30 14:36:39.985 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:39.985 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:39.988 I/SDM     ( 1838): NotifyCWBStatus: Notify the client about buffer (0x7db71c0) status 0 for display-0.
+11-30 14:36:39.988 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:36:40.033 I/MiSensorServiceImpl( 3500): New_Feature_Aon Als Strm data :83.642082 ! pendingVirtualAlsValues is 0
+11-30 14:36:40.033 I/MiSensorServiceImpl( 3500): New_Feature_Aon fov last use data 83.642082
+11-30 14:36:40.033 I/MiSensorServiceImpl( 3500): LightFovOptimizationSensor::screen_angle: -0.198604 0.557528 9.777073 86.530785 83.642082 0.000000 0 83.642082 0 83.642082
+11-30 14:36:40.083 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:40.083 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:40.108 D/DnsCacheManager(16217): DnsCacheManager already initialized, ensuring metrics job is running...
+11-30 14:36:40.108 D/DnsCacheManager(16217): ✅ Metrics job is already running (isActive=true)
+11-30 14:36:40.109 D/DnsCacheManager(16217): ✅ Metrics job is already running (isActive=true)
+11-30 14:36:40.109 I/MainViewModelDashboardAdapter(16217): ✅ DNS cache stats StateFlow connected: entries=1, hits=1, misses=1, hitRate=50%
+11-30 14:36:40.139 I/MiSensorServiceImpl( 3500): New_Feature_Aon Als Strm data :83.642082 ! pendingVirtualAlsValues is 0
+11-30 14:36:40.139 I/MiSensorServiceImpl( 3500): New_Feature_Aon fov last use data 83.642082
+11-30 14:36:40.164 I/vendor.qti.hardware.display.composer-service( 1838): Sensor: notify citsensorservice to trigger cwb, misForced = 0
+11-30 14:36:40.165 I/SDM     ( 1838): CWB config passed by cwb_client : tappoint 1  CWB_ROI : (480.000000 159.000000 721.000000 400.000000) for display-0
+11-30 14:36:40.183 D/DnsCacheManager(16217): 📊 Synced latency from SharedPreferences: avgHitLatency=0,000ms, avgMissLatency=0,062ms
+11-30 14:36:40.183 V/DnsCacheManager(16217): 📊 StateFlow updated: entries=1, hits=1, misses=1, hitRate=50%, avgHitLatency=0,000ms
+11-30 14:36:40.183 D/MainViewModelDashboardAdapter(16217): 📊 toFeatureState: avgHitLatencyMs=0.0, avgMissLatencyMs=0.062344
+11-30 14:36:40.183 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:40.183 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:40.197 I/SDM     ( 1838): HWDeviceDRM::SetupConcurrentWriteback: Tear down the Concurrent Writeback topology
+11-30 14:36:40.202 I/SDM     ( 1838): NotifyCWBStatus: Notify the client about buffer (0x7db3490) status 0 for display-0.
+11-30 14:36:40.202 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:36:40.245 I/MiSensorServiceImpl( 3500): New_Feature_Aon Als Strm data :83.642082 ! pendingVirtualAlsValues is 0
+11-30 14:36:40.245 I/MiSensorServiceImpl( 3500): New_Feature_Aon fov last use data 83.642082
+11-30 14:36:40.245 I/MiSensorServiceImpl( 3500): LightFovOptimizationSensor::screen_angle: -0.201595 0.522832 9.778868 86.581032 83.642082 0.000000 0 83.642082 0 83.642082
+11-30 14:36:40.283 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:40.283 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:40.351 I/MiSensorServiceImpl( 3500): New_Feature_Aon Als Strm data :83.642082 ! pendingVirtualAlsValues is 0
+11-30 14:36:40.351 I/MiSensorServiceImpl( 3500): New_Feature_Aon fov last use data 83.642082
+11-30 14:36:40.378 I/vendor.qti.hardware.display.composer-service( 1838): Sensor: notify citsensorservice to trigger cwb, misForced = 0
+11-30 14:36:40.378 I/SDM     ( 1838): CWB config passed by cwb_client : tappoint 1  CWB_ROI : (480.000000 159.000000 721.000000 400.000000) for display-0
+11-30 14:36:40.383 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:40.383 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:40.395 D/DnsCacheManager(18066): 📊 Synced latency from SharedPreferences: avgHitLatency=0,000ms, avgMissLatency=0,062ms
+11-30 14:36:40.396 V/DnsCacheManager(18066): 📊 StateFlow updated: entries=1, hits=1, misses=1, hitRate=50%, avgHitLatency=0,000ms
+11-30 14:36:40.396 D/DnsCacheManager(18066): 📊 Metrics update #110: entries=1, hits=1, misses=1, hitRate=50%
+11-30 14:36:40.411 I/SDM     ( 1838): HWDeviceDRM::SetupConcurrentWriteback: Tear down the Concurrent Writeback topology
+11-30 14:36:40.415 I/SDM     ( 1838): NotifyCWBStatus: Notify the client about buffer (0x7db3cd0) status 0 for display-0.
+11-30 14:36:40.416 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:36:40.457 I/MiSensorServiceImpl( 3500): New_Feature_Aon Als Strm data :83.642082 ! pendingVirtualAlsValues is 0
+11-30 14:36:40.457 I/MiSensorServiceImpl( 3500): New_Feature_Aon fov last use data 83.642082
+11-30 14:36:40.457 I/MiSensorServiceImpl( 3500): LightFovOptimizationSensor::screen_angle: -0.164507 0.554537 9.787243 86.648354 83.642082 0.000000 0 83.642082 0 83.642082
+11-30 14:36:40.483 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener
+11-30 14:36:40.484 I/MiSensorServiceImpl( 3500): user found in check list, getPackageName  android.view.OrientationEventListener

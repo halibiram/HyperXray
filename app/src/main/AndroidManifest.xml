@@ -89,15 +89,29 @@
                 android:value="WireGuard over Xray VPN service" />
         </service>
 
+        <!--
+            MainActivity Launch Mode Configuration:
+            
+            Using singleTop instead of singleTask to fix Activity launch issues:
+            - singleTask + FLAG_ACTIVITY_NEW_TASK (auto-added by Launcher/Notification) 
+              causes new task creation on MIUI and other custom launchers
+            - singleTop + FLAG_ACTIVITY_CLEAR_TOP | FLAG_ACTIVITY_SINGLE_TOP provides
+              consistent behavior: reuses existing Activity instance via onNewIntent()
+            - Works correctly with Launcher (MAIN/LAUNCHER), Notification, and deeplink intents
+            
+            Expected behavior:
+            - If Activity exists in current task: onNewIntent() called, onCreate() NOT called
+            - If Activity doesn't exist: onCreate() called normally
+            - No unnecessary task creation or Activity instance duplication
+        -->
         <activity
             android:name="com.hyperxray.an.activity.MainActivity"
             android:configChanges="orientation|screenSize|screenLayout"
             android:enableOnBackInvokedCallback="true"
             android:excludeFromRecents="false"
             android:exported="true"
-            android:launchMode="singleTask"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustPan"
-            android:taskAffinity=""
             tools:targetApi="tiramisu">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

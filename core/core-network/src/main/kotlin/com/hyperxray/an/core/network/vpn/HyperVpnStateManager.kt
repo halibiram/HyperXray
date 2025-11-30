@@ -105,6 +105,7 @@ class HyperVpnStateManager(private val context: Context) {
         val txPackets: Long = 0,
         val rxPackets: Long = 0,
         val lastHandshake: Long = 0,
+        val lastHandshakeFormatted: String = "Never",
         val connected: Boolean = false,
         val uptime: Long = 0, // seconds
         val latency: Long = 0, // milliseconds
@@ -124,6 +125,7 @@ class HyperVpnStateManager(private val context: Context) {
                         txPackets = obj.optLong("txPackets", 0),
                         rxPackets = obj.optLong("rxPackets", 0),
                         lastHandshake = obj.optLong("lastHandshake", 0),
+                        lastHandshakeFormatted = obj.optString("lastHandshakeFormatted", "Never"),
                         connected = obj.optBoolean("connected", false),
                         uptime = obj.optLong("uptime", 0),
                         latency = obj.optLong("latency", 0),

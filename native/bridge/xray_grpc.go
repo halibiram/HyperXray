@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/xtls/xray-core/app/stats/command"
@@ -50,8 +51,50 @@ func NewXrayGrpcClient(apiPort int) (*XrayGrpcClient, error) {
 	}, nil
 }
 
+// waitForConnection waits for gRPC connection to be ready
+func (c *XrayGrpcClient) waitForConnection(maxWait time.Duration) error {
+	if c.conn == nil {
+		return fmt.Errorf("connection is nil")
+	}
+
+	state := c.conn.GetState()
+	if state == connectivity.Ready {
+		return nil // Already ready
+	}
+
+	// Wait for connection to be ready
+	ctx, cancel := context.WithTimeout(context.Background(), maxWait)
+	defer cancel()
+
+	for {
+		if !c.conn.WaitForStateChange(ctx, state) {
+			// Context expired
+			currentState := c.conn.GetState()
+			return fmt.Errorf("connection not ready: state=%v (waited %v)", currentState, maxWait)
+		}
+
+		state = c.conn.GetState()
+		if state == connectivity.Ready {
+			logDebug("[XrayGrpc] Connection is now ready")
+			return nil
+		}
+
+		if state == connectivity.Shutdown || state == connectivity.TransientFailure {
+			return fmt.Errorf("connection failed: state=%v", state)
+		}
+
+		// Continue waiting for IDLE or CONNECTING states
+	}
+}
+
 // GetSystemStats queries system statistics from Xray-core
 func (c *XrayGrpcClient) GetSystemStats() (*command.SysStatsResponse, error) {
+	// Wait for connection to be ready (max 2 seconds)
+	if err := c.waitForConnection(2 * time.Second); err != nil {
+		logError("[XrayGrpc] Connection not ready: %v", err)
+		return nil, fmt.Errorf("connection not ready: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -69,6 +112,12 @@ func (c *XrayGrpcClient) GetSystemStats() (*command.SysStatsResponse, error) {
 // QueryTrafficStats queries traffic statistics from Xray-core
 // Returns uplink and downlink bytes, matching Kotlin CoreStatsClient pattern matching logic
 func (c *XrayGrpcClient) QueryTrafficStats() (uplink, downlink int64, err error) {
+	// Wait for connection to be ready (max 2 seconds)
+	if err := c.waitForConnection(2 * time.Second); err != nil {
+		logError("[XrayGrpc] Connection not ready for traffic stats: %v", err)
+		return 0, 0, fmt.Errorf("connection not ready: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 

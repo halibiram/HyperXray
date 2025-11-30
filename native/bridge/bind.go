@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -198,12 +199,53 @@ func (b *XrayBind) makeReceiveFunc() conn.ReceiveFunc {
 		data, err := b.udpConn.Read(30 * time.Second)
 		if err != nil {
 			timeoutCount++
-			// Log timeout errors periodically to avoid spam
+			
+			// Check if it's a timeout error (expected for UDP when no data available)
+			errStr := err.Error()
+			isTimeout := strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline")
+			
+			// Check if connection is still valid
+			b.mu.Lock()
+			connStillValid := b.udpConn != nil && !b.closed
+			if b.udpConn != nil {
+				if b.udpConn.IsConnected() {
+					connState = "connected"
+				} else {
+					connState = "not connected"
+				}
+			}
+			b.mu.Unlock()
+			
+			// If it's a timeout and connection is still valid, this is normal UDP behavior
+			if isTimeout && connStillValid {
+				// Log timeout periodically to avoid spam
+				if timeoutCount%10 == 0 || timeoutCount == 1 {
+					logDebug("[XrayBind] makeReceiveFunc: Read timeout #%d (normal UDP behavior, no data available, connState: %s)", 
+						timeoutCount, connState)
+				}
+				// Return timeout error - WireGuard will retry
+				return 0, err
+			}
+			
+			// For non-timeout errors or invalid connection, check if we need to reconnect
+			if !connStillValid {
+				logWarn("[XrayBind] makeReceiveFunc: Connection invalid during read (state: %s), attempting reconnect...", connState)
+				if reconnectErr := b.reconnect(); reconnectErr != nil {
+					logError("[XrayBind] makeReceiveFunc: Reconnect failed: %v", reconnectErr)
+					// Return timeout to allow retry
+					return 0, fmt.Errorf("read timeout (reconnect failed: %v)", reconnectErr)
+				}
+				logInfo("[XrayBind] makeReceiveFunc: ✅ Reconnected successfully, WireGuard will retry read...")
+				// Return timeout to allow WireGuard to retry with new connection
+				return 0, fmt.Errorf("read timeout (reconnected, retry needed)")
+			}
+			
+			// Log other errors periodically
 			if timeoutCount%10 == 0 || timeoutCount == 1 {
-				logWarn("[XrayBind] makeReceiveFunc: ⚠️ Read timeout/error #%d: %v (successCount: %d, timeoutCount: %d, connState: %s)", 
+				logWarn("[XrayBind] makeReceiveFunc: ⚠️ Read error #%d: %v (successCount: %d, timeoutCount: %d, connState: %s)", 
 					timeoutCount, err, successCount, timeoutCount, connState)
 			} else {
-				logDebug("[XrayBind] makeReceiveFunc: Read timeout/error #%d: %v", timeoutCount, err)
+				logDebug("[XrayBind] makeReceiveFunc: Read error #%d: %v", timeoutCount, err)
 			}
 			return 0, err
 		}

@@ -1,0 +1,200 @@
+11-30 14:13:09.450 V/AndroidMemoryStatsManager(15770): Memory stats updated - Total PSS: 306,64MB, Native: 83,09MB, Dalvik: 14,10MB, Go Alloc: 0B
+11-30 14:13:09.659 D/MainViewModel(15770): Service event received: LogUpdate(logData=[2025/11/30 14:13:09 [HyperVpnService] 📊 Tunnel stats JSON: {"connected":true,"txBytes":5464576,"rxBytes":58827104,"txPackets":37677,"rxPackets":48023,"lastHandshake":0,"handshakeRTT":50,"endpoint":"162.159.192.1:2408","uptime":371000}])
+11-30 14:13:09.659 D/MainViewModel(15770): Service event received: LogUpdate(logData=[2025/11/30 14:13:09 [HyperVpnService] 📊 Tunnel stats - connected: true, txBytes: 5464576, rxBytes: 58827104, txPackets: 37677, rxPackets: 48023, lastHandshake: 0])
+11-30 14:13:09.705 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:10.034 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:10.153 D/HyperXray-JNI(21461): getTunnelStats called
+11-30 14:13:10.153 D/HyperVpnService(21461): 📊 Tunnel stats JSON: {"connected":true,"txBytes":5464832,"rxBytes":58827296,"txPackets":37680,"rxPackets":48025,"lastHandshake":0,"handshakeRTT":50,"endpoint":"162.159.192.1:2408","uptime":372000}
+11-30 14:13:10.153 D/HyperVpnService(21461): 📊 Tunnel stats - connected: true, txBytes: 5464832, rxBytes: 58827296, txPackets: 37680, rxPackets: 48025, lastHandshake: 0
+11-30 14:13:10.153 D/HyperXray-JNI(21461): getHandshakeRTT called
+11-30 14:13:10.153 D/HyperXray-JNI(21461): Go GetHandshakeRTT returned: 50 ms
+11-30 14:13:10.290 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:10.349 D/MiSightJni( 3500): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"OldFps":60,"OldFpsDuration":38078,"NewFps":120,"FpsChangeReason":0,"Scene":"COLLAPSE_NOTIFICATION_PANEL_ANIMATION","PackageName":"com.miui.home"}'
+11-30 14:13:10.349 I/misight ( 2577): ProcessEvent eventId=902005007, region=eea,cfg=cn
+11-30 14:13:10.349 I/misight ( 2577): OnEvent event 902005007 param compliance process failed
+11-30 14:13:10.386 D/XrayLogManager(21461): No logs available in native channel (polling...)
+11-30 14:13:10.526 D/BatteryStatsManagerStub( 3500): notifyEvent for resId=128 used 0ms
+11-30 14:13:10.526 I/whetstone.activity( 3500): processNotifyEvent1 resId = 128, bundle = Bundle[{startTime=8276816, sourcePkg=com.google.android.gms, type=ELAPSED_WAKEUP, statsTag=*walarm*:com.google.android.intent.action.GCM_RECONNECT, creatorUid=10165, elapsedRealtime=8276814}]
+11-30 14:13:10.546 D/BoostHelper( 5819): onFrameDraw processId:6296,viewRoot:61944713
+11-30 14:13:10.553 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:10.559 I/TrafficStats( 5969): tagSocketFd(-1, 1031, -1) failed with errno-9
+11-30 14:13:10.560 D/HyperXray-Bridge(21461): [XrayUDP] Write: ✅ Sent 96 bytes
+11-30 14:13:10.560 D/HyperXray-Bridge(21461): [XrayBind] → Sent 96 bytes
+11-30 14:13:10.643 I/SDM     ( 1838): DemuraTnCaptureIntfImpl::ProcessCapturePanelData: Screen capture status = 0
+11-30 14:13:10.644 D/HyperXray-Bridge(21461): [PacketInspector] RX Len: 92, Header: [0x04, 0x00, 0x00, 0x00]
+11-30 14:13:10.644 D/HyperXray-Bridge(21461): [XrayUDP] readLoop: ✅ Received 92 bytes
+11-30 14:13:10.644 D/HyperXray-Bridge(21461): [XrayBind] makeReceiveFunc: ✅ ← Received 92 bytes
+11-30 14:13:10.644 D/HyperXray-Bridge(21461): [XrayUDP] Write: ✅ Sent 96 bytes
+11-30 14:13:10.644 D/HyperXray-Bridge(21461): [XrayBind] → Sent 96 bytes
+11-30 14:13:10.645 D/HyperXray-Bridge(21461): [XrayUDP] Write: Attempting to write 624 bytes to 162.159.192.1:2408...
+11-30 14:13:10.645 I/HyperXray-Bridge(21461): [XrayUDP] Write: ✅ Sent 624 bytes to 162.159.192.1:2408
+11-30 14:13:10.645 D/HyperXray-Bridge(21461): [XrayBind] → Sent 624 bytes
+11-30 14:13:10.655 D/MainViewModel(15770): Service event received: LogUpdate(logData=[2025/11/30 14:13:10 [HyperVpnService] 📊 Tunnel stats JSON: {"connected":true,"txBytes":5464832,"rxBytes":58827296,"txPackets":37680,"rxPackets":48025,"lastHandshake":0,"handshakeRTT":50,"endpoint":"162.159.192.1:2408","uptime":372000}])
+11-30 14:13:10.656 D/MainViewModel(15770): Service event received: LogUpdate(logData=[2025/11/30 14:13:10 [HyperVpnService] 📊 Tunnel stats - connected: true, txBytes: 5464832, rxBytes: 58827296, txPackets: 37680, rxPackets: 48025, lastHandshake: 0])
+11-30 14:13:10.739 D/HyperXray-Bridge(21461): [PacketInspector] RX Len: 84, Header: [0x04, 0x00, 0x00, 0x00]
+11-30 14:13:10.739 D/HyperXray-Bridge(21461): [XrayUDP] readLoop: ✅ Received 84 bytes
+11-30 14:13:10.739 D/HyperXray-Bridge(21461): [XrayBind] makeReceiveFunc: ✅ ← Received 84 bytes
+11-30 14:13:10.755 D/HyperXray-Bridge(21461): [PacketInspector] RX Len: 287, Header: [0x04, 0x00, 0x00, 0x00]
+11-30 14:13:10.756 I/HyperXray-Bridge(21461): [XrayUDP] readLoop: ✅ Received 287 bytes (readCount: 48028, errorCount: 0)
+11-30 14:13:10.756 I/HyperXray-Bridge(21461): [XrayBind] makeReceiveFunc: ✅ ← Received 287 bytes (successCount: 48028, timeoutCount: 0)
+11-30 14:13:10.756 D/HyperXray-Bridge(21461): [XrayUDP] Write: ✅ Sent 96 bytes
+11-30 14:13:10.756 D/HyperXray-Bridge(21461): [XrayBind] → Sent 96 bytes
+11-30 14:13:10.756 D/HyperXray-Bridge(21461): [XrayUDP] Write: Attempting to write 160 bytes to 162.159.192.1:2408...
+11-30 14:13:10.756 I/HyperXray-Bridge(21461): [XrayUDP] Write: ✅ Sent 160 bytes to 162.159.192.1:2408
+11-30 14:13:10.756 D/HyperXray-Bridge(21461): [XrayBind] → Sent 160 bytes
+11-30 14:13:10.775 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:10.881 D/HyperXray-Bridge(21461): [PacketInspector] RX Len: 84, Header: [0x04, 0x00, 0x00, 0x00]
+11-30 14:13:10.882 D/HyperXray-Bridge(21461): [XrayUDP] readLoop: ✅ Received 84 bytes
+11-30 14:13:10.882 D/HyperXray-Bridge(21461): [XrayBind] makeReceiveFunc: ✅ ← Received 84 bytes
+11-30 14:13:10.882 D/HyperXray-Bridge(21461): [XrayUDP] Write: Attempting to write 544 bytes to 162.159.192.1:2408...
+11-30 14:13:10.882 I/HyperXray-Bridge(21461): [XrayUDP] Write: ✅ Sent 544 bytes to 162.159.192.1:2408
+11-30 14:13:10.882 D/HyperXray-Bridge(21461): [XrayBind] → Sent 544 bytes
+11-30 14:13:10.974 D/HyperXray-Bridge(21461): [PacketInspector] RX Len: 84, Header: [0x04, 0x00, 0x00, 0x00]
+11-30 14:13:10.974 I/HyperXray-Bridge(21461): [XrayUDP] readLoop: ✅ Received 84 bytes (readCount: 48030, errorCount: 0)
+11-30 14:13:10.974 D/HyperXray-Bridge(21461): [XrayUDP] readLoop: Attempting to read (readCount: 48030, errorCount: 0)...
+11-30 14:13:10.974 I/HyperXray-Bridge(21461): [XrayBind] makeReceiveFunc: ✅ ← Received 84 bytes (successCount: 48030, timeoutCount: 0)
+11-30 14:13:10.987 D/HyperXray-Bridge(21461): [PacketInspector] RX Len: 619, Header: [0x04, 0x00, 0x00, 0x00]
+11-30 14:13:10.987 I/HyperXray-Bridge(21461): [XrayUDP] readLoop: ✅ Received 619 bytes (readCount: 48031, errorCount: 0)
+11-30 14:13:10.987 I/HyperXray-Bridge(21461): [XrayBind] makeReceiveFunc: ✅ ← Received 619 bytes (successCount: 48031, timeoutCount: 0)
+11-30 14:13:10.989 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:11.026 D/HyperXray-Bridge(21461): [XrayUDP] Write: ✅ Sent 96 bytes
+11-30 14:13:11.026 D/HyperXray-Bridge(21461): [XrayBind] → Sent 96 bytes
+11-30 14:13:11.112 D/HyperXray-Bridge(21461): [PacketInspector] RX Len: 202, Header: [0x04, 0x00, 0x00, 0x00]
+11-30 14:13:11.112 I/HyperXray-Bridge(21461): [XrayUDP] readLoop: ✅ Received 202 bytes (readCount: 48032, errorCount: 0)
+11-30 14:13:11.112 I/HyperXray-Bridge(21461): [XrayBind] makeReceiveFunc: ✅ ← Received 202 bytes (successCount: 48032, timeoutCount: 0)
+11-30 14:13:11.112 D/HyperXray-Bridge(21461): [XrayUDP] Write: ✅ Sent 96 bytes
+11-30 14:13:11.112 D/HyperXray-Bridge(21461): [XrayBind] → Sent 96 bytes
+11-30 14:13:11.156 D/HyperXray-JNI(21461): getTunnelStats called
+11-30 14:13:11.156 D/HyperVpnService(21461): 📊 Tunnel stats JSON: {"connected":true,"txBytes":5464832,"rxBytes":58827296,"txPackets":37680,"rxPackets":48025,"lastHandshake":0,"handshakeRTT":50,"endpoint":"162.159.192.1:2408","uptime":373000}
+11-30 14:13:11.157 D/HyperVpnService(21461): 📊 Tunnel stats - connected: true, txBytes: 5464832, rxBytes: 58827296, txPackets: 37680, rxPackets: 48025, lastHandshake: 0
+11-30 14:13:11.157 D/HyperXray-JNI(21461): getHandshakeRTT called
+11-30 14:13:11.157 D/HyperXray-JNI(21461): Go GetHandshakeRTT returned: 50 ms
+11-30 14:13:11.244 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:11.401 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:11.521 V/AndroidMemoryStatsManager(15770): ⚠️ Go runtime stats are zero - XrayStatsManager available but stats not yet received
+11-30 14:13:11.522 V/AndroidMemoryStatsManager(15770): Memory stats updated - Total PSS: 307,06MB, Native: 83,51MB, Dalvik: 14,10MB, Go Alloc: 0B
+11-30 14:13:11.661 D/MainViewModel(15770): Service event received: LogUpdate(logData=[2025/11/30 14:13:11 [HyperVpnService] 📊 Tunnel stats JSON: {"connected":true,"txBytes":5464832,"rxBytes":58827296,"txPackets":37680,"rxPackets":48025,"lastHandshake":0,"handshakeRTT":50,"endpoint":"162.159.192.1:2408","uptime":373000}])
+11-30 14:13:11.661 D/MainViewModel(15770): Service event received: LogUpdate(logData=[2025/11/30 14:13:11 [HyperVpnService] 📊 Tunnel stats - connected: true, txBytes: 5464832, rxBytes: 58827296, txPackets: 37680, rxPackets: 48025, lastHandshake: 0])
+11-30 14:13:11.751 D/HyperXray-Bridge(21461): [PacketInspector] RX Len: 108, Header: [0x04, 0x00, 0x00, 0x00]
+11-30 14:13:11.752 I/HyperXray-Bridge(21461): [XrayUDP] readLoop: ✅ Received 108 bytes (readCount: 48033, errorCount: 0)
+11-30 14:13:11.752 D/HyperXray-Bridge(21461): [PacketInspector] RX Len: 108, Header: [0x04, 0x00, 0x00, 0x00]
+11-30 14:13:11.752 I/HyperXray-Bridge(21461): [XrayUDP] readLoop: ✅ Received 108 bytes (readCount: 48034, errorCount: 0)
+11-30 14:13:11.752 I/HyperXray-Bridge(21461): [XrayBind] makeReceiveFunc: ✅ ← Received 108 bytes (successCount: 48033, timeoutCount: 0)
+11-30 14:13:11.752 I/HyperXray-Bridge(21461): [XrayBind] makeReceiveFunc: ✅ ← Received 108 bytes (successCount: 48034, timeoutCount: 0)
+11-30 14:13:11.752 D/HyperXray-Bridge(21461): [XrayUDP] Write: ✅ Sent 80 bytes
+11-30 14:13:11.752 D/HyperXray-Bridge(21461): [XrayBind] → Sent 80 bytes
+11-30 14:13:11.752 D/HyperXray-Bridge(21461): [XrayUDP] Write: ✅ Sent 80 bytes
+11-30 14:13:11.752 D/HyperXray-Bridge(21461): [XrayBind] → Sent 80 bytes
+11-30 14:13:12.143 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:12.159 D/HyperXray-JNI(21461): getTunnelStats called
+11-30 14:13:12.160 D/HyperVpnService(21461): 📊 Tunnel stats JSON: {"connected":true,"txBytes":5466640,"rxBytes":58828748,"txPackets":37688,"rxPackets":48032,"lastHandshake":0,"handshakeRTT":50,"endpoint":"162.159.192.1:2408","uptime":374001}
+11-30 14:13:12.161 D/HyperVpnService(21461): 📊 Tunnel stats - connected: true, txBytes: 5466640, rxBytes: 58828748, txPackets: 37688, rxPackets: 48032, lastHandshake: 0
+11-30 14:13:12.161 D/HyperXray-JNI(21461): getHandshakeRTT called
+11-30 14:13:12.161 D/HyperXray-JNI(21461): Go GetHandshakeRTT returned: 50 ms
+11-30 14:13:12.347 W/XrayStatsManager(15770): ⚠️ Native process not available in monitoring loop - invalidating client
+11-30 14:13:12.363 I/MediaCodec( 3930): [mId: 9] [video-debug-dec] Stats 5005ms:Client:com.instagram.android,Component:c2.qti.av1.decoder,Qin:0,DQin:0/5,Render:0,Drop:0,DQout:0/0
+11-30 14:13:12.363 I/MediaCodec( 3930): [mId: 10] [audio-debug-dec] Stats 5006ms:Client:com.instagram.android,Component:c2.android.aac.decoder,Qin:0,DQin:0/5,Render:0,Drop:0,DQout:0/0
+11-30 14:13:12.554 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:12.666 D/MainViewModel(15770): Service event received: LogUpdate(logData=[2025/11/30 14:13:12 [HyperVpnService] 📊 Tunnel stats JSON: {"connected":true,"txBytes":5466640,"rxBytes":58828748,"txPackets":37688,"rxPackets":48032,"lastHandshake":0,"handshakeRTT":50,"endpoint":"162.159.192.1:2408","uptime":374001}])
+11-30 14:13:12.666 D/MainViewModel(15770): Service event received: LogUpdate(logData=[2025/11/30 14:13:12 [HyperVpnService] 📊 Tunnel stats - connected: true, txBytes: 5466640, rxBytes: 58828748, txPackets: 37688, rxPackets: 48032, lastHandshake: 0])
+11-30 14:13:12.774 D/HyperXray-Bridge(21461): [PacketInspector] RX Len: 108, Header: [0x04, 0x00, 0x00, 0x00]
+11-30 14:13:12.774 I/HyperXray-Bridge(21461): [XrayUDP] readLoop: ✅ Received 108 bytes (readCount: 48035, errorCount: 0)
+11-30 14:13:12.774 I/HyperXray-Bridge(21461): [XrayBind] makeReceiveFunc: ✅ ← Received 108 bytes (successCount: 48035, timeoutCount: 0)
+11-30 14:13:12.774 D/HyperXray-Bridge(21461): [XrayUDP] Write: ✅ Sent 80 bytes
+11-30 14:13:12.774 D/HyperXray-Bridge(21461): [XrayBind] → Sent 80 bytes
+11-30 14:13:12.876 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:13.029 I/PAL: StreamSoundTrigger( 1814): ProcessEvent: 2811: StActive: handle event 15 (ST_EV_CONCURRENT_STREAM) for stream instance 1
+11-30 14:13:13.029 I/PAL: StreamSoundTrigger( 1814): ProcessEvent: 3154: current capture profile DUAL_MIC_48KHZ_16BIT_FFECNS: dev_id=0x1c, chs=2, sr=48000, ec_ref=1
+11-30 14:13:13.029 I/PAL: StreamSoundTrigger( 1814): ProcessEvent: 3161: new capture profile SINGLE_MIC_16KHZ_16BIT_RAW_LPI: dev_id=0x1c, chs=1, sr=16000, ec_ref=0
+11-30 14:13:13.029 I/PAL: StreamSoundTrigger( 1814): ProcessEvent: 2811: StActive: handle event 5 (ST_EV_STOP_RECOGNITION) for stream instance 1
+11-30 14:13:13.029 I/PAL: StreamSoundTrigger( 1814): ProcessEvent: 2811: StActive: handle event 16 (ST_EV_EC_REF) for stream instance 1
+11-30 14:13:13.029 I/PAL: SoundTriggerEngineGsl( 1814): ProcessStopRecognition: 1283: Enter
+11-30 14:13:13.033 I/PAL: SoundTriggerEngineGsl( 1814): ProcessStopRecognition: 1306: Exit, status = 0
+11-30 14:13:13.033 I/PAL: StreamSoundTrigger( 1814): ProcessEvent: 2874: Stop device 42-PAL_DEVICE_IN_HANDSET_VA_MIC
+11-30 14:13:13.033 I/PAL: StreamSoundTrigger( 1814): ProcessEvent: 2880: Close device 42-PAL_DEVICE_IN_HANDSET_VA_MIC
+11-30 14:13:13.040 I/PAL: StreamSoundTrigger( 1814): ProcessEvent: 2334: StLoaded: handle event 15 (ST_EV_CONCURRENT_STREAM) for stream instance 1
+11-30 14:13:13.040 I/PAL: StreamSoundTrigger( 1814): ProcessEvent: 2714: current capture profile DUAL_MIC_48KHZ_16BIT_FFECNS: dev_id=0x1c, chs=2, sr=48000, ec_ref=1
+11-30 14:13:13.040 I/PAL: StreamSoundTrigger( 1814): ProcessEvent: 2721: new capture profile SINGLE_MIC_16KHZ_16BIT_RAW_LPI: dev_id=0x1c, chs=1, sr=16000, ec_ref=0
+11-30 14:13:13.046 I/PAL: StreamSoundTrigger( 1814): ProcessEvent: 2107: StIdle: handle event 15 (ST_EV_CONCURRENT_STREAM) for stream instance 1
+11-30 14:13:13.046 I/PAL: StreamSoundTrigger( 1814): ProcessEvent: 2266: current capture profile DUAL_MIC_48KHZ_16BIT_FFECNS: dev_id=0x1c, chs=2, sr=48000, ec_ref=1
+11-30 14:13:13.046 I/PAL: StreamSoundTrigger( 1814): ProcessEvent: 2273: new capture profile SINGLE_MIC_16KHZ_16BIT_RAW_LPI: dev_id=0x1c, chs=1, sr=16000, ec_ref=0
+11-30 14:13:13.047 I/PAL: StreamSoundTrigger( 1814): ProcessEvent: 2334: StLoaded: handle event 3 (ST_EV_START_RECOGNITION) for stream instance 1
+11-30 14:13:13.048 I/PAL: StreamSoundTrigger( 1814): ProcessEvent: 2468: Start device 42-PAL_DEVICE_IN_HANDSET_VA_MIC
+11-30 14:13:13.048 I/PAL: StreamSoundTrigger( 1814): ProcessEvent: 2479: device started
+11-30 14:13:13.048 I/PAL: SoundTriggerEngineGsl( 1814): ProcessStartRecognition: 966: Enter
+11-30 14:13:13.054 I/PAL: SoundTriggerEngineGsl( 1814): ProcessStartRecognition: 992: Resize mmap buffer size to 163840
+11-30 14:13:13.066 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:13.076 I/PAL: SoundTriggerEngineGsl( 1814): ProcessStartRecognition: 1014: Exit, status 0
+11-30 14:13:13.163 D/HyperXray-JNI(21461): getTunnelStats called
+11-30 14:13:13.164 D/HyperVpnService(21461): 📊 Tunnel stats JSON: {"connected":true,"txBytes":5466800,"rxBytes":58828964,"txPackets":37690,"rxPackets":48034,"lastHandshake":0,"handshakeRTT":50,"endpoint":"162.159.192.1:2408","uptime":375001}
+11-30 14:13:13.165 D/HyperVpnService(21461): 📊 Tunnel stats - connected: true, txBytes: 5466800, rxBytes: 58828964, txPackets: 37690, rxPackets: 48034, lastHandshake: 0
+11-30 14:13:13.165 D/HyperXray-JNI(21461): getHandshakeRTT called
+11-30 14:13:13.165 D/HyperXray-JNI(21461): Go GetHandshakeRTT returned: 50 ms
+11-30 14:13:13.554 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:13.592 V/AndroidMemoryStatsManager(15770): ⚠️ Go runtime stats are zero - XrayStatsManager available but stats not yet received
+11-30 14:13:13.593 V/AndroidMemoryStatsManager(15770): Memory stats updated - Total PSS: 308,99MB, Native: 83,82MB, Dalvik: 14,79MB, Go Alloc: 0B
+11-30 14:13:13.667 D/MainViewModel(15770): Service event received: LogUpdate(logData=[2025/11/30 14:13:13 [HyperVpnService] 📊 Tunnel stats JSON: {"connected":true,"txBytes":5466800,"rxBytes":58828964,"txPackets":37690,"rxPackets":48034,"lastHandshake":0,"handshakeRTT":50,"endpoint":"162.159.192.1:2408","uptime":375001}])
+11-30 14:13:13.667 D/MainViewModel(15770): Service event received: LogUpdate(logData=[2025/11/30 14:13:13 [HyperVpnService] 📊 Tunnel stats - connected: true, txBytes: 5466800, rxBytes: 58828964, txPackets: 37690, rxPackets: 48034, lastHandshake: 0])
+11-30 14:13:13.786 I/ProcessManager( 3500): getRenderThreadTidByPid, caller=3500
+11-30 14:13:13.799 I/ProcessManager( 3500): getRenderThreadTidByPid, caller=3500
+11-30 14:13:13.799 I/ProcessManager( 3500): getRenderThreadTidByPid, caller=3500
+11-30 14:13:13.809 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:13.811 E/NPVCInjector( 5819): 	at android.view.ViewRootImpl$ViewPostImeInputStage.processPointerEvent(ViewRootImpl.java:9728)
+11-30 14:13:13.811 E/NPVCInjector( 5819): 	at android.view.ViewRootImpl$ViewPostImeInputStage.onProcess(ViewRootImpl.java:9467)
+11-30 14:13:13.811 E/NPVCInjector( 5819): 	at android.view.ViewRootImpl.doProcessInputEvents(ViewRootImpl.java:12170)
+11-30 14:13:13.811 E/NPVCInjector( 5819): 	at android.view.ViewRootImpl.processRawInputEvent(ViewRootImpl.java:12676)
+11-30 14:13:13.811 E/NPVCInjector( 5819): 	at android.view.InputEventReceiver.nativeConsumeBatchedInputEvents(Native Method)
+11-30 14:13:13.811 E/NPVCInjector( 5819): 	at java.lang.reflect.Method.invoke(Native Method)
+11-30 14:13:13.932 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:14.138 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:14.168 D/HyperXray-JNI(21461): getTunnelStats called
+11-30 14:13:14.168 D/HyperVpnService(21461): 📊 Tunnel stats JSON: {"connected":true,"txBytes":5466880,"rxBytes":58829072,"txPackets":37691,"rxPackets":48035,"lastHandshake":0,"handshakeRTT":50,"endpoint":"162.159.192.1:2408","uptime":376000}
+11-30 14:13:14.169 D/HyperVpnService(21461): 📊 Tunnel stats - connected: true, txBytes: 5466880, rxBytes: 58829072, txPackets: 37691, rxPackets: 48035, lastHandshake: 0
+11-30 14:13:14.169 D/HyperXray-JNI(21461): getHandshakeRTT called
+11-30 14:13:14.169 D/HyperXray-JNI(21461): Go GetHandshakeRTT returned: 50 ms
+11-30 14:13:14.344 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:14.550 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:14.671 D/MainViewModel(15770): Service event received: LogUpdate(logData=[2025/11/30 14:13:14 [HyperVpnService] 📊 Tunnel stats JSON: {"connected":true,"txBytes":5466880,"rxBytes":58829072,"txPackets":37691,"rxPackets":48035,"lastHandshake":0,"handshakeRTT":50,"endpoint":"162.159.192.1:2408","uptime":376000}])
+11-30 14:13:14.671 D/MainViewModel(15770): Service event received: LogUpdate(logData=[2025/11/30 14:13:14 [HyperVpnService] 📊 Tunnel stats - connected: true, txBytes: 5466880, rxBytes: 58829072, txPackets: 37691, rxPackets: 48035, lastHandshake: 0])
+11-30 14:13:14.756 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:14.890 D/HyperXray-Bridge(21461): [XrayUDP] Write: ✅ Sent 96 bytes
+11-30 14:13:14.890 D/HyperXray-Bridge(21461): [XrayBind] → Sent 96 bytes
+11-30 14:13:14.891 D/MiSightJni( 3500): MiSight: Java_com_miui_misight_MiSight_nativeSendEvent enter called. '{"OldFps":120,"OldFpsDuration":4724,"NewFps":60,"FpsChangeReason":0,"Scene":"COLLAPSE_NOTIFICATION_PANEL_ANIMATION","PackageName":"com.miui.home"}'
+11-30 14:13:14.892 I/misight ( 2577): ProcessEvent eventId=902005007, region=eea,cfg=cn
+11-30 14:13:14.892 I/misight ( 2577): OnEvent event 902005007 param compliance process failed
+11-30 14:13:14.962 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:14.981 D/HyperXray-Bridge(21461): [PacketInspector] RX Len: 84, Header: [0x04, 0x00, 0x00, 0x00]
+11-30 14:13:14.981 D/HyperXray-Bridge(21461): [XrayUDP] readLoop: ✅ Received 84 bytes
+11-30 14:13:14.981 D/HyperXray-Bridge(21461): [XrayBind] makeReceiveFunc: ✅ ← Received 84 bytes
+11-30 14:13:15.171 D/HyperXray-JNI(21461): getTunnelStats called
+11-30 14:13:15.171 D/HyperVpnService(21461): 📊 Tunnel stats JSON: {"connected":true,"txBytes":5466880,"rxBytes":58829072,"txPackets":37691,"rxPackets":48035,"lastHandshake":0,"handshakeRTT":50,"endpoint":"162.159.192.1:2408","uptime":377000}
+11-30 14:13:15.172 D/HyperVpnService(21461): 📊 Tunnel stats - connected: true, txBytes: 5466880, rxBytes: 58829072, txPackets: 37691, rxPackets: 48035, lastHandshake: 0
+11-30 14:13:15.172 D/HyperXray-JNI(21461): getHandshakeRTT called
+11-30 14:13:15.172 D/HyperXray-JNI(21461): Go GetHandshakeRTT returned: 50 ms
+11-30 14:13:15.250 I/ProcessManager( 3500): getRenderThreadTidByPid, caller=3500
+11-30 14:13:15.264 I/ProcessManager( 3500): getRenderThreadTidByPid, caller=3500
+11-30 14:13:15.264 I/ProcessManager( 3500): getRenderThreadTidByPid, caller=3500
+11-30 14:13:15.267 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:15.482 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:15.638 I/SDM     ( 1838): DemuraTnCaptureIntfImpl::ProcessCapturePanelData: Screen capture status = 0
+11-30 14:13:15.640 V/AndroidMemoryStatsManager(15770): ⚠️ Go runtime stats are zero - XrayStatsManager available but stats not yet received
+11-30 14:13:15.640 V/AndroidMemoryStatsManager(15770): Memory stats updated - Total PSS: 309,13MB, Native: 87,33MB, Dalvik: 12,15MB, Go Alloc: 0B
+11-30 14:13:15.674 D/MainViewModel(15770): Service event received: LogUpdate(logData=[2025/11/30 14:13:15 [HyperVpnService] 📊 Tunnel stats JSON: {"connected":true,"txBytes":5466880,"rxBytes":58829072,"txPackets":37691,"rxPackets":48035,"lastHandshake":0,"handshakeRTT":50,"endpoint":"162.159.192.1:2408","uptime":377000}])
+11-30 14:13:15.674 D/MainViewModel(15770): Service event received: LogUpdate(logData=[2025/11/30 14:13:15 [HyperVpnService] 📊 Tunnel stats - connected: true, txBytes: 5466880, rxBytes: 58829072, txPackets: 37691, rxPackets: 48035, lastHandshake: 0])
+11-30 14:13:15.688 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:15.894 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:16.099 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:16.175 D/HyperXray-JNI(21461): getTunnelStats called
+11-30 14:13:16.175 D/HyperVpnService(21461): 📊 Tunnel stats JSON: {"connected":true,"txBytes":5466976,"rxBytes":58829156,"txPackets":37692,"rxPackets":48036,"lastHandshake":0,"handshakeRTT":50,"endpoint":"162.159.192.1:2408","uptime":378000}
+11-30 14:13:16.176 D/HyperVpnService(21461): 📊 Tunnel stats - connected: true, txBytes: 5466976, rxBytes: 58829156, txPackets: 37692, rxPackets: 48036, lastHandshake: 0
+11-30 14:13:16.176 D/HyperXray-JNI(21461): getHandshakeRTT called
+11-30 14:13:16.176 D/HyperXray-JNI(21461): Go GetHandshakeRTT returned: 50 ms
+11-30 14:13:16.301 I/ProcessManager( 3500): getRenderThreadTidByPid, caller=3500
+11-30 14:13:16.322 D/WM-Processor( 3614): Processor: processing WorkGenerationalId(workSpecId=47349d34-4378-4bed-bedd-04527edeeb8e, generation=0)
+11-30 14:13:16.323 D/WM-Processor( 3614): Processor 47349d34-4378-4bed-bedd-04527edeeb8e executed; reschedule = false
+11-30 14:13:16.337 I/ProcessManager( 3500): getRenderThreadTidByPid, caller=3500
+11-30 14:13:16.337 I/ProcessManager( 3500): getRenderThreadTidByPid, caller=3500
+11-30 14:13:16.362 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:16.569 I/SDM     ( 1838): SDMConcurrentWriteBack::ProcessCWBStatus: CWB queue is empty. Display: 0
+11-30 14:13:16.677 D/MainViewModel(15770): Service event received: LogUpdate(logData=[2025/11/30 14:13:16 [HyperVpnService] 📊 Tunnel stats JSON: {"connected":true,"txBytes":5466976,"rxBytes":58829156,"txPackets":37692,"rxPackets":48036,"lastHandshake":0,"handshakeRTT":50,"endpoint":"162.159.192.1:2408","uptime":378000}])
+11-30 14:13:16.677 D/MainViewModel(15770): Service event received: LogUpdate(logData=[2025/11/30 14:13:16 [HyperVpnService] 📊 Tunnel stats - connected: true, txBytes: 5466976, rxBytes: 58829156, txPackets: 37692, rxPackets: 48036, lastHandshake: 0])

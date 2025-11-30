@@ -234,6 +234,16 @@ fun HyperVpnControlCard(
                             )
                         }
                     }
+                    
+                    // Last Handshake
+                    if (stats.lastHandshake > 0) {
+                        StatItem(
+                            label = "Last Handshake",
+                            value = stats.lastHandshakeFormatted,
+                            color = successColor,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
             

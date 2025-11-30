@@ -11,14 +11,17 @@ android {
     defaultConfig {
         minSdk 29
         targetSdk 35
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
             // Release build type for baseline profile generation
+            minifyEnabled false
         }
         debug {
             // Debug build type for baseline profile generation
+            minifyEnabled false
         }
     }
 
@@ -30,6 +33,13 @@ android {
     kotlinOptions {
         jvmTarget = '17'
     }
+    
+    // Baseline profile generation configuration
+    baselineProfile {
+        // Save profiles in baselineprofile/src/main/baseline-prof.txt
+        // The app module will automatically pick up profiles from baselineProfile dependency
+        saveInSrc = true
+    }
 }
 
 dependencies {
@@ -39,6 +49,7 @@ dependencies {
     implementation 'androidx.benchmark:benchmark-macro-junit4:1.3.2'
     
     // App module dependency for profile generation
+    // This allows the baseline profile module to access app classes
     implementation project(':app')
 }
 

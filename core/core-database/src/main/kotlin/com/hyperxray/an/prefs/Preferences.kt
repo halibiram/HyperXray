@@ -652,6 +652,9 @@ class Preferences(context: Context) {
         const val STICKY_ROUTING_CACHE_SIZE: String = "StickyRoutingCacheSize"
         const val STICKY_ROUTING_TTL_MS: String = "StickyRoutingTtlMs"
         
+        // Xray log monitoring key
+        const val XRAY_LOG_MONITORING_ENABLED: String = "XrayLogMonitoringEnabled"
+        
         private const val TAG = "Preferences"
     }
     
@@ -684,6 +687,13 @@ class Preferences(context: Context) {
         }
         set(ttl) {
             setValueInProvider(STICKY_ROUTING_TTL_MS, ttl)
+        }
+    
+    // Xray log monitoring preference
+    var xrayLogMonitoringEnabled: Boolean
+        get() = getBooleanPref(XRAY_LOG_MONITORING_ENABLED, false)
+        set(enabled) {
+            setValueInProvider(XRAY_LOG_MONITORING_ENABLED, enabled)
         }
 }
 

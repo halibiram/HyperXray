@@ -9,6 +9,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.Binder
 import android.os.Build
@@ -30,6 +32,8 @@ import com.hyperxray.an.notification.TelegramNotificationManager
 import com.hyperxray.an.core.inference.OnnxRuntimeManager
 import com.hyperxray.an.core.network.vpn.HyperVpnStateManager
 import com.hyperxray.an.core.config.utils.ConfigInjector
+import com.hyperxray.an.service.managers.XrayLogHandler
+import com.hyperxray.an.core.monitor.XrayLogManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -38,13 +42,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.InetAddress
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -159,6 +165,8 @@ class HyperVpnService : VpnService() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var heartbeatJob: kotlinx.coroutines.Job? = null
     private var logFileManager: LogFileManager? = null
+    private var xrayLogHandler: XrayLogHandler? = null
+    private var xrayLogManager: XrayLogManager? = null
     private var telegramNotificationManager: TelegramNotificationManager? = null
     private var prefs: Preferences? = null
     
@@ -316,6 +324,20 @@ class HyperVpnService : VpnService() {
         prefs = Preferences(this)
         logFileManager = LogFileManager(this)
         
+        // Initialize XrayLogHandler for processing logs
+        try {
+            xrayLogHandler = XrayLogHandler(serviceScope, this)
+            xrayLogHandler?.initialize(logFileManager!!)
+            
+            // Initialize XrayLogManager to collect logs from native Go channel
+            xrayLogHandler?.let { handler ->
+                xrayLogManager = XrayLogManager(serviceScope, handler, prefs!!)
+            }
+            AiLogHelper.d(TAG, "XrayLogHandler and XrayLogManager initialized")
+        } catch (e: Exception) {
+            AiLogHelper.e(TAG, "Failed to initialize XrayLogHandler/XrayLogManager: ${e.message}", e)
+        }
+        
         // Initialize Telegram notification manager
         try {
             telegramNotificationManager = TelegramNotificationManager.getInstance(this)
@@ -467,6 +489,9 @@ class HyperVpnService : VpnService() {
         } catch (e: Exception) {
             Log.e(TAG, "Error cleaning up socket protector: ${e.message}", e)
         }
+        
+        // Stop Xray log monitoring
+        xrayLogManager?.stopMonitoring()
         
         // Cancel heartbeat job
         heartbeatJob?.cancel()
@@ -715,36 +740,117 @@ class HyperVpnService : VpnService() {
                 
                 // ===== STEP 4: Creating TUN Interface =====
                 broadcastState("connecting", 0.7f, "Creating TUN interface...")
+                Log.i(TAG, "========================================")
+                Log.i(TAG, "STEP 4: Creating TUN Interface")
+                Log.i(TAG, "========================================")
                 AiLogHelper.i(TAG, "🔧 TUN ESTABLISH: Building VPN interface configuration...")
+                
+                // Check VPN permission before attempting to create TUN
+                val prepareIntent = android.net.VpnService.prepare(this@HyperVpnService)
+                if (prepareIntent != null) {
+                    val errorMsg = "VPN permission not granted - user must grant VPN permission first"
+                    Log.e(TAG, "❌ $errorMsg")
+                    AiLogHelper.e(TAG, "❌ TUN ESTABLISH: $errorMsg")
+                    broadcastError(errorMsg, -1, "VPN permission not granted")
+                    return@launch
+                }
+                Log.d(TAG, "✅ VPN permission check passed")
+                
+                // Check if another VPN is active before attempting to create TUN
+                try {
+                    val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+                    val activeNetwork = connectivityManager.activeNetwork
+                    val caps = connectivityManager.getNetworkCapabilities(activeNetwork)
+                    val hasVpn = caps?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) == true
+                    
+                    if (hasVpn) {
+                        val errorMsg = "Another VPN is currently active. Please disconnect other VPN services first."
+                        Log.e(TAG, "❌ $errorMsg")
+                        AiLogHelper.e(TAG, "❌ TUN ESTABLISH: $errorMsg")
+                        broadcastError(errorMsg, -1, "Another VPN is active")
+                        return@launch
+                    }
+                    Log.d(TAG, "✅ No other VPN detected")
+                } catch (e: Exception) {
+                    Log.w(TAG, "⚠️ Could not check for active VPN: ${e.message}", e)
+                    AiLogHelper.w(TAG, "⚠️ TUN ESTABLISH: Could not check for active VPN: ${e.message}")
+                    // Continue anyway - let builder.establish() handle it
+                }
+                
                 val builder = Builder()
                 builder.setSession("HyperXray VPN")
+                // Use default blocking mode (setBlocking(false) can cause VPN connection issues on some Android versions)
                 builder.addAddress("10.0.0.2", 30)
                 builder.addRoute("0.0.0.0", 0)
                 // Force lower MTU for WireGuard over Xray (adds overhead)
                 // 1280 is conservative and prevents fragmentation issues
                 builder.setMtu(1280)
                 
+                // CRITICAL: Add DNS servers - without DNS, builder.establish() may hang
+                // Use fallback DNS servers if prefs DNS is not available
+                val dnsServers = mutableListOf<String>()
+                prefs?.dnsIpv4?.takeIf { it.isNotEmpty() }?.let { dnsServers.add(it) }
+                // Always add fallback DNS servers to prevent hanging
+                if (dnsServers.isEmpty()) {
+                    dnsServers.add("8.8.8.8") // Google DNS
+                    dnsServers.add("1.1.1.1") // Cloudflare DNS
+                    Log.d(TAG, "⚠️ No custom DNS configured, using fallback DNS servers")
+                }
+                dnsServers.forEach { dns ->
+                    try {
+                        builder.addDnsServer(dns)
+                        Log.d(TAG, "✅ DNS server added: $dns")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ Failed to add DNS server $dns: ${e.message}", e)
+                    }
+                }
+                
+                Log.d(TAG, "VPN Builder configured:")
+                Log.d(TAG, "  - Session: HyperXray VPN")
+                Log.d(TAG, "  - Blocking: true (default blocking mode)")
+                Log.d(TAG, "  - Address: 10.0.0.2/30")
+                Log.d(TAG, "  - Route: 0.0.0.0/0")
+                Log.d(TAG, "  - MTU: 1280")
+                Log.d(TAG, "  - DNS servers: ${dnsServers.joinToString(", ")}")
+                AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: VPN Builder configured (blocking mode, DNS: ${dnsServers.size} servers)")
+                
                 // Establish VPN interface with timeout protection
+                Log.i(TAG, "Calling builder.establish() with 10s timeout protection...")
                 AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Calling builder.establish() with 10s timeout protection...")
                 val establishStartTime = System.currentTimeMillis()
-                val establishedTunFd = try {
-                    val future = CompletableFuture.supplyAsync({
-                        builder.establish()
-                    }, java.util.concurrent.Executors.newSingleThreadExecutor())
-                    
-                    // Wait with timeout
-                    future.get(10, TimeUnit.SECONDS)
-                } catch (e: TimeoutException) {
+                
+                // Log progress every 2 seconds while waiting (reduced timeout to 10s)
+                val progressLogger = serviceScope.launch {
+                    var elapsed = 0L
+                    while (elapsed < 10000) {
+                        delay(2000)
+                        elapsed = System.currentTimeMillis() - establishStartTime
+                        if (elapsed < 10000) {
+                            Log.w(TAG, "⏳ TUN ESTABLISH: Still waiting... (${elapsed}ms elapsed)")
+                            AiLogHelper.w(TAG, "⏳ TUN ESTABLISH: Still waiting... (${elapsed}ms elapsed)")
+                        }
+                    }
+                }
+                
+                // Use withTimeoutOrNull instead of CompletableFuture.get() to avoid blocking
+                val establishedTunFd = withTimeoutOrNull(10000) {
+                    withContext(Dispatchers.IO) {
+                        try {
+                            builder.establish()
+                        } catch (e: Exception) {
+                            Log.e(TAG, "❌ TUN ESTABLISH: Exception in builder.establish(): ${e.message}", e)
+                            AiLogHelper.e(TAG, "❌ TUN ESTABLISH: Exception in builder.establish(): ${e.message}")
+                            null
+                        }
+                    }
+                } ?: run {
+                    progressLogger.cancel()
                     val duration = System.currentTimeMillis() - establishStartTime
                     AiLogHelper.e(TAG, "❌ TUN ESTABLISH TIMEOUT: builder.establish() took longer than 10 seconds (${duration}ms) - possible system-level hang")
-                    Log.e(TAG, "❌ TUN ESTABLISH TIMEOUT: builder.establish() took longer than 10 seconds!", e)
-                    null
-                } catch (e: Exception) {
-                    val duration = System.currentTimeMillis() - establishStartTime
-                    AiLogHelper.e(TAG, "❌ TUN ESTABLISH EXCEPTION: ${e.message} (${duration}ms)")
-                    Log.e(TAG, "❌ TUN ESTABLISH EXCEPTION: ${e.message}", e)
+                    Log.e(TAG, "❌ TUN ESTABLISH TIMEOUT: builder.establish() took longer than 10 seconds!")
                     null
                 }
+                progressLogger.cancel()
                 
                 val establishDuration = System.currentTimeMillis() - establishStartTime
                 
@@ -935,37 +1041,48 @@ class HyperVpnService : VpnService() {
                 val effectivePort = if (apiPort > 0 && apiPort <= 65535) apiPort else 65276
                 AiLogHelper.d(TAG, "✅ VPN START: gRPC StatsService injected (port: $effectivePort) - libhyperxray.so içindeki Xray-core kullanılacak")
                 
-                val result = try {
-                    startHyperTunnel(
-                        tunFd = fdInt,
-                        wgConfigJSON = wgConfig,
-                        xrayConfigJSON = xrayConfigWithApi,
-                        warpEndpoint = warpEndpoint,
-                        warpPrivateKey = warpPrivateKey,
-                        nativeLibDir = nativeLibDir,
-                        filesDir = filesDirPath
-                    )
-                } catch (e: UnsatisfiedLinkError) {
-                    val errorMsg = "startHyperTunnel() failed with UnsatisfiedLinkError: ${e.message}"
-                    AiLogHelper.e(TAG, errorMsg, e)
-                    broadcastError("JNI call failed: ${e.message}", -14, e.stackTraceToString())
-                    // File descriptor was detached, native code should handle cleanup
-                    // If native code didn't start, the fd will be closed by the system when process exits
-                    // Note: tunFd is already null after detachFd()
-                    return@launch
-                } catch (e: Exception) {
-                    val errorMsg = "startHyperTunnel() threw exception: ${e.message}"
-                    AiLogHelper.e(TAG, errorMsg, e)
-                    broadcastError("Unexpected error: ${e.message}", -14, e.stackTraceToString())
-                    // File descriptor was detached, native code should handle cleanup
-                    // If native code didn't start, the fd will be closed by the system when process exits
-                    // Note: tunFd is already null after detachFd()
+                // Call native method in IO dispatcher context (already in coroutine, but ensure IO dispatcher)
+                val result = withContext(Dispatchers.IO) {
+                    try {
+                        startHyperTunnel(
+                            tunFd = fdInt,
+                            wgConfigJSON = wgConfig,
+                            xrayConfigJSON = xrayConfigWithApi,
+                            warpEndpoint = warpEndpoint,
+                            warpPrivateKey = warpPrivateKey,
+                            nativeLibDir = nativeLibDir,
+                            filesDir = filesDirPath
+                        )
+                    } catch (e: UnsatisfiedLinkError) {
+                        val errorMsg = "startHyperTunnel() failed with UnsatisfiedLinkError: ${e.message}"
+                        AiLogHelper.e(TAG, errorMsg, e)
+                        broadcastError("JNI call failed: ${e.message}", -14, e.stackTraceToString())
+                        // File descriptor was detached, native code should handle cleanup
+                        // If native code didn't start, the fd will be closed by the system when process exits
+                        // Note: tunFd is already null after detachFd()
+                        return@withContext -1
+                    } catch (e: Exception) {
+                        val errorMsg = "startHyperTunnel() threw exception: ${e.message}"
+                        AiLogHelper.e(TAG, errorMsg, e)
+                        broadcastError("Unexpected error: ${e.message}", -14, e.stackTraceToString())
+                        // File descriptor was detached, native code should handle cleanup
+                        // If native code didn't start, the fd will be closed by the system when process exits
+                        // Note: tunFd is already null after detachFd()
+                        return@withContext -1
+                    }
+                }
+                
+                if (result == -1) {
                     return@launch
                 }
                 
                 if (result == 0) {
                     isRunning = true
                     startTime = System.currentTimeMillis()
+                    
+                    // Start Xray log monitoring from native Go channel
+                    xrayLogManager?.startMonitoring()
+                    AiLogHelper.d(TAG, "XrayLogManager monitoring started")
                     
                     // Determine server info
                     val serverName = if (isWarpUsed) "Cloudflare WARP" else "Custom Server"
@@ -1088,31 +1205,36 @@ class HyperVpnService : VpnService() {
                 isRunning = false
                 startTime = 0
                 
+                // Stop Xray log monitoring
+                xrayLogManager?.stopMonitoring()
+                
                 // Broadcast disconnected state IMMEDIATELY (before stopping tunnel)
                 // This ensures UI updates instantly, tunnel stops in background
                 broadcastState("disconnected")
                 
-                // Stop native tunnel IMMEDIATELY (synchronous but fast - should be < 100ms)
-                // This ensures all goroutines and processes are killed immediately
-                try {
-                    val result = stopHyperTunnel()
-                    if (result == 0) {
-                        AiLogHelper.i(TAG, "✅ VPN tunnel stopped successfully")
-                    } else {
-                        AiLogHelper.w(TAG, "Warning: stopHyperTunnel returned $result")
-                        // Native code failed to stop properly, close manually
-                        tunFdToClose?.let { fd ->
-                            try {
-                                fd.close()
-                            } catch (e: Exception) {
-                                AiLogHelper.e(TAG, "Error closing tunFd after failed stop: ${e.message}")
+                // Stop native tunnel in background (non-blocking)
+                // Use withContext to ensure it runs on IO dispatcher
+                withContext(Dispatchers.IO) {
+                    try {
+                        val result = stopHyperTunnel()
+                        if (result == 0) {
+                            AiLogHelper.i(TAG, "✅ VPN tunnel stopped successfully")
+                        } else {
+                            AiLogHelper.w(TAG, "Warning: stopHyperTunnel returned $result")
+                            // Native code failed to stop properly, close manually
+                            tunFdToClose?.let { fd ->
+                                try {
+                                    fd.close()
+                                } catch (e: Exception) {
+                                    AiLogHelper.e(TAG, "Error closing tunFd after failed stop: ${e.message}")
+                                }
                             }
                         }
+                    } catch (e: UnsatisfiedLinkError) {
+                        AiLogHelper.e(TAG, "stopHyperTunnel() failed: ${e.message}", e)
+                    } catch (e: Exception) {
+                        AiLogHelper.e(TAG, "stopHyperTunnel() threw exception: ${e.message}", e)
                     }
-                } catch (e: UnsatisfiedLinkError) {
-                    AiLogHelper.e(TAG, "stopHyperTunnel() failed: ${e.message}", e)
-                } catch (e: Exception) {
-                    AiLogHelper.e(TAG, "stopHyperTunnel() threw exception: ${e.message}", e)
                 }
                 
                 // Start DNS shutdown asynchronously (fire-and-forget, don't block)
@@ -1202,8 +1324,9 @@ class HyperVpnService : VpnService() {
                     val rxPackets = stats.optLong("rxPackets", 0)
                     val lastHandshake = stats.optLong("lastHandshake", 0)
                     val connected = stats.optBoolean("connected", false)
+                    val lastHandshakeFormatted = formatHandshakeTime(lastHandshake)
                     
-                    AiLogHelper.d(TAG, "📊 Tunnel stats - connected: $connected, txBytes: $txBytes, rxBytes: $rxBytes, txPackets: $txPackets, rxPackets: $rxPackets, lastHandshake: $lastHandshake")
+                    AiLogHelper.d(TAG, "📊 Tunnel stats - connected: $connected, txBytes: $txBytes, rxBytes: $rxBytes, txPackets: $txPackets, rxPackets: $rxPackets, lastHandshake: $lastHandshake ($lastHandshakeFormatted)")
                     
                     // Calculate additional metrics
                     val uptime = if (startTime > 0) {
@@ -1226,6 +1349,8 @@ class HyperVpnService : VpnService() {
                         put("txPackets", txPackets)
                         put("rxPackets", rxPackets)
                         put("lastHandshake", lastHandshake)
+                        // Format lastHandshake as readable time string
+                        put("lastHandshakeFormatted", formatHandshakeTime(lastHandshake))
                         put("connected", connected)
                         put("uptime", uptime)
                         put("latency", calculateLatency())
@@ -1327,6 +1452,28 @@ class HyperVpnService : VpnService() {
         if (txPackets == 0L) return 0.0
         val loss = ((txPackets - rxPackets).toDouble() / txPackets) * 100.0
         return loss.coerceIn(0.0, 100.0)
+    }
+    
+    /**
+     * Format Unix timestamp (seconds) to readable time string
+     * @param timestamp Unix timestamp in seconds
+     * @return Formatted time string (e.g., "November 30, 2025, 20:24:22") or "Never" if timestamp is 0
+     */
+    private fun formatHandshakeTime(timestamp: Long): String {
+        if (timestamp <= 0) {
+            return "Never"
+        }
+        
+        try {
+            // Convert Unix timestamp (seconds) to milliseconds
+            val date = Date(timestamp * 1000)
+            // Format: "November 30, 2025, 20:24:22" (English locale)
+            val formatter = SimpleDateFormat("MMMM dd, yyyy, HH:mm:ss", Locale.ENGLISH)
+            return formatter.format(date)
+        } catch (e: Exception) {
+            AiLogHelper.w(TAG, "Error formatting handshake time: ${e.message}")
+            return "Invalid time"
+        }
     }
     
     /**
@@ -2111,12 +2258,24 @@ class HyperVpnService : VpnService() {
      * Create notification
      */
     private fun createNotification(text: String): Notification {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        // Use consistent request code to reuse same PendingIntent
+        // FIXED: With singleTop launch mode, use CLEAR_TOP + SINGLE_TOP flags
+        // - FLAG_ACTIVITY_CLEAR_TOP: Clears activities above target in task stack
+        // - FLAG_ACTIVITY_SINGLE_TOP: Ensures onNewIntent() is called if Activity is at top
+        // - System automatically adds FLAG_ACTIVITY_NEW_TASK for notification intents
+        // This combination ensures existing Activity instance is reused via onNewIntent()
+        val appContext = applicationContext
+        val intent = Intent(appContext, MainActivity::class.java).apply {
+            action = Intent.ACTION_MAIN
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            // singleTop + CLEAR_TOP + SINGLE_TOP = reuse existing instance, call onNewIntent()
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         
         val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
+            appContext, 
+            0, // Consistent request code
+            intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         

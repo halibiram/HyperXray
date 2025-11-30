@@ -198,7 +198,10 @@ class XrayLogHandler(
      */
     fun processLogLine(line: String) {
         logFileManager?.appendLog(line)
-        logBroadcastChannel.trySend(line)
+        val sent = logBroadcastChannel.trySend(line)
+        if (!sent.isSuccess) {
+            Log.w(TAG, "Failed to send log to broadcast channel (channel may be full)")
+        }
 
         // Check if Xray has started
         if (line.contains("started", ignoreCase = true) &&

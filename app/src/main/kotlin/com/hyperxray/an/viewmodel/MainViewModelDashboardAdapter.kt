@@ -4,6 +4,7 @@ import com.hyperxray.an.feature.dashboard.DashboardViewModel
 import com.hyperxray.an.feature.dashboard.CoreStatsState as FeatureCoreStatsState
 import com.hyperxray.an.feature.dashboard.AggregatedTelemetry as FeatureAggregatedTelemetry
 import com.hyperxray.an.feature.dashboard.DnsCacheStats as FeatureDnsCacheStats
+import com.hyperxray.an.feature.dashboard.AndroidMemoryStats as FeatureAndroidMemoryStats
 import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.telemetry.AggregatedTelemetry
 import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
@@ -56,6 +57,37 @@ fun AggregatedTelemetry.toFeatureState(): FeatureAggregatedTelemetry {
 }
 
 /**
+ * Extension function to convert app module AndroidMemoryStats to feature module AndroidMemoryStats
+ */
+fun com.hyperxray.an.core.monitor.AndroidMemoryStats.toFeatureState(): FeatureAndroidMemoryStats {
+    return FeatureAndroidMemoryStats(
+        totalPss = totalPss,
+        nativeHeap = nativeHeap,
+        dalvikHeap = dalvikHeap,
+        otherPss = otherPss,
+        usedMemory = usedMemory,
+        maxMemory = maxMemory,
+        freeMemory = freeMemory,
+        systemTotalMem = systemTotalMem,
+        systemAvailMem = systemAvailMem,
+        systemUsedMem = systemUsedMem,
+        systemThreshold = systemThreshold,
+        systemLowMemory = systemLowMemory,
+        goAlloc = goAlloc,
+        goTotalAlloc = goTotalAlloc,
+        goSys = goSys,
+        goMallocs = goMallocs,
+        goFrees = goFrees,
+        goLiveObjects = goLiveObjects,
+        goPauseTotalNs = goPauseTotalNs,
+        processMemoryUsagePercent = processMemoryUsagePercent,
+        runtimeMemoryUsagePercent = runtimeMemoryUsagePercent,
+        systemMemoryUsagePercent = systemMemoryUsagePercent,
+        updateTimestamp = updateTimestamp
+    )
+}
+
+/**
  * Extension function to convert DnsCacheManager metrics to feature module DnsCacheStats
  * Maps all fields from the comprehensive DnsCacheMetrics to FeatureDnsCacheStats
  */
@@ -92,14 +124,17 @@ private fun com.hyperxray.an.core.network.dns.DnsCacheManager.DnsCacheMetrics.to
  */
 class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : DashboardViewModel {
     // Cached transformed StateFlows - created once and reused
-    // Using SharingStarted.WhileSubscribed(5000) to keep subscription alive during brief configuration changes
-    // This prevents unnecessary recreation of upstream flows and reduces memory overhead
+    // CRITICAL FIX: Using SharingStarted.Lazily instead of WhileSubscribed(5000) to ensure
+    // StateFlow restarts after process death. WhileSubscribed(5000) may not restart properly
+    // when ViewModel is recreated after process death, causing StateFlow to stop updating.
+    // Lazily starts when first subscriber arrives and stops when last subscriber leaves,
+    // but can be restarted after process death when ViewModel is recreated.
     override val coreStatsState: StateFlow<FeatureCoreStatsState> =
         mainViewModel.coreStatsState
             .map { it.toFeatureState() }
             .stateIn(
                 scope = mainViewModel.viewModelScope,
-                started = SharingStarted.WhileSubscribed(5000), // Keep alive for 5s after last subscriber
+                started = SharingStarted.Lazily, // Restart after process death
                 initialValue = mainViewModel.coreStatsState.value.toFeatureState()
             )
     
@@ -108,7 +143,7 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
             .map { it?.toFeatureState() }
             .stateIn(
                 scope = mainViewModel.viewModelScope,
-                started = SharingStarted.WhileSubscribed(5000), // Keep alive for 5s after last subscriber
+                started = SharingStarted.Lazily, // Restart after process death
                 initialValue = mainViewModel.telemetryState.value?.toFeatureState()
             )
     
@@ -257,6 +292,17 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
     // WARP Account state flow
     override val warpAccountInfo: StateFlow<com.hyperxray.an.feature.dashboard.WarpAccountInfo>? =
         mainViewModel.warpAccountInfo
+    
+    // Android Memory Stats state flow
+    // CRITICAL FIX: Using SharingStarted.Lazily to ensure restart after process death
+    override val androidMemoryStats: StateFlow<FeatureAndroidMemoryStats>? =
+        mainViewModel.androidMemoryStats
+            .map { it.toFeatureState() }
+            .stateIn(
+                scope = mainViewModel.viewModelScope,
+                started = SharingStarted.Lazily, // Restart after process death
+                initialValue = mainViewModel.androidMemoryStats.value.toFeatureState()
+            )
 }
 
 /**

@@ -750,9 +750,14 @@ android {
     
     // Baseline Profiles configuration
     // Profiles are automatically included in release builds and distributed via Play Store
+    // This optimizes app startup and critical user journeys by pre-compiling hot paths
     baselineProfile {
+        // Disable automatic generation during build (use manual generation for better control)
         automaticGenerationDuringBuild = false
+        // Save generated profiles in src/main/baseline-prof.txt
         saveInSrc = true
+        // Use partial compilation mode for better performance
+        // Full mode can be enabled for maximum optimization but increases build time
     }
 }
 
@@ -802,7 +807,8 @@ dependencies {
     implementation 'androidx.profileinstaller:profileinstaller:1.4.0'
     
     // Baseline Profile Generator (for generating profiles)
-    baselineProfile project(':baselineprofile')
+    // Temporarily disabled for debug builds
+    // baselineProfile project(':baselineprofile')
 
     // HyperXray-AI Optimizer dependencies
     implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3'

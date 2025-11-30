@@ -102,6 +102,9 @@ class MainViewModel(
     
     // Xray stats manager - created in init block since it needs viewModelScope
     private lateinit var xrayStatsManager: XrayStatsManager
+    
+    // Android memory stats manager - created in init block since it needs viewModelScope
+    private lateinit var androidMemoryStatsManager: com.hyperxray.an.core.monitor.AndroidMemoryStatsManager
 
     var reloadView: (() -> Unit)? = null
 
@@ -179,6 +182,7 @@ class MainViewModel(
 
     // Theme state management
     private val _systemNightMode = MutableStateFlow<Int>(android.content.res.Configuration.UI_MODE_NIGHT_NO)
+    // CRITICAL FIX: Using SharingStarted.Lazily to ensure restart after process death
     val isDarkTheme: StateFlow<Boolean> = kotlinx.coroutines.flow.combine(
         settingsState,
         _systemNightMode
@@ -189,7 +193,7 @@ class MainViewModel(
         )
     }.stateIn(
         scope = viewModelScope,
-        started = kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000),
+        started = kotlinx.coroutines.flow.SharingStarted.Lazily, // Restart after process death
         initialValue = false
     )
 
@@ -216,6 +220,14 @@ class MainViewModel(
         // Initialize coreStatsState after XrayStatsManager is created
         coreStatsState = xrayStatsManager.stats
         
+        // Initialize AndroidMemoryStatsManager - needs viewModelScope which is only available here
+        // Pass XrayStatsManager reference to enable Go runtime memory stats collection
+        androidMemoryStatsManager = com.hyperxray.an.core.monitor.AndroidMemoryStatsManager(
+            context = application,
+            scope = viewModelScope,
+            xrayStatsManager = xrayStatsManager
+        )
+        
         // Initialize VPN Connection Use Case after StateFlows and XrayStatsManager are declared
         vpnConnectionUseCase = VpnConnectionUseCase(
             context = application,
@@ -239,6 +251,7 @@ class MainViewModel(
         
         // Map HyperVpnStateManager state to connectionState for dashboard
         // This ensures dashboard reflects the actual VPN service state
+        // CRITICAL FIX: Using SharingStarted.Lazily to ensure restart after process death
         connectionState = hyperVpnState.map { vpnState ->
             when (vpnState) {
                 is HyperVpnStateManager.VpnState.Connected -> com.hyperxray.an.feature.dashboard.ConnectionState.Connected
@@ -258,7 +271,7 @@ class MainViewModel(
             }
         }.stateIn(
             scope = viewModelScope,
-            started = kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000),
+            started = kotlinx.coroutines.flow.SharingStarted.Lazily, // Restart after process death
             initialValue = com.hyperxray.an.feature.dashboard.ConnectionState.Disconnected
         )
         
@@ -519,6 +532,7 @@ class MainViewModel(
      */
     fun startMonitoring() {
         xrayStatsManager.startMonitoring()
+        androidMemoryStatsManager.startMonitoring()
     }
 
     /**
@@ -527,7 +541,12 @@ class MainViewModel(
      */
     fun stopMonitoring() {
         xrayStatsManager.stopMonitoring()
+        androidMemoryStatsManager.stopMonitoring()
     }
+    
+    // Android memory stats state - delegated to AndroidMemoryStatsManager
+    val androidMemoryStats: StateFlow<com.hyperxray.an.core.monitor.AndroidMemoryStats> = 
+        androidMemoryStatsManager.memoryStats
 
     /**
      * Updates service enabled state in stats manager.

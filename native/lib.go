@@ -77,6 +77,10 @@ var (
 	
 	// REMOVED: Multi-instance manager
 	// multiManager and multiManagerLock removed as part of architectural cleanup
+	
+	// Counter for GetXrayLogs diagnostic logging
+	getXrayLogsCallCount int
+	getXrayLogsCallCountMu sync.Mutex
 )
 
 // Error codes
@@ -145,6 +149,23 @@ func logDebug(format string, args ...interface{}) {
 	
 	// Also log to AiLogHelper (optional - will work if symbol exists)
 	levelC := C.CString("DEBUG")
+	defer C.free(unsafe.Pointer(levelC))
+	C.safe_callAiLogHelper(tag, levelC, msgC)
+}
+
+// logWarn logs warning level messages to Android logcat and AiLogHelper
+func logWarn(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	tag := C.CString(logTag)
+	defer C.free(unsafe.Pointer(tag))
+	msgC := C.CString(msg)
+	defer C.free(unsafe.Pointer(msgC))
+	
+	// Log to Android logcat
+	C.android_log_print(C.ANDROID_LOG_WARN, tag, msgC)
+	
+	// Also log to AiLogHelper (optional - will work if symbol exists)
+	levelC := C.CString("WARN")
 	defer C.free(unsafe.Pointer(levelC))
 	C.safe_callAiLogHelper(tag, levelC, msgC)
 }
@@ -532,17 +553,40 @@ func IsXrayGrpcAvailable() C.bool {
 	tunnelLock.Lock()
 	defer tunnelLock.Unlock()
 
+	// Detailed logging to diagnose which check fails
 	if tunnel == nil {
+		logDebug("[IsXrayGrpcAvailable] ❌ tunnel is nil - returning false")
 		return C.bool(false)
 	}
+	logDebug("[IsXrayGrpcAvailable] ✅ tunnel exists, checking xrayInstance...")
 
 	xrayInstance := tunnel.GetXrayInstance()
 	if xrayInstance == nil {
+		logError("[IsXrayGrpcAvailable] ❌ xrayInstance is nil - XrayWrapper was not created or was destroyed")
+		logError("[IsXrayGrpcAvailable] This usually means Xray-core failed to start or was stopped")
+		return C.bool(false)
+	}
+	logDebug("[IsXrayGrpcAvailable] ✅ xrayInstance exists, checking grpcClient...")
+
+	// Check if Xray instance is running
+	if !xrayInstance.IsRunning() {
+		logError("[IsXrayGrpcAvailable] ❌ xrayInstance is not running - Xray-core may have crashed or stopped")
+		return C.bool(false)
+	}
+	logDebug("[IsXrayGrpcAvailable] ✅ xrayInstance is running, checking grpcClient...")
+
+	grpcClient := xrayInstance.GetGrpcClient()
+	if grpcClient == nil {
+		logError("[IsXrayGrpcAvailable] ❌ grpcClient is nil - gRPC client was not created or failed to initialize")
+		logError("[IsXrayGrpcAvailable] Possible causes:")
+		logError("[IsXrayGrpcAvailable]   1. API port not configured in Xray config")
+		logError("[IsXrayGrpcAvailable]   2. gRPC client creation failed during Xray startup")
+		logError("[IsXrayGrpcAvailable]   3. gRPC service not ready yet (timing issue)")
 		return C.bool(false)
 	}
 
-	grpcClient := xrayInstance.GetGrpcClient()
-	return C.bool(grpcClient != nil)
+	logInfo("[IsXrayGrpcAvailable] ✅ All checks passed - tunnel, xrayInstance, and grpcClient all exist - returning true")
+	return C.bool(true)
 }
 
 //export GetXraySystemStats
@@ -567,14 +611,24 @@ func GetXraySystemStats() *C.char {
 
 	grpcClient := xrayInstance.GetGrpcClient()
 	if grpcClient == nil {
+		logError("GetXraySystemStats: gRPC client is nil")
 		return C.CString(`{"error":"gRPC client not available"}`)
 	}
 
+	logDebug("GetXraySystemStats: Calling grpcClient.GetSystemStats()...")
 	stats, err := grpcClient.GetSystemStats()
 	if err != nil {
-		logError("Failed to get system stats: %v", err)
+		logError("GetXraySystemStats: Failed to get system stats: %v", err)
+		// Return detailed error for debugging
 		return C.CString(fmt.Sprintf(`{"error":"failed to get stats: %v"}`, err))
 	}
+
+	if stats == nil {
+		logError("GetXraySystemStats: GetSystemStats returned nil response")
+		return C.CString(`{"error":"stats response is nil"}`)
+	}
+
+	logDebug("GetXraySystemStats: Successfully retrieved stats: uptime=%d, goroutines=%d", stats.Uptime, stats.NumGoroutine)
 
 	// Convert to JSON
 	result := map[string]interface{}{
@@ -621,14 +675,19 @@ func GetXrayTrafficStats() *C.char {
 
 	grpcClient := xrayInstance.GetGrpcClient()
 	if grpcClient == nil {
+		logError("GetXrayTrafficStats: gRPC client is nil")
 		return C.CString(`{"error":"gRPC client not available"}`)
 	}
 
+	logDebug("GetXrayTrafficStats: Calling grpcClient.QueryTrafficStats()...")
 	uplink, downlink, err := grpcClient.QueryTrafficStats()
 	if err != nil {
-		logError("Failed to get traffic stats: %v", err)
+		logError("GetXrayTrafficStats: Failed to get traffic stats: %v", err)
+		// Return detailed error for debugging
 		return C.CString(fmt.Sprintf(`{"error":"failed to get traffic stats: %v"}`, err))
 	}
+
+	logDebug("GetXrayTrafficStats: Successfully retrieved traffic stats: uplink=%d, downlink=%d", uplink, downlink)
 
 	// Convert to JSON
 	result := map[string]interface{}{
@@ -935,6 +994,119 @@ func DNSResolve(hostname *C.char) *C.char {
 	}
 
 	jsonBytes, _ := json.Marshal(ipStrings)
+	return C.CString(string(jsonBytes))
+}
+
+//export GetXrayLogs
+func GetXrayLogs(maxCount C.int) *C.char {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in GetXrayLogs: %v", r)
+		}
+	}()
+
+	tunnelLock.Lock()
+	defer tunnelLock.Unlock()
+
+	if tunnel == nil {
+		// Log periodically to verify polling is working
+		getXrayLogsCallCountMu.Lock()
+		getXrayLogsCallCount++
+		callCount := getXrayLogsCallCount
+		getXrayLogsCallCountMu.Unlock()
+		
+		if callCount%20 == 0 { // Log every 20th call
+			logDebug("[GetXrayLogs] No tunnel running (call #%d) - waiting for tunnel to start", callCount)
+		}
+		return C.CString(`{"logs":[],"error":"no tunnel running"}`)
+	}
+
+	// Verify Xray instance exists
+	xrayInstance := tunnel.GetXrayInstance()
+	if xrayInstance == nil {
+		logError("[GetXrayLogs] ❌ Xray instance is nil - Xray-core may not be running")
+		return C.CString(`{"logs":[],"error":"xray instance not available"}`)
+	}
+
+	// Verify Xray instance is running
+	if !xrayInstance.IsRunning() {
+		logError("[GetXrayLogs] ❌ Xray instance is not running - Xray-core may have crashed")
+		return C.CString(`{"logs":[],"error":"xray instance not running"}`)
+	}
+
+	// Collect logs from channel (non-blocking, up to maxCount)
+	logs := make([]string, 0, int(maxCount))
+	count := 0
+	max := int(maxCount)
+	if max <= 0 {
+		max = 100 // Default to 100 logs
+	}
+	if max > 1000 {
+		max = 1000 // Cap at 1000 logs
+	}
+
+	bridge.XrayLogChannelMu.Lock()
+	channelClosed := bridge.XrayLogChannelClosed
+	channelLen := len(bridge.XrayLogChannel)
+	channelCap := cap(bridge.XrayLogChannel)
+	bridge.XrayLogChannelMu.Unlock()
+
+	if channelClosed {
+		logError("[GetXrayLogs] ❌ Log channel is closed - logs will not be available")
+		logError("[GetXrayLogs] This usually means Xray-core was stopped or crashed")
+		return C.CString(`{"logs":[],"error":"log channel closed"}`)
+	}
+
+	// Log channel status for diagnostics
+	if channelLen > 0 {
+		logDebug("[GetXrayLogs] Channel has %d logs available (capacity: %d), requesting up to %d", channelLen, channelCap, max)
+	} else {
+		// Log periodically when channel is empty to verify it's being polled
+		// Use a simple counter to avoid too much logging
+		getXrayLogsCallCountMu.Lock()
+		getXrayLogsCallCount++
+		callCount := getXrayLogsCallCount
+		getXrayLogsCallCountMu.Unlock()
+		
+		if callCount%20 == 0 { // Log every 20th call (roughly every 10 seconds at 500ms polling)
+			logWarn("[GetXrayLogs] ⚠️ Channel is empty (call #%d) - XrayLogWriter may not be receiving logs", callCount)
+			logWarn("[GetXrayLogs] Possible causes:")
+			logWarn("[GetXrayLogs]   1. XrayLogWriter not registered or not receiving log messages")
+			logWarn("[GetXrayLogs]   2. Xray-core is not generating logs (check log level)")
+			logWarn("[GetXrayLogs]   3. Log channel buffer is full and logs are being dropped")
+		}
+	}
+
+	// Collect available logs (non-blocking)
+	for count < max {
+		select {
+		case logLine := <-bridge.XrayLogChannel:
+			logs = append(logs, logLine)
+			count++
+		default:
+			// No more logs available
+			goto done
+		}
+	}
+
+done:
+	// Return logs as JSON array
+	result := map[string]interface{}{
+		"logs": logs,
+		"count": len(logs),
+	}
+
+	// Log when logs are returned (first few times to verify)
+	if len(logs) > 0 {
+		logDebug("[GetXrayLogs] ✅ Returning %d logs to Android", len(logs))
+	}
+
+	jsonBytes, err := json.Marshal(result)
+	if err != nil {
+		logError("Failed to marshal logs: %v", err)
+		return C.CString(`{"logs":[],"error":"failed to marshal logs"}`)
+	}
+
 	return C.CString(string(jsonBytes))
 }
 
