@@ -81,6 +81,9 @@ class HyperXrayApplication : Application() {
             // Continue without AI logging
         }
         
+        // Set singleton instance after super.onCreate() and before any initialization
+        instance = this
+        
         Log.d(TAG, "HyperXrayApplication onCreate - initializing components")
         AiLogHelper.d(TAG, "HyperXrayApplication onCreate - initializing components")
         
@@ -166,7 +169,18 @@ class HyperXrayApplication : Application() {
         }
     }
     
-    init {
-        instance = this
+    override fun onTerminate() {
+        super.onTerminate()
+        
+        // Cleanup AppInitializer resources (cancel coroutine scope, release AI models)
+        try {
+            appInitializer?.cleanup()
+            appInitializer = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error cleaning up AppInitializer: ${e.message}", e)
+        }
+        
+        instance = null
+        Log.d(TAG, "HyperXrayApplication terminated")
     }
 }

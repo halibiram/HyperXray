@@ -528,18 +528,34 @@ func (x *XrayWrapper) Start() error {
 			// This allows Xray startup to continue immediately without blocking on gRPC verification
 			logInfo("[Xray] Starting gRPC connection verification in background (fully non-blocking)...")
 			go func() {
-				// Wait a bit for gRPC service to be fully ready
-				time.Sleep(200 * time.Millisecond)
+				// Wait longer for gRPC service to be fully ready
+				// Xray API server needs time to start listening
+				time.Sleep(1 * time.Second)
 				
-				stats, err := grpcClient.GetSystemStats()
-				if err != nil {
-					logWarn("[Xray] ⚠️ gRPC connection verification failed: %v (will retry on first use)", err)
-					logWarn("[Xray] ⚠️ This is normal if Xray gRPC service is still starting up")
-					logWarn("[Xray] ⚠️ Client will retry connection on first actual use")
-				} else {
-					logInfo("[Xray] ✅ gRPC connection verified - uptime=%ds, goroutines=%d, numGC=%d", 
-						stats.Uptime, stats.NumGoroutine, stats.NumGC)
-					logInfo("[Xray] ✅ gRPC client is fully operational and ready for stats queries")
+				// Retry verification with exponential backoff
+				maxRetries := 5
+				retryDelay := 500 * time.Millisecond
+				
+				for attempt := 1; attempt <= maxRetries; attempt++ {
+					stats, err := grpcClient.GetSystemStats()
+					if err == nil {
+						logInfo("[Xray] ✅ gRPC connection verified (attempt %d/%d) - uptime=%ds, goroutines=%d, numGC=%d", 
+							attempt, maxRetries, stats.Uptime, stats.NumGoroutine, stats.NumGC)
+						logInfo("[Xray] ✅ gRPC client is fully operational and ready for stats queries")
+						return
+					}
+					
+					if attempt < maxRetries {
+						logDebug("[Xray] ⚠️ gRPC connection verification failed (attempt %d/%d): %v (retrying in %v...)", 
+							attempt, maxRetries, err, retryDelay)
+						time.Sleep(retryDelay)
+						retryDelay *= 2 // Exponential backoff
+					} else {
+						logWarn("[Xray] ⚠️ gRPC connection verification failed after %d attempts: %v (will retry on first use)", 
+							maxRetries, err)
+						logWarn("[Xray] ⚠️ This is normal if Xray gRPC service is still starting up")
+						logWarn("[Xray] ⚠️ Client will retry connection on first actual use")
+					}
 				}
 			}()
 			logInfo("[Xray] gRPC verification started in background, continuing Xray startup immediately")

@@ -199,6 +199,15 @@ class HyperVpnService : VpnService() {
     
     private external fun freeString(str: String)
     
+    // Check if Xray gRPC is available (called from VPN service process)
+    private external fun isXrayGrpcAvailableNative(): Boolean
+    
+    // Get Xray system stats via gRPC (Go runtime memory stats)
+    private external fun getXraySystemStatsNative(): String?
+    
+    // Get Xray traffic stats via gRPC
+    private external fun getXrayTrafficStatsNative(): String?
+    
     /**
      * Check if native library is ready
      * @return true if library is loaded and ready
@@ -241,6 +250,7 @@ class HyperVpnService : VpnService() {
     // Socket protector native methods
     private external fun initSocketProtector()
     private external fun cleanupSocketProtector()
+    private external fun isSocketProtectorVerified(): Boolean
     
     /**
      * Called from native code to log to AiLogHelper
@@ -582,6 +592,20 @@ class HyperVpnService : VpnService() {
         }
         
         isStarting = true
+        
+        // Verify socket protection is working before starting
+        try {
+            if (!isSocketProtectorVerified()) {
+                AiLogHelper.e(TAG, "❌ Socket protection verification failed!")
+                broadcastError("Socket protection not working", -35, "VpnService.protect() verification failed")
+                isStarting = false
+                return
+            }
+            AiLogHelper.i(TAG, "✅ Socket protection verified")
+        } catch (e: Exception) {
+            AiLogHelper.e(TAG, "❌ Socket protection verification error: ${e.message}", e)
+            // Continue anyway - native code will also verify
+        }
         
         // Reset recovery state for new connection
         recoveryAttempts = 0
@@ -1342,6 +1366,52 @@ class HyperVpnService : VpnService() {
                     
                     lastStatsUpdate = System.currentTimeMillis()
                     
+                    // Check gRPC availability from VPN service process (where tunnel is running)
+                    val grpcAvailable = try {
+                        if (nativeLibraryLoaded && goLibraryLoaded) {
+                            isXrayGrpcAvailableNative()
+                        } else {
+                            false
+                        }
+                    } catch (e: Exception) {
+                        AiLogHelper.w(TAG, "Failed to check gRPC availability: ${e.message}")
+                        false
+                    }
+                    
+                    // Get Go runtime stats from gRPC (only if gRPC is available)
+                    var goAlloc = 0L
+                    var goTotalAlloc = 0L
+                    var goSys = 0L
+                    var goMallocs = 0L
+                    var goFrees = 0L
+                    var goLiveObjects = 0L
+                    var goPauseTotalNs = 0L
+                    var goNumGoroutine = 0L
+                    var goNumGC = 0L
+                    var xrayUptime = 0L
+                    
+                    if (grpcAvailable) {
+                        try {
+                            val systemStatsJson = getXraySystemStatsNative()
+                            if (systemStatsJson != null && !systemStatsJson.contains("error")) {
+                                val systemStats = JSONObject(systemStatsJson)
+                                goAlloc = systemStats.optLong("alloc", 0)
+                                goTotalAlloc = systemStats.optLong("totalAlloc", 0)
+                                goSys = systemStats.optLong("sys", 0)
+                                goMallocs = systemStats.optLong("mallocs", 0)
+                                goFrees = systemStats.optLong("frees", 0)
+                                goLiveObjects = systemStats.optLong("liveObjects", 0)
+                                goPauseTotalNs = systemStats.optLong("pauseTotalNs", 0)
+                                goNumGoroutine = systemStats.optLong("numGoroutine", 0)
+                                goNumGC = systemStats.optLong("numGC", 0)
+                                xrayUptime = systemStats.optLong("uptime", 0)
+                                AiLogHelper.d(TAG, "📊 Go runtime stats - alloc: $goAlloc, sys: $goSys, goroutines: $goNumGoroutine")
+                            }
+                        } catch (e: Exception) {
+                            AiLogHelper.w(TAG, "Failed to get Go runtime stats: ${e.message}")
+                        }
+                    }
+                    
                     // Enhanced stats with calculated metrics
                     val enhancedStats = JSONObject().apply {
                         put("txBytes", txBytes)
@@ -1356,6 +1426,18 @@ class HyperVpnService : VpnService() {
                         put("latency", calculateLatency())
                         put("packetLoss", calculatePacketLoss(txPackets, rxPackets))
                         put("throughput", throughput)
+                        put("grpcAvailable", grpcAvailable) // Add gRPC availability to stats
+                        // Go runtime stats from gRPC
+                        put("goAlloc", goAlloc)
+                        put("goTotalAlloc", goTotalAlloc)
+                        put("goSys", goSys)
+                        put("goMallocs", goMallocs)
+                        put("goFrees", goFrees)
+                        put("goLiveObjects", goLiveObjects)
+                        put("goPauseTotalNs", goPauseTotalNs)
+                        put("goNumGoroutine", goNumGoroutine)
+                        put("goNumGC", goNumGC)
+                        put("xrayUptime", xrayUptime)
                     }
                     
                     // Broadcast stats update

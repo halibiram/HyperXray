@@ -209,12 +209,14 @@ class MainViewModel(
         
         // Initialize XrayStatsManager - needs viewModelScope which is only available here
         // Use default port 65276 if apiPort is 0 (same as ConfigInjector)
+        // Pass HyperVpnStateManager to enable gRPC availability check from VPN service process
         xrayStatsManager = XrayStatsManager(
             scope = viewModelScope,
             apiPortProvider = { 
                 val port = prefs.apiPort
                 if (port > 0 && port <= 65535) port else 65276
-            }
+            },
+            hyperVpnStateManager = hyperVpnStateManager
         )
         
         // Initialize coreStatsState after XrayStatsManager is created
@@ -380,15 +382,32 @@ class MainViewModel(
     override fun onCleared() {
         super.onCleared()
         Log.d(TAG, "MainViewModel cleared, stopping service event observer.")
+        
+        // Cleanup dashboard adapter
+        _dashboardAdapter = null
+        
+        // Stop monitoring before cleanup
+        stopMonitoring()
+        
+        // Cleanup service event observer
         serviceEventObserver.stopObserving(application)
+        
         // Cleanup use case resources
         vpnConnectionUseCase.cleanup()
+        
         // Cleanup stats manager resources
         xrayStatsManager.cleanup()
+        
+        // Cleanup memory stats manager
+        androidMemoryStatsManager.stopMonitoring()
+        
         // Cleanup repository resources
         configRepository.cleanup()
+        
         // Cleanup HyperVpnService observer
         hyperVpnStateManager.stopObserving()
+        
+        Log.d(TAG, "MainViewModel cleanup completed")
     }
     
     /**

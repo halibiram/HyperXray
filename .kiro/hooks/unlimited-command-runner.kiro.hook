@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Sınırsız Komut Çalıştırıcı",
+  "description": "Kullanıcı tarafından tetiklendiğinde istenen herhangi bir shell komutunu çalıştırır. Sınırsız komut kullanımı sağlar.",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Kullanıcının isteğini analiz et ve gerekli shell komutlarını çalıştır. Herhangi bir komut sınırlaması olmadan, kullanıcının istediği tüm komutları sırayla veya paralel olarak çalıştırabilirsin. Build, test, deploy, dosya işlemleri, git komutları ve diğer tüm shell komutlarını özgürce kullan."
+  }
+}

@@ -178,13 +178,13 @@ class AndroidMemoryStatsManager(
             // Get Go runtime memory stats from cached value (updated via collectLatest)
             // Fallback to reading StateFlow.value if cache is not available
             val goRuntimeStats = currentGoRuntimeStats ?: xrayStatsManager?.stats?.value
-            val goAlloc = goRuntimeStats?.alloc ?: 0L
-            val goTotalAlloc = goRuntimeStats?.totalAlloc ?: 0L
-            val goSys = goRuntimeStats?.sys ?: 0L
-            val goMallocs = goRuntimeStats?.mallocs ?: 0L
-            val goFrees = goRuntimeStats?.frees ?: 0L
-            val goLiveObjects = goRuntimeStats?.liveObjects ?: 0L
-            val goPauseTotalNs = goRuntimeStats?.pauseTotalNs ?: 0L
+            var goAlloc = goRuntimeStats?.alloc ?: 0L
+            var goTotalAlloc = goRuntimeStats?.totalAlloc ?: 0L
+            var goSys = goRuntimeStats?.sys ?: 0L
+            var goMallocs = goRuntimeStats?.mallocs ?: 0L
+            var goFrees = goRuntimeStats?.frees ?: 0L
+            var goLiveObjects = goRuntimeStats?.liveObjects ?: 0L
+            var goPauseTotalNs = goRuntimeStats?.pauseTotalNs ?: 0L
             
             // Debug log if Go runtime stats are missing
             if (goAlloc == 0L && goSys == 0L && xrayStatsManager != null) {

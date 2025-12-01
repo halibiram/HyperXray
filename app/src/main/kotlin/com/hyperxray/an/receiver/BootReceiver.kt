@@ -3,6 +3,7 @@ package com.hyperxray.an.receiver
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.net.VpnService
 import android.os.Build
 import android.util.Log
 import com.hyperxray.an.prefs.Preferences
@@ -25,6 +26,14 @@ class BootReceiver : BroadcastReceiver() {
     }
 
     private fun startVpnService(context: Context) {
+        // Check if VPN permission is already granted
+        // If not granted, we can't start VPN from boot - user must grant permission via Activity
+        val prepareIntent = VpnService.prepare(context)
+        if (prepareIntent != null) {
+            Log.w(TAG, "VPN permission not granted, cannot auto-start from boot")
+            return
+        }
+        
         val intent = Intent(context, HyperVpnService::class.java).apply {
             action = HyperVpnService.ACTION_START
         }

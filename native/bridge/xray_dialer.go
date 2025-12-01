@@ -85,7 +85,9 @@ func (d *ProtectedXrayDialer) Dial(ctx context.Context, source xnet.Address, des
 	} else if physicalIP != nil {
 		logInfo("[XrayDialer] ✅ Physical IP found: %s", physicalIP.String())
 	} else {
-		logWarn("[XrayDialer] ⚠️ Physical IP is nil (cache miss), will proceed without binding")
+		logWarn("[XrayDialer] ⚠️ Physical IP is nil (cache miss) - VPN may be active")
+		logWarn("[XrayDialer] ⚠️ This is normal when VPN is running, proceeding without binding")
+		logInfo("[XrayDialer] ℹ️  Socket protection will still work, only explicit source binding is skipped")
 	}
 
 	// Use net.Dialer with Control callback for socket protection and source binding
@@ -118,16 +120,24 @@ func (d *ProtectedXrayDialer) Dial(ctx context.Context, source xnet.Address, des
 					var bindAddr syscall.SockaddrInet4
 					copy(bindAddr.Addr[:], physicalIP.To4())
 					bindAddr.Port = 0 // Let OS choose port
-					
+
 					// Convert fd to appropriate type for syscall.Bind
 					// On Android, syscall.Socket returns int, so we can use it directly
 					if err := syscall.Bind(int(fd), &bindAddr); err != nil {
 						bindErr = fmt.Errorf("failed to bind to physical IP %s: %w", physicalIP.String(), err)
-						logWarn("[XrayDialer] ⚠️ Bind failed (non-fatal): %v", bindErr)
+						logWarn("[XrayDialer] ⚠️ Socket binding failed: %v", bindErr)
+						logInfo("[XrayDialer] ℹ️  This is often normal on Android when:")
+						logInfo("[XrayDialer]    - VPN is active (TUN interface is default route)")
+						logInfo("[XrayDialer]    - Physical IP detection fails due to cache miss")
+						logInfo("[XrayDialer]    - Socket permissions are restricted")
+						logInfo("[XrayDialer] ℹ️  Connection will proceed with socket protection only")
 						// Bind failure is not fatal - socket protection is more important
 					} else {
 						logInfo("[XrayDialer] ✅ Socket bound to physical IP: %s", physicalIP.String())
 					}
+				} else if physicalIP == nil && network == "tcp" {
+					logInfo("[XrayDialer] ℹ️  Skipping socket binding (no physical IP available)")
+					logInfo("[XrayDialer] ℹ️  This is expected when VPN is active or IP detection fails")
 				}
 			})
 			if err != nil {
@@ -313,21 +323,45 @@ func resolveDomainUDPProtected(domain, dnsServer string) (net.IP, error) {
 	if !ProtectSocket(fdInt) {
 		return nil, fmt.Errorf("failed to protect DNS query socket")
 	}
-	logInfo("[XrayDialer] ✅ DNS query socket protected")
+	logInfo("[XrayDialer] ✅ DNS query socket protected (fd=%d)", fdInt)
 	
-	// Build simple DNS query (A record)
-	query := buildDNSQuery(domain)
+	// Try to bind to physical IP for extra assurance
+	// This ensures the socket uses physical network interface
+	physicalIP, _ := GetLocalPhysicalIP()
+	if physicalIP != nil {
+		var bindAddr syscall.SockaddrInet4
+		copy(bindAddr.Addr[:], physicalIP.To4())
+		bindAddr.Port = 0
+		if err := syscall.Bind(fd, &bindAddr); err != nil {
+			logWarn("[XrayDialer] ⚠️ Failed to bind DNS socket to physical IP %s: %v (non-fatal)", physicalIP.String(), err)
+		} else {
+			logInfo("[XrayDialer] ✅ DNS socket bound to physical IP: %s", physicalIP.String())
+		}
+	}
 	
-	// Send DNS query
+	// Connect the UDP socket to the DNS server
+	// This is important on Android - it ensures the socket uses the correct route
+	// after protection. Without connect(), sendto() may still use VPN route.
 	sa := &syscall.SockaddrInet4{
 		Port: addr.Port,
 	}
 	copy(sa.Addr[:], addr.IP.To4())
 	
-	err = syscall.Sendto(fd, query, 0, sa)
+	err = syscall.Connect(fd, sa)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect UDP socket to DNS server: %w", err)
+	}
+	logInfo("[XrayDialer] ✅ DNS socket connected to %s", dnsServer)
+	
+	// Build simple DNS query (A record)
+	query := buildDNSQuery(domain)
+	
+	// Send DNS query using Write (since socket is connected)
+	_, err = syscall.Write(fd, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send DNS query: %w", err)
 	}
+	logInfo("[XrayDialer] ✅ DNS query sent for %s", domain)
 	
 	// Receive DNS response with timeout using goroutine and channel
 	buffer := make([]byte, 512)
@@ -337,7 +371,7 @@ func resolveDomainUDPProtected(domain, dnsServer string) (net.IP, error) {
 	}, 1)
 	
 	go func() {
-		n, _, err := syscall.Recvfrom(fd, buffer, 0)
+		n, err := syscall.Read(fd, buffer)
 		recvDone <- struct {
 			n   int
 			err error
@@ -351,6 +385,7 @@ func resolveDomainUDPProtected(domain, dnsServer string) (net.IP, error) {
 			return nil, fmt.Errorf("failed to receive DNS response: %w", result.err)
 		}
 		buffer = buffer[:result.n]
+		logInfo("[XrayDialer] ✅ DNS response received (%d bytes)", result.n)
 	case <-time.After(5 * time.Second):
 		return nil, fmt.Errorf("DNS query timeout after 5 seconds")
 	}

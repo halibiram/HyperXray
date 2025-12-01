@@ -1,8 +1,6 @@
 package com.hyperxray.an.ui.scaffold
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -67,9 +65,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
@@ -745,190 +747,334 @@ private fun StatsActions(
 fun AppBottomNavigationBar(navController: NavHostController) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
-    val colorScheme = MaterialTheme.colorScheme
     val hapticFeedback = LocalHapticFeedback.current
+    
+    // Futuristic neon colors
+    val neonCyan = Color(0xFF00F5FF)
+    val neonMagenta = Color(0xFFFF00FF)
+    val neonPurple = Color(0xFF8B5CF6)
+    val deepSpace = Color(0xFF000011)
+    val glassWhite = Color(0x15FFFFFF)
+    
+    // Animated glow effect
+    val infiniteTransition = rememberInfiniteTransition(label = "navbarGlow")
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.6f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "navGlowAlpha"
+    )
+    
+    // Animated gradient offset for holographic effect
+    val gradientOffset by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "gradientOffset"
+    )
 
-    // Modern navbar with rounded top corners and elevation
-    Surface(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(
-                elevation = 8.dp,
-                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-                spotColor = colorScheme.primary.copy(alpha = 0.15f),
-                ambientColor = colorScheme.primary.copy(alpha = 0.08f)
-            ),
-        color = colorScheme.surfaceContainerHighest,
-        tonalElevation = 3.dp,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        Row(
+        // Outer glow layer
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
+                .height(72.dp)
+                .graphicsLayer { alpha = glowAlpha }
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            neonCyan.copy(alpha = 0.2f),
+                            neonMagenta.copy(alpha = 0.1f),
+                            Color.Transparent
+                        ),
+                        radius = 600f
+                    ),
+                    shape = RoundedCornerShape(28.dp)
+                )
+        )
+        
+        // Main navbar container with glassmorphism
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .shadow(
+                    elevation = 16.dp,
+                    shape = RoundedCornerShape(28.dp),
+                    spotColor = neonCyan.copy(alpha = 0.3f),
+                    ambientColor = neonMagenta.copy(alpha = 0.15f)
+                ),
+            color = deepSpace.copy(alpha = 0.85f),
+            tonalElevation = 0.dp,
+            shape = RoundedCornerShape(28.dp)
         ) {
-            AdvancedNavItem(
-                route = ROUTE_STATS,
-                currentRoute = currentRoute,
-                icon = R.drawable.dashboard,
-                label = stringResource(R.string.core_stats_title),
-                onClick = {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    navigateToRoute(navController, ROUTE_STATS)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                glassWhite,
+                                Color.Transparent,
+                                glassWhite.copy(alpha = 0.05f)
+                            )
+                        )
+                    )
+                    .drawBehind {
+                        // Animated top border glow
+                        drawLine(
+                            brush = Brush.horizontalGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    neonCyan.copy(alpha = 0.8f * gradientOffset),
+                                    neonMagenta.copy(alpha = 0.6f),
+                                    neonPurple.copy(alpha = 0.8f * (1f - gradientOffset)),
+                                    Color.Transparent
+                                )
+                            ),
+                            start = Offset(0f, 0f),
+                            end = Offset(size.width, 0f),
+                            strokeWidth = 2f
+                        )
+                    }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FuturisticNavItem(
+                        route = ROUTE_STATS,
+                        currentRoute = currentRoute,
+                        icon = R.drawable.dashboard,
+                        label = stringResource(R.string.core_stats_title),
+                        neonColor = neonCyan,
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            navigateToRoute(navController, ROUTE_STATS)
+                        }
+                    )
+                    FuturisticNavItem(
+                        route = ROUTE_CONFIG,
+                        currentRoute = currentRoute,
+                        icon = R.drawable.code,
+                        label = stringResource(R.string.configuration),
+                        neonColor = neonMagenta,
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            navigateToRoute(navController, ROUTE_CONFIG)
+                        }
+                    )
+                    FuturisticNavItem(
+                        route = ROUTE_LOG,
+                        currentRoute = currentRoute,
+                        icon = R.drawable.history,
+                        label = stringResource(R.string.log),
+                        neonColor = neonPurple,
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            navigateToRoute(navController, ROUTE_LOG)
+                        }
+                    )
+                    FuturisticNavItem(
+                        route = ROUTE_UTILS,
+                        currentRoute = currentRoute,
+                        icon = R.drawable.utils,
+                        label = "Utils",
+                        neonColor = Color(0xFF00FF88), // Neon Green
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            navigateToRoute(navController, ROUTE_UTILS)
+                        }
+                    )
+                    FuturisticNavItem(
+                        route = ROUTE_SETTINGS,
+                        currentRoute = currentRoute,
+                        icon = R.drawable.settings,
+                        label = stringResource(R.string.settings),
+                        neonColor = Color(0xFFFF6B00), // Neon Orange
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            navigateToRoute(navController, ROUTE_SETTINGS)
+                        }
+                    )
                 }
-            )
-            AdvancedNavItem(
-                route = ROUTE_CONFIG,
-                currentRoute = currentRoute,
-                icon = R.drawable.code,
-                label = stringResource(R.string.configuration),
-                onClick = {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    navigateToRoute(navController, ROUTE_CONFIG)
-                }
-            )
-            AdvancedNavItem(
-                route = ROUTE_LOG,
-                currentRoute = currentRoute,
-                icon = R.drawable.history,
-                label = stringResource(R.string.log),
-                onClick = {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    navigateToRoute(navController, ROUTE_LOG)
-                }
-            )
-            AdvancedNavItem(
-                route = ROUTE_UTILS,
-                currentRoute = currentRoute,
-                icon = R.drawable.utils,
-                label = "Utils",
-                onClick = {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    navigateToRoute(navController, ROUTE_UTILS)
-                }
-            )
-            AdvancedNavItem(
-                route = ROUTE_SETTINGS,
-                currentRoute = currentRoute,
-                icon = R.drawable.settings,
-                label = stringResource(R.string.settings),
-                onClick = {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    navigateToRoute(navController, ROUTE_SETTINGS)
-                }
-            )
+            }
         }
     }
 }
 
 @Composable
-private fun RowScope.AdvancedNavItem(
+private fun RowScope.FuturisticNavItem(
     route: String,
     currentRoute: String?,
     icon: Int,
     label: String,
+    neonColor: Color,
     onClick: () -> Unit
 ) {
     val isSelected = currentRoute == route
-    val colorScheme = MaterialTheme.colorScheme
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
+    
+    // Neon glow animation for selected state
+    val infiniteTransition = rememberInfiniteTransition(label = "navItemGlow_$route")
+    val glowPulse by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glowPulse_$route"
+    )
 
     // Animation values
     val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.85f else if (isSelected) 1.1f else 1f,
+        targetValue = when {
+            isPressed -> 0.88f
+            isSelected -> 1.05f
+            else -> 1f
+        },
         animationSpec = spring(
-            dampingRatio = 0.6f,
-            stiffness = 400f
+            dampingRatio = 0.5f,
+            stiffness = 350f
         ),
         label = "nav_item_scale"
     )
 
     val iconScale by animateFloatAsState(
-        targetValue = if (isSelected) 1.15f else 1f,
+        targetValue = if (isSelected) 1.2f else 1f,
         animationSpec = spring(
-            dampingRatio = 0.7f,
-            stiffness = 500f
+            dampingRatio = 0.6f,
+            stiffness = 400f
         ),
         label = "icon_scale"
     )
 
     val containerAlpha by animateFloatAsState(
         targetValue = if (isSelected) 1f else 0f,
-        animationSpec = tween(durationMillis = 300),
+        animationSpec = tween(durationMillis = 350),
         label = "container_alpha"
     )
 
-    val iconColor by animateFloatAsState(
+    val colorTransition by animateFloatAsState(
         targetValue = if (isSelected) 1f else 0f,
         animationSpec = tween(durationMillis = 300),
-        label = "icon_color"
+        label = "color_transition"
     )
 
-    val textColor by animateFloatAsState(
-        targetValue = if (isSelected) 1f else 0f,
-        animationSpec = tween(durationMillis = 300),
-        label = "text_color"
-    )
-
-    val animatedIconColor = androidx.compose.ui.graphics.lerp(
-        colorScheme.onSurfaceVariant,
-        colorScheme.primary,
-        iconColor
-    )
-
-    val animatedTextColor = androidx.compose.ui.graphics.lerp(
-        colorScheme.onSurfaceVariant,
-        colorScheme.primary,
-        textColor
-    )
+    val inactiveColor = Color(0xFF6B7280) // Muted gray
+    val animatedIconColor = androidx.compose.ui.graphics.lerp(inactiveColor, neonColor, colorTransition)
+    val animatedTextColor = androidx.compose.ui.graphics.lerp(inactiveColor.copy(alpha = 0.7f), neonColor, colorTransition)
 
     Box(
         modifier = Modifier
             .weight(1f)
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(20.dp))
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick
             )
             .scale(scale)
-            .padding(vertical = 4.dp, horizontal = 4.dp),
+            .padding(vertical = 2.dp, horizontal = 2.dp),
         contentAlignment = Alignment.Center
     ) {
-        // Background indicator
+        // Neon glow background for selected state
+        if (isSelected) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .graphicsLayer { alpha = containerAlpha * glowPulse * 0.4f }
+                    .background(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                neonColor.copy(alpha = 0.5f),
+                                neonColor.copy(alpha = 0.2f),
+                                Color.Transparent
+                            ),
+                            radius = 120f
+                        ),
+                        shape = RoundedCornerShape(20.dp)
+                    )
+            )
+        }
+        
+        // Glass container background
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp)
-                .clip(RoundedCornerShape(16.dp))
+                .height(56.dp)
+                .clip(RoundedCornerShape(20.dp))
                 .graphicsLayer { alpha = containerAlpha }
                 .background(
-                    brush = Brush.linearGradient(
+                    brush = Brush.verticalGradient(
                         colors = listOf(
-                            colorScheme.primaryContainer.copy(alpha = 0.6f),
-                            colorScheme.secondaryContainer.copy(alpha = 0.4f)
+                            neonColor.copy(alpha = 0.15f),
+                            neonColor.copy(alpha = 0.05f),
+                            Color.Transparent
                         )
                     )
                 )
+                .drawBehind {
+                    // Neon border glow
+                    drawRoundRect(
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                neonColor.copy(alpha = 0.8f * glowPulse),
+                                neonColor.copy(alpha = 0.3f),
+                                neonColor.copy(alpha = 0.6f * glowPulse)
+                            )
+                        ),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(20.dp.toPx()),
+                        style = Stroke(width = 1.5f)
+                    )
+                }
         )
 
         // Content
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .padding(horizontal = 4.dp, vertical = 6.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
             Box(
                 modifier = Modifier
-                    .size(24.dp)
-                    .graphicsLayer { scaleX = iconScale; scaleY = iconScale },
+                    .size(26.dp)
+                    .graphicsLayer { 
+                        scaleX = iconScale
+                        scaleY = iconScale
+                    },
                 contentAlignment = Alignment.Center
             ) {
+                // Icon glow layer for selected state
+                if (isSelected) {
+                    Icon(
+                        painter = painterResource(id = icon),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(26.dp)
+                            .graphicsLayer { alpha = glowPulse * 0.6f }
+                            .blur(4.dp),
+                        tint = neonColor
+                    )
+                }
+                // Main icon
                 Icon(
                     painter = painterResource(id = icon),
                     contentDescription = label,
@@ -937,30 +1083,57 @@ private fun RowScope.AdvancedNavItem(
                 )
             }
             
-            Spacer(modifier = Modifier.height(2.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                    fontSize = 10.sp,
-                    letterSpacing = (-0.01).sp
-                ),
-                color = animatedTextColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            // Text with glow effect for selected
+            Box {
+                if (isSelected) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 9.sp,
+                            letterSpacing = 0.5.sp
+                        ),
+                        color = neonColor.copy(alpha = glowPulse * 0.5f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.blur(3.dp)
+                    )
+                }
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        fontSize = 9.sp,
+                        letterSpacing = if (isSelected) 0.5.sp else 0.sp
+                    ),
+                    color = animatedTextColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
 
-        // Selection indicator dot
+        // Top neon indicator line for selected
         if (isSelected) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .offset(y = (-2).dp)
-                    .size(4.dp)
-                    .clip(CircleShape)
-                    .background(colorScheme.primary)
+                    .offset(y = 2.dp)
+                    .width(24.dp)
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                neonColor,
+                                Color.Transparent
+                            )
+                        )
+                    )
+                    .graphicsLayer { alpha = glowPulse }
             )
         }
     }
@@ -970,162 +1143,287 @@ private fun RowScope.AdvancedNavItem(
 fun AppNavigationRail(navController: NavHostController) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
-    val colorScheme = MaterialTheme.colorScheme
     val hapticFeedback = LocalHapticFeedback.current
+    
+    // Futuristic neon colors
+    val neonCyan = Color(0xFF00F5FF)
+    val neonMagenta = Color(0xFFFF00FF)
+    val neonPurple = Color(0xFF8B5CF6)
+    val deepSpace = Color(0xFF000011)
+    val glassWhite = Color(0x15FFFFFF)
+    
+    // Animated glow
+    val infiniteTransition = rememberInfiniteTransition(label = "railGlow")
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2500, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "railGlowAlpha"
+    )
 
-    Surface(
+    Box(
         modifier = Modifier
-            .width(80.dp)
+            .width(88.dp)
             .fillMaxSize()
-            .shadow(
-                elevation = 4.dp,
-                shape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
-                spotColor = colorScheme.primary.copy(alpha = 0.12f),
-                ambientColor = colorScheme.primary.copy(alpha = 0.06f)
-            ),
-        color = colorScheme.surfaceContainerHighest,
-        tonalElevation = 2.dp,
-        shape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)
+            .padding(start = 8.dp, top = 8.dp, bottom = 8.dp)
     ) {
-        Column(
+        // Outer glow
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(vertical = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .graphicsLayer { alpha = glowAlpha * 0.5f }
+                .background(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(
+                            neonCyan.copy(alpha = 0.15f),
+                            Color.Transparent
+                        )
+                    ),
+                    shape = RoundedCornerShape(28.dp)
+                )
+        )
+        
+        Surface(
+            modifier = Modifier
+                .width(80.dp)
+                .fillMaxSize()
+                .shadow(
+                    elevation = 16.dp,
+                    shape = RoundedCornerShape(28.dp),
+                    spotColor = neonCyan.copy(alpha = 0.25f),
+                    ambientColor = neonMagenta.copy(alpha = 0.1f)
+                ),
+            color = deepSpace.copy(alpha = 0.9f),
+            tonalElevation = 0.dp,
+            shape = RoundedCornerShape(28.dp)
         ) {
-            AdvancedRailItem(
-                route = ROUTE_STATS,
-                currentRoute = currentRoute,
-                icon = R.drawable.dashboard,
-                label = stringResource(R.string.core_stats_title),
-                onClick = {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    navigateToRoute(navController, ROUTE_STATS)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                glassWhite,
+                                Color.Transparent,
+                                glassWhite.copy(alpha = 0.05f)
+                            )
+                        )
+                    )
+                    .drawBehind {
+                        // Animated side border glow
+                        drawLine(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    neonCyan.copy(alpha = 0.6f * glowAlpha),
+                                    neonMagenta.copy(alpha = 0.4f),
+                                    neonPurple.copy(alpha = 0.6f * glowAlpha),
+                                    Color.Transparent
+                                )
+                            ),
+                            start = Offset(size.width - 1f, 0f),
+                            end = Offset(size.width - 1f, size.height),
+                            strokeWidth = 2f
+                        )
+                    }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(vertical = 16.dp, horizontal = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FuturisticRailItem(
+                        route = ROUTE_STATS,
+                        currentRoute = currentRoute,
+                        icon = R.drawable.dashboard,
+                        label = stringResource(R.string.core_stats_title),
+                        neonColor = neonCyan,
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            navigateToRoute(navController, ROUTE_STATS)
+                        }
+                    )
+                    FuturisticRailItem(
+                        route = ROUTE_CONFIG,
+                        currentRoute = currentRoute,
+                        icon = R.drawable.code,
+                        label = stringResource(R.string.configuration),
+                        neonColor = neonMagenta,
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            navigateToRoute(navController, ROUTE_CONFIG)
+                        }
+                    )
+                    FuturisticRailItem(
+                        route = ROUTE_LOG,
+                        currentRoute = currentRoute,
+                        icon = R.drawable.history,
+                        label = stringResource(R.string.log),
+                        neonColor = neonPurple,
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            navigateToRoute(navController, ROUTE_LOG)
+                        }
+                    )
+                    FuturisticRailItem(
+                        route = ROUTE_UTILS,
+                        currentRoute = currentRoute,
+                        icon = R.drawable.utils,
+                        label = "Utils",
+                        neonColor = Color(0xFF00FF88),
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            navigateToRoute(navController, ROUTE_UTILS)
+                        }
+                    )
+                    FuturisticRailItem(
+                        route = ROUTE_SETTINGS,
+                        currentRoute = currentRoute,
+                        icon = R.drawable.settings,
+                        label = stringResource(R.string.settings),
+                        neonColor = Color(0xFFFF6B00),
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            navigateToRoute(navController, ROUTE_SETTINGS)
+                        }
+                    )
                 }
-            )
-            AdvancedRailItem(
-                route = ROUTE_CONFIG,
-                currentRoute = currentRoute,
-                icon = R.drawable.code,
-                label = stringResource(R.string.configuration),
-                onClick = {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    navigateToRoute(navController, ROUTE_CONFIG)
-                }
-            )
-            AdvancedRailItem(
-                route = ROUTE_LOG,
-                currentRoute = currentRoute,
-                icon = R.drawable.history,
-                label = stringResource(R.string.log),
-                onClick = {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    navigateToRoute(navController, ROUTE_LOG)
-                }
-            )
-            AdvancedRailItem(
-                route = ROUTE_UTILS,
-                currentRoute = currentRoute,
-                icon = R.drawable.utils,
-                label = "Utils",
-                onClick = {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    navigateToRoute(navController, ROUTE_UTILS)
-                }
-            )
-            AdvancedRailItem(
-                route = ROUTE_SETTINGS,
-                currentRoute = currentRoute,
-                icon = R.drawable.settings,
-                label = stringResource(R.string.settings),
-                onClick = {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    navigateToRoute(navController, ROUTE_SETTINGS)
-                }
-            )
+            }
         }
     }
 }
 
 @Composable
-private fun AdvancedRailItem(
+private fun FuturisticRailItem(
     route: String,
     currentRoute: String?,
     icon: Int,
     label: String,
+    neonColor: Color,
     onClick: () -> Unit
 ) {
     val isSelected = currentRoute == route
-    val colorScheme = MaterialTheme.colorScheme
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
+    
+    // Neon glow animation
+    val infiniteTransition = rememberInfiniteTransition(label = "railItemGlow_$route")
+    val glowPulse by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "railGlowPulse_$route"
+    )
 
     // Animation values
     val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.9f else if (isSelected) 1.05f else 1f,
+        targetValue = when {
+            isPressed -> 0.9f
+            isSelected -> 1.05f
+            else -> 1f
+        },
         animationSpec = spring(
-            dampingRatio = 0.6f,
-            stiffness = 400f
+            dampingRatio = 0.5f,
+            stiffness = 350f
         ),
         label = "rail_item_scale"
     )
 
     val iconScale by animateFloatAsState(
-        targetValue = if (isSelected) 1.2f else 1f,
+        targetValue = if (isSelected) 1.25f else 1f,
         animationSpec = spring(
-            dampingRatio = 0.7f,
-            stiffness = 500f
+            dampingRatio = 0.6f,
+            stiffness = 400f
         ),
         label = "rail_icon_scale"
     )
 
     val containerAlpha by animateFloatAsState(
         targetValue = if (isSelected) 1f else 0f,
-        animationSpec = tween(durationMillis = 300),
+        animationSpec = tween(durationMillis = 350),
         label = "rail_container_alpha"
     )
 
-    val iconColor by animateFloatAsState(
+    val colorTransition by animateFloatAsState(
         targetValue = if (isSelected) 1f else 0f,
         animationSpec = tween(durationMillis = 300),
-        label = "rail_icon_color"
+        label = "rail_color_transition"
     )
 
-    val animatedIconColor = androidx.compose.ui.graphics.lerp(
-        colorScheme.onSurfaceVariant,
-        colorScheme.primary,
-        iconColor
-    )
+    val inactiveColor = Color(0xFF6B7280)
+    val animatedIconColor = androidx.compose.ui.graphics.lerp(inactiveColor, neonColor, colorTransition)
 
     Box(
         modifier = Modifier
-            .width(64.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .width(68.dp)
+            .clip(RoundedCornerShape(20.dp))
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick
             )
             .scale(scale)
-            .padding(8.dp),
+            .padding(4.dp),
         contentAlignment = Alignment.Center
     ) {
-        // Background indicator
+        // Neon glow background
+        if (isSelected) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp)
+                    .graphicsLayer { alpha = containerAlpha * glowPulse * 0.4f }
+                    .background(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                neonColor.copy(alpha = 0.5f),
+                                neonColor.copy(alpha = 0.2f),
+                                Color.Transparent
+                            ),
+                            radius = 100f
+                        ),
+                        shape = RoundedCornerShape(20.dp)
+                    )
+            )
+        }
+        
+        // Glass container
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(56.dp)
-                .clip(RoundedCornerShape(16.dp))
+                .height(64.dp)
+                .clip(RoundedCornerShape(20.dp))
                 .graphicsLayer { alpha = containerAlpha }
                 .background(
                     brush = Brush.verticalGradient(
                         colors = listOf(
-                            colorScheme.primaryContainer.copy(alpha = 0.6f),
-                            colorScheme.secondaryContainer.copy(alpha = 0.4f)
+                            neonColor.copy(alpha = 0.15f),
+                            neonColor.copy(alpha = 0.05f),
+                            Color.Transparent
                         )
                     )
                 )
+                .drawBehind {
+                    drawRoundRect(
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                neonColor.copy(alpha = 0.8f * glowPulse),
+                                neonColor.copy(alpha = 0.3f),
+                                neonColor.copy(alpha = 0.6f * glowPulse)
+                            )
+                        ),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(20.dp.toPx()),
+                        style = Stroke(width = 1.5f)
+                    )
+                }
         )
 
         // Content
@@ -1139,43 +1437,84 @@ private fun AdvancedRailItem(
             Box(
                 modifier = Modifier
                     .size(28.dp)
-                    .graphicsLayer { scaleX = iconScale; scaleY = iconScale },
+                    .graphicsLayer { 
+                        scaleX = iconScale
+                        scaleY = iconScale
+                    },
                 contentAlignment = Alignment.Center
             ) {
+                // Icon glow
+                if (isSelected) {
+                    Icon(
+                        painter = painterResource(id = icon),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .graphicsLayer { alpha = glowPulse * 0.6f }
+                            .blur(4.dp),
+                        tint = neonColor
+                    )
+                }
                 Icon(
                     painter = painterResource(id = icon),
                     contentDescription = label,
-                    modifier = Modifier.size(28.dp),
+                    modifier = Modifier.size(26.dp),
                     tint = animatedIconColor
                 )
             }
             
             Spacer(modifier = Modifier.height(4.dp))
             
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                    fontSize = 10.sp,
-                    letterSpacing = (-0.01).sp
-                ),
-                color = animatedIconColor,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-            )
+            Box {
+                if (isSelected) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 9.sp,
+                            letterSpacing = 0.3.sp
+                        ),
+                        color = neonColor.copy(alpha = glowPulse * 0.5f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.blur(3.dp)
+                    )
+                }
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        fontSize = 9.sp,
+                        letterSpacing = if (isSelected) 0.3.sp else 0.sp
+                    ),
+                    color = animatedIconColor,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
         }
 
-        // Selection indicator
+        // Left neon indicator
         if (isSelected) {
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterStart)
-                    .offset(x = (-4).dp)
-                    .width(4.dp)
-                    .height(32.dp)
+                    .offset(x = 0.dp)
+                    .width(3.dp)
+                    .height(28.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(colorScheme.primary)
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                neonColor,
+                                Color.Transparent
+                            )
+                        )
+                    )
+                    .graphicsLayer { alpha = glowPulse }
             )
         }
     }

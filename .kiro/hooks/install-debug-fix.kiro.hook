@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Install Debug & Fix",
+  "description": "Automatically analyzes build errors, installs missing dependencies, and suggests fixes when Gradle build files or native Go files are edited",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A build-related file was edited. Please analyze the changes and: 1) Check for any missing dependencies or imports, 2) Identify potential build errors or compatibility issues, 3) Suggest fixes for any problems found, 4) If dependencies are missing, provide the correct dependency declarations for Gradle (build.gradle) or Go (go.mod). Run './gradlew assembleDebug --dry-run' or 'go mod tidy' if needed to verify the build configuration."
+  }
+}

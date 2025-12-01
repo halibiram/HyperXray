@@ -32,7 +32,8 @@ import org.json.JSONObject
 class XrayStatsManager(
     private val scope: CoroutineScope,
     private val apiPortProvider: () -> Int,
-    private val activeInstancesProvider: (suspend () -> Map<Int, Int>)? = null
+    private val activeInstancesProvider: (suspend () -> Map<Int, Int>)? = null,
+    private val hyperVpnStateManager: com.hyperxray.an.core.network.vpn.HyperVpnStateManager? = null
 ) {
     private val TAG = "XrayStatsManager"
     
@@ -333,40 +334,52 @@ class XrayStatsManager(
     private suspend fun updateCoreStatsSingleInstance() {
         // CRITICAL: Check native process health first with state machine
         // This provides better diagnostics and retry logic
+        // PREFER: Use grpcAvailable from HyperVpnStateManager (VPN service process) if available
         val nativeAvailable = try {
-            if (!isLibraryLoaded()) {
-                nativeAvailabilityState = NativeAvailabilityState.LIB_NOT_LOADED
-                Log.d(TAG, "Native library not loaded, state: $nativeAvailabilityState")
-                false
+            // First, check if we have grpcAvailable from VPN service process (more reliable)
+            val grpcAvailableFromService = hyperVpnStateManager?.stats?.value?.grpcAvailable ?: false
+            if (grpcAvailableFromService) {
+                nativeAvailabilityState = NativeAvailabilityState.GRPC_AVAILABLE
+                firstGrpcCheckTime = 0L
+                Log.d(TAG, "✅ Native gRPC available from VPN service process (state: $nativeAvailabilityState)")
+                // Continue with native gRPC client usage (don't return early)
+                true
             } else {
-                Log.d(TAG, "Checking native gRPC availability...")
-                val available = isXrayGrpcAvailableNative()
-                
-                // Update state machine based on availability
-                val now = System.currentTimeMillis()
-                if (available) {
-                    nativeAvailabilityState = NativeAvailabilityState.GRPC_AVAILABLE
-                    firstGrpcCheckTime = 0L // Reset grace period timer
-                    Log.d(TAG, "✅ Native gRPC available, state: $nativeAvailabilityState")
+                // Fallback: Check directly (may fail due to process separation)
+                if (!isLibraryLoaded()) {
+                    nativeAvailabilityState = NativeAvailabilityState.LIB_NOT_LOADED
+                    Log.d(TAG, "Native library not loaded, state: $nativeAvailabilityState")
+                    false
                 } else {
-                    // Check if we're still within grace period
-                    if (firstGrpcCheckTime == 0L) {
-                        firstGrpcCheckTime = now
-                        nativeAvailabilityState = NativeAvailabilityState.GRPC_NOT_READY_YET
-                        Log.d(TAG, "⏳ gRPC not ready yet, starting grace period (state: $nativeAvailabilityState)")
+                    Log.d(TAG, "Checking native gRPC availability directly (fallback)...")
+                    val available = isXrayGrpcAvailableNative()
+                    
+                    // Update state machine based on availability
+                    val now = System.currentTimeMillis()
+                    if (available) {
+                        nativeAvailabilityState = NativeAvailabilityState.GRPC_AVAILABLE
+                        firstGrpcCheckTime = 0L // Reset grace period timer
+                        Log.d(TAG, "✅ Native gRPC available, state: $nativeAvailabilityState")
                     } else {
-                        val timeSinceFirstCheck = now - firstGrpcCheckTime
-                        if (timeSinceFirstCheck < GRPC_GRACE_PERIOD_MS) {
+                        // Check if we're still within grace period
+                        if (firstGrpcCheckTime == 0L) {
+                            firstGrpcCheckTime = now
                             nativeAvailabilityState = NativeAvailabilityState.GRPC_NOT_READY_YET
-                            Log.d(TAG, "⏳ gRPC not ready yet, grace period: ${GRPC_GRACE_PERIOD_MS - timeSinceFirstCheck}ms remaining (state: $nativeAvailabilityState)")
+                            Log.d(TAG, "⏳ gRPC not ready yet, starting grace period (state: $nativeAvailabilityState)")
                         } else {
-                            nativeAvailabilityState = NativeAvailabilityState.GRPC_FAILED
-                            Log.w(TAG, "⚠️ gRPC failed after grace period (${timeSinceFirstCheck}ms > ${GRPC_GRACE_PERIOD_MS}ms), state: $nativeAvailabilityState")
+                            val timeSinceFirstCheck = now - firstGrpcCheckTime
+                            if (timeSinceFirstCheck < GRPC_GRACE_PERIOD_MS) {
+                                nativeAvailabilityState = NativeAvailabilityState.GRPC_NOT_READY_YET
+                                Log.d(TAG, "⏳ gRPC not ready yet, grace period: ${GRPC_GRACE_PERIOD_MS - timeSinceFirstCheck}ms remaining (state: $nativeAvailabilityState)")
+                            } else {
+                                nativeAvailabilityState = NativeAvailabilityState.GRPC_FAILED
+                                Log.w(TAG, "⚠️ gRPC failed after grace period (${timeSinceFirstCheck}ms > ${GRPC_GRACE_PERIOD_MS}ms), state: $nativeAvailabilityState")
+                            }
                         }
                     }
+                    
+                    available
                 }
-                
-                available
             }
         } catch (e: UnsatisfiedLinkError) {
             nativeAvailabilityState = NativeAvailabilityState.LIB_NOT_LOADED
@@ -409,8 +422,47 @@ class XrayStatsManager(
         }
         
         if (nativeAvailable) {
-            // Use native gRPC client
-            Log.d(TAG, "Using native gRPC client for stats")
+            // PREFER: Get Go runtime stats from HyperVpnStateManager (VPN service process)
+            // This is more reliable because VPN service process has direct access to native tunnel
+            val tunnelStats = hyperVpnStateManager?.stats?.value
+            if (tunnelStats != null && tunnelStats.grpcAvailable && tunnelStats.goAlloc > 0) {
+                Log.d(TAG, "Using Go runtime stats from HyperVpnStateManager (VPN service process)")
+                
+                // Create system stats from tunnel stats
+                val systemStats = com.xray.app.stats.command.SysStatsResponse.newBuilder()
+                    .setNumGoroutine(tunnelStats.goNumGoroutine.toInt())
+                    .setNumGC(tunnelStats.goNumGC.toInt())
+                    .setAlloc(tunnelStats.goAlloc)
+                    .setTotalAlloc(tunnelStats.goTotalAlloc)
+                    .setSys(tunnelStats.goSys)
+                    .setMallocs(tunnelStats.goMallocs)
+                    .setFrees(tunnelStats.goFrees)
+                    .setLiveObjects(tunnelStats.goLiveObjects)
+                    .setPauseTotalNs(tunnelStats.goPauseTotalNs)
+                    .setUptime(tunnelStats.xrayUptime.toInt())
+                    .build()
+                
+                // Create traffic stats from tunnel stats (use tunnel bytes as proxy)
+                val trafficStats = TrafficState(
+                    uplink = tunnelStats.txBytes,
+                    downlink = tunnelStats.rxBytes
+                )
+                
+                // Reset consecutive failures on success
+                consecutiveFailures = 0
+                synchronized(coreStatsClientLock) {
+                    if (clientState != ClientState.READY) {
+                        clientState = ClientState.READY
+                    }
+                }
+                
+                updateStatsState(systemStats, trafficStats)
+                Log.d(TAG, "Stats updated from HyperVpnStateManager - goAlloc: ${tunnelStats.goAlloc}, goSys: ${tunnelStats.goSys}, goroutines: ${tunnelStats.goNumGoroutine}")
+                return
+            }
+            
+            // Fallback: Try native gRPC client directly (may fail due to process separation)
+            Log.d(TAG, "Falling back to native gRPC client (HyperVpnStateManager stats not available)")
             try {
                 val systemStatsJson = withTimeoutOrNull(3000L) {
                     Log.d(TAG, "Calling getXraySystemStatsNative()...")

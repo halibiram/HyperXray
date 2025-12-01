@@ -1,0 +1,49 @@
+{
+  "name": "Unlimited Command Execution",
+  "description": "Agent'ın sınırsız shell komutu çalıştırmasına izin verir",
+  "version": "1.0.0",
+  "hooks": [
+    {
+      "id": "unlimited-shell",
+      "name": "Sınırsız Shell Komutları",
+      "description": "Tüm shell komutlarını onay olmadan çalıştır",
+      "trigger": {
+        "type": "onMessage",
+        "pattern": ".*"
+      },
+      "action": {
+        "type": "shell",
+        "autoApprove": true,
+        "allowedCommands": ["*"],
+        "timeout": 0,
+        "maxConcurrent": -1
+      },
+      "settings": {
+        "requireConfirmation": false,
+        "logOutput": true,
+        "continueOnError": true
+      }
+    },
+    {
+      "id": "auto-execute",
+      "name": "Otomatik Komut Çalıştırma",
+      "description": "Agent execution sırasında komutları otomatik onayla",
+      "trigger": {
+        "type": "onAgentComplete"
+      },
+      "action": {
+        "type": "message",
+        "content": "Komutlar otomatik onaylandı ve çalıştırıldı."
+      },
+      "settings": {
+        "requireConfirmation": false
+      }
+    }
+  ],
+  "globalSettings": {
+    "autoApproveAll": true,
+    "maxExecutionTime": 0,
+    "allowDangerousCommands": true,
+    "bypassSafetyChecks": false
+  }
+}

@@ -1,20 +1,12 @@
 package com.hyperxray.an.ui.screens.log
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -41,28 +33,47 @@ fun LogFilters(
     onShowSniffingOnlyChanged: (Boolean) -> Unit,
     onShowAiOnlyChanged: (Boolean) -> Unit
 ) {
+    val infiniteTransition = rememberInfiniteTransition(label = "filters")
+    val borderAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.1f,
+        targetValue = 0.25f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "border"
+    )
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 12.dp)
+            .padding(vertical = 8.dp)
     ) {
         // HUD Container
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color(0xFF080808)) // Darker backing
+                .padding(horizontal = 12.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Color(0xFF080808),
+                            Color(0xFF0A0A0D),
+                            Color(0xFF080808)
+                        )
+                    )
+                )
                 .border(
                     width = 1.dp,
                     brush = Brush.horizontalGradient(
                         colors = listOf(
-                            Color(0xFF202020),
-                            Color(0xFF303030),
-                            Color(0xFF202020)
+                            LogColorPalette.NeonCyan.copy(alpha = borderAlpha),
+                            Color(0xFF202025),
+                            LogColorPalette.NeonPurple.copy(alpha = borderAlpha)
                         )
                     ),
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(12.dp)
                 )
         ) {
             Row(
@@ -71,45 +82,51 @@ fun LogFilters(
                     .horizontalScroll(rememberScrollState())
                     .padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // Group 1: Levels
                 FilterGroup(label = "LEVEL") {
                     NeonFilterChip(
                         text = "ERR",
                         isSelected = selectedLogLevel == LogLevel.ERROR,
-                        activeColor = Color(0xFFFF0055),
+                        activeColor = LogColorPalette.NeonRed,
                         onClick = { onLogLevelSelected(if (selectedLogLevel == LogLevel.ERROR) null else LogLevel.ERROR) }
                     )
                     NeonFilterChip(
                         text = "WARN",
                         isSelected = selectedLogLevel == LogLevel.WARN,
-                        activeColor = Color(0xFFFFD700),
+                        activeColor = LogColorPalette.NeonYellow,
                         onClick = { onLogLevelSelected(if (selectedLogLevel == LogLevel.WARN) null else LogLevel.WARN) }
                     )
                     NeonFilterChip(
                         text = "INFO",
                         isSelected = selectedLogLevel == LogLevel.INFO,
-                        activeColor = Color(0xFF00FFFF),
+                        activeColor = LogColorPalette.NeonCyan,
                         onClick = { onLogLevelSelected(if (selectedLogLevel == LogLevel.INFO) null else LogLevel.INFO) }
+                    )
+                    NeonFilterChip(
+                        text = "DBG",
+                        isSelected = selectedLogLevel == LogLevel.DEBUG,
+                        activeColor = LogColorPalette.NeonGreen,
+                        onClick = { onLogLevelSelected(if (selectedLogLevel == LogLevel.DEBUG) null else LogLevel.DEBUG) }
                     )
                 }
 
                 VerticalSeparator()
 
                 // Group 2: Transport
-                FilterGroup(label = "NET") {
-                    NeonFilterChip(
-                        text = "UDP",
-                        isSelected = selectedConnectionType == ConnectionType.UDP,
-                        activeColor = Color(0xFF00FF99),
-                        onClick = { onConnectionTypeSelected(if (selectedConnectionType == ConnectionType.UDP) null else ConnectionType.UDP) }
-                    )
+                FilterGroup(label = "NETWORK") {
                     NeonFilterChip(
                         text = "TCP",
                         isSelected = selectedConnectionType == ConnectionType.TCP,
-                        activeColor = Color(0xFF00FF99),
+                        activeColor = LogColorPalette.NeonGreen,
                         onClick = { onConnectionTypeSelected(if (selectedConnectionType == ConnectionType.TCP) null else ConnectionType.TCP) }
+                    )
+                    NeonFilterChip(
+                        text = "UDP",
+                        isSelected = selectedConnectionType == ConnectionType.UDP,
+                        activeColor = LogColorPalette.NeonBlue,
+                        onClick = { onConnectionTypeSelected(if (selectedConnectionType == ConnectionType.UDP) null else ConnectionType.UDP) }
                     )
                 }
 
@@ -120,13 +137,13 @@ fun LogFilters(
                     NeonFilterChip(
                         text = "SNIFF",
                         isSelected = showSniffingOnly,
-                        activeColor = Color(0xFFFF9900),
+                        activeColor = LogColorPalette.NeonOrange,
                         onClick = { onShowSniffingOnlyChanged(!showSniffingOnly) }
                     )
                     NeonFilterChip(
                         text = "AI",
                         isSelected = showAiOnly,
-                        activeColor = Color(0xFFBD00FF),
+                        activeColor = LogColorPalette.NeonPurple,
                         onClick = { onShowAiOnlyChanged(!showAiOnly) }
                     )
                 }
@@ -142,14 +159,15 @@ fun FilterGroup(
 ) {
     Column(
         horizontalAlignment = Alignment.Start,
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Text(
             text = label,
             color = Color.Gray.copy(alpha = 0.5f),
-            fontSize = 9.sp,
+            fontSize = 8.sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp,
             modifier = Modifier.padding(start = 2.dp)
         )
         Row(
@@ -165,12 +183,12 @@ fun VerticalSeparator() {
     Box(
         modifier = Modifier
             .width(1.dp)
-            .height(24.dp)
+            .height(32.dp)
             .background(
                 brush = Brush.verticalGradient(
                     colors = listOf(
                         Color.Transparent,
-                        Color(0xFF303030),
+                        Color(0xFF252530),
                         Color.Transparent
                     )
                 )
@@ -185,6 +203,17 @@ fun NeonFilterChip(
     activeColor: Color,
     onClick: () -> Unit
 ) {
+    val infiniteTransition = rememberInfiniteTransition(label = "chip")
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.6f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glow"
+    )
+    
     val animatedColor by animateColorAsState(
         targetValue = if (isSelected) activeColor else Color(0xFF404040),
         animationSpec = tween(300),
@@ -204,10 +233,10 @@ fun NeonFilterChip(
             .background(animatedBg)
             .border(
                 width = 1.dp,
-                color = if (isSelected) activeColor.copy(alpha = 0.6f) else Color(0xFF252525),
+                color = if (isSelected) activeColor.copy(alpha = glowAlpha) else Color(0xFF202025),
                 shape = RoundedCornerShape(8.dp)
             )
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 14.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -218,21 +247,5 @@ fun NeonFilterChip(
             fontSize = 11.sp,
             letterSpacing = 0.5.sp
         )
-        
-        // Inner glow effect when selected
-        if (isSelected) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .background(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                activeColor.copy(alpha = 0.1f),
-                                Color.Transparent
-                            )
-                        )
-                    )
-            )
-        }
     }
 }

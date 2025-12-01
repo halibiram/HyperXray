@@ -13,6 +13,10 @@
 #include <string.h>
 #include <stdbool.h>
 #include <dlfcn.h>
+#include <unistd.h>  // For usleep() in retry mechanism
+#include <errno.h>   // For errno in verification
+#include <sys/socket.h>  // For socket() in verification
+#include <netinet/in.h>  // For AF_INET
 #include <android/log.h>
 
 #define LOG_TAG "HyperXray-JNI"
@@ -93,20 +97,51 @@ static GetXraySystemStatsFunc go_GetXraySystemStats = NULL;
 static GetXrayTrafficStatsFunc go_GetXrayTrafficStats = NULL;
 static GetXrayLogsFunc go_GetXrayLogs = NULL;
 
+// Forward declarations
+static void register_c_socket_creator(void);
 
-// Socket protector globals (must be declared before use)
-static JavaVM* g_jvm = NULL;
-static jobject g_vpnService = NULL;
-static jmethodID g_protectMethod = NULL;
 
 // Socket protector function type (must match Go's socket_protector_func)
 typedef bool (*socket_protector_func)(int fd);
+
+/**
+ * SocketProtectorState - Enhanced socket protector with retry mechanism
+ * Tracks JNI references and retry configuration for robust socket protection
+ */
+typedef struct {
+    JavaVM* jvm;              // JVM reference for thread attachment
+    jobject vpnService;       // Global ref to VpnService instance
+    jmethodID protectMethod;  // Method ID for protect(int fd)
+    int maxRetries;           // Maximum retry attempts (default: 3)
+    int retryDelayMs;         // Delay between retries in ms (default: 100)
+    bool initialized;         // Whether protector is initialized
+    bool verified;            // Whether protection has been verified
+} SocketProtectorState;
+
+// Global socket protector state with default values
+static SocketProtectorState g_protectorState = {
+    .jvm = NULL,
+    .vpnService = NULL,
+    .protectMethod = NULL,
+    .maxRetries = 3,
+    .retryDelayMs = 100,
+    .initialized = false,
+    .verified = false
+};
+
+// Legacy globals for backward compatibility (will be migrated to g_protectorState)
+static JavaVM* g_jvm = NULL;
+static jobject g_vpnService = NULL;
+static jmethodID g_protectMethod = NULL;
 
 // Export g_protector symbol for Go library
 // Go library expects this symbol to be available during dlopen
 // This must match the type expected by Go: socket_protector_func
 // We export it as a strong symbol to ensure it's available when Go library loads
 __attribute__((visibility("default"))) socket_protector_func g_protector = NULL;
+
+// Forward declarations
+static bool verify_socket_protection(void);
 
 /**
  * Load Go library and resolve symbols
@@ -376,9 +411,18 @@ Java_com_hyperxray_an_vpn_HyperVpnService_startHyperTunnel(
     LOGI("startHyperTunnel called with tunFd=%d", tunFd);
     
     // Verify protector is initialized
-    if (g_protectMethod == NULL) {
-        LOGE("Socket protector not initialized! Call initSocketProtector first!");
+    if (g_protectMethod == NULL || !g_protectorState.initialized) {
+        LOGE("[Protector] ❌ Socket protector not initialized! Call initSocketProtector first!");
         return -30;
+    }
+    
+    // Verify socket protection is working before starting tunnel
+    if (!g_protectorState.verified) {
+        LOGI("[Protector] Running socket protection verification before tunnel start...");
+        if (!verify_socket_protection()) {
+            LOGE("[Protector] ❌ Socket protection verification failed!");
+            return -35;  // Error code for verification failed
+        }
     }
     
     // Ensure Go library is loaded
@@ -1059,38 +1103,134 @@ Java_com_hyperxray_an_vpn_HyperVpnService_dnsResolve(
 static jobject g_serviceInstance = NULL;
 static jmethodID g_logToAiLogHelperMethodID = NULL;
 
-// Socket protector callback - called from Go
-static bool socket_protector_callback(int fd) {
-    if (g_jvm == NULL || g_vpnService == NULL || g_protectMethod == NULL) {
-        LOGE("Protector not initialized!");
+/**
+ * Socket protector callback with retry mechanism - called from Go
+ * 
+ * This function implements robust socket protection with:
+ * - Configurable retry attempts (default: 3)
+ * - Delay between retries (default: 100ms)
+ * - Thread re-attachment on JNI_EDETACHED
+ * - Detailed logging for debugging
+ */
+static bool socket_protector_callback_with_retry(int fd) {
+    // Check if protector is initialized
+    if (!g_protectorState.initialized) {
+        LOGE("[Protector] ❌ Protector not initialized! fd=%d", fd);
         return false;
     }
     
-    JNIEnv* env;
+    if (g_protectorState.jvm == NULL || g_protectorState.vpnService == NULL || 
+        g_protectorState.protectMethod == NULL) {
+        LOGE("[Protector] ❌ Protector state invalid! jvm=%p, vpnService=%p, protectMethod=%p",
+             g_protectorState.jvm, g_protectorState.vpnService, g_protectorState.protectMethod);
+        return false;
+    }
+    
+    JNIEnv* env = NULL;
     bool needDetach = false;
+    int maxRetries = g_protectorState.maxRetries;
+    int retryDelayMs = g_protectorState.retryDelayMs;
     
     // Attach to JVM if needed
-    int getEnvResult = (*g_jvm)->GetEnv(g_jvm, (void**)&env, JNI_VERSION_1_6);
+    int getEnvResult = (*g_protectorState.jvm)->GetEnv(g_protectorState.jvm, (void**)&env, JNI_VERSION_1_6);
     if (getEnvResult == JNI_EDETACHED) {
-        if ((*g_jvm)->AttachCurrentThread(g_jvm, &env, NULL) != 0) {
-            LOGE("Failed to attach thread");
+        LOGD("[Protector] Thread detached, attaching to JVM...");
+        if ((*g_protectorState.jvm)->AttachCurrentThread(g_protectorState.jvm, &env, NULL) != 0) {
+            LOGE("[Protector] ❌ Failed to attach thread for fd=%d", fd);
             return false;
         }
         needDetach = true;
+        LOGD("[Protector] ✅ Thread attached successfully");
     } else if (getEnvResult != JNI_OK) {
-        LOGE("Failed to get JNI environment");
+        LOGE("[Protector] ❌ Failed to get JNI environment: %d", getEnvResult);
         return false;
     }
     
-    // Call VpnService.protect(fd)
-    jboolean result = (*env)->CallBooleanMethod(env, g_vpnService, g_protectMethod, fd);
-    
-    if (needDetach) {
-        (*g_jvm)->DetachCurrentThread(g_jvm);
+    // Retry loop for socket protection
+    bool result = false;
+    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        // Call VpnService.protect(fd)
+        jboolean protectResult = (*env)->CallBooleanMethod(
+            env, g_protectorState.vpnService, g_protectorState.protectMethod, fd);
+        
+        // Check for JNI exceptions
+        if ((*env)->ExceptionCheck(env)) {
+            LOGE("[Protector] ❌ JNI exception during protect() call, attempt %d/%d", attempt, maxRetries);
+            (*env)->ExceptionDescribe(env);
+            (*env)->ExceptionClear(env);
+            
+            if (attempt < maxRetries) {
+                LOGD("[Protector] Retrying in %dms...", retryDelayMs);
+                usleep(retryDelayMs * 1000); // Convert ms to microseconds
+                continue;
+            }
+        } else if (protectResult) {
+            result = true;
+            if (attempt > 1) {
+                LOGI("[Protector] ✅ protect(%d) succeeded on attempt %d/%d", fd, attempt, maxRetries);
+            } else {
+                LOGD("[Protector] ✅ protect(%d) = true", fd);
+            }
+            break;
+        } else {
+            LOGE("[Protector] ❌ protect(%d) returned false, attempt %d/%d", fd, attempt, maxRetries);
+            
+            if (attempt < maxRetries) {
+                LOGD("[Protector] Retrying in %dms...", retryDelayMs);
+                usleep(retryDelayMs * 1000);
+            }
+        }
     }
     
-    LOGI("protect(%d) = %s", fd, result ? "true" : "false");
+    if (!result) {
+        LOGE("[Protector] ❌ All %d protection attempts failed for fd=%d", maxRetries, fd);
+    }
+    
+    // Detach thread if we attached it
+    if (needDetach) {
+        (*g_protectorState.jvm)->DetachCurrentThread(g_protectorState.jvm);
+    }
+    
     return result;
+}
+
+// Legacy callback for backward compatibility (delegates to retry version)
+static bool socket_protector_callback(int fd) {
+    // Use legacy globals if new state not initialized
+    if (!g_protectorState.initialized) {
+        // Fallback to legacy behavior
+        if (g_jvm == NULL || g_vpnService == NULL || g_protectMethod == NULL) {
+            LOGE("Protector not initialized!");
+            return false;
+        }
+        
+        JNIEnv* env;
+        bool needDetach = false;
+        
+        int getEnvResult = (*g_jvm)->GetEnv(g_jvm, (void**)&env, JNI_VERSION_1_6);
+        if (getEnvResult == JNI_EDETACHED) {
+            if ((*g_jvm)->AttachCurrentThread(g_jvm, &env, NULL) != 0) {
+                LOGE("Failed to attach thread");
+                return false;
+            }
+            needDetach = true;
+        } else if (getEnvResult != JNI_OK) {
+            LOGE("Failed to get JNI environment");
+            return false;
+        }
+        
+        jboolean result = (*env)->CallBooleanMethod(env, g_vpnService, g_protectMethod, fd);
+        
+        if (needDetach) {
+            (*g_jvm)->DetachCurrentThread(g_jvm);
+        }
+        
+        LOGI("protect(%d) = %s", fd, result ? "true" : "false");
+        return result;
+    }
+    
+    // Use new retry mechanism
+    return socket_protector_callback_with_retry(fd);
 }
 
 /**
@@ -1146,52 +1286,80 @@ Java_com_hyperxray_an_vpn_HyperVpnService_initSocketProtector(
     JNIEnv* env,
     jobject thiz
 ) {
-    LOGI("Initializing socket protector...");
+    LOGI("[Protector] Initializing socket protector with retry mechanism...");
     
     // Ensure Go library is loaded
     if (!goLibraryLoaded) {
-        LOGD("Go library not loaded, attempting to load...");
+        LOGD("[Protector] Go library not loaded, attempting to load...");
         if (loadGoLibrary(env) != 0) {
-            LOGE("Failed to load Go library");
+            LOGE("[Protector] ❌ Failed to load Go library");
+            g_protectorState.initialized = false;
             return;
         }
     }
     
-    // Save JVM reference
+    // Save JVM reference to both legacy and new state
     (*env)->GetJavaVM(env, &g_jvm);
+    g_protectorState.jvm = g_jvm;
     
     // Save VpnService reference (global ref to prevent GC)
+    // Clean up old references first
     if (g_vpnService != NULL) {
         (*env)->DeleteGlobalRef(env, g_vpnService);
     }
+    if (g_protectorState.vpnService != NULL && g_protectorState.vpnService != g_vpnService) {
+        (*env)->DeleteGlobalRef(env, g_protectorState.vpnService);
+    }
+    
     g_vpnService = (*env)->NewGlobalRef(env, thiz);
+    g_protectorState.vpnService = g_vpnService;
+    
+    if (g_vpnService == NULL) {
+        LOGE("[Protector] ❌ Failed to create global reference to VpnService");
+        g_protectorState.initialized = false;
+        return;
+    }
     
     // Get protect method ID
     jclass clazz = (*env)->GetObjectClass(env, thiz);
     if (clazz == NULL) {
-        LOGE("Failed to get HyperVpnService class");
+        LOGE("[Protector] ❌ Failed to get HyperVpnService class");
+        g_protectorState.initialized = false;
         return;
     }
     
     g_protectMethod = (*env)->GetMethodID(env, clazz, "protect", "(I)Z");
+    g_protectorState.protectMethod = g_protectMethod;
     
     if (g_protectMethod == NULL) {
-        LOGE("Failed to find protect method!");
+        LOGE("[Protector] ❌ Failed to find protect(int) method!");
+        g_protectorState.initialized = false;
         return;
     }
     
-    // Set g_protector to the callback function
+    // Mark as initialized
+    g_protectorState.initialized = true;
+    g_protectorState.verified = false; // Will be verified on first use or explicit call
+    
+    // Set g_protector to the callback function with retry mechanism
     // This ensures the symbol is available when Go library needs it
     g_protector = socket_protector_callback;
-    LOGD("g_protector set to socket_protector_callback");
+    LOGD("[Protector] g_protector set to socket_protector_callback (with retry support)");
     
     // Register callback with Go
     if (go_SetSocketProtector != NULL) {
         go_SetSocketProtector(socket_protector_callback);
-        LOGI("Socket protector initialized successfully!");
+        LOGI("[Protector] ✅ Socket protector initialized successfully!");
+        LOGI("[Protector]    maxRetries=%d, retryDelayMs=%d", 
+             g_protectorState.maxRetries, g_protectorState.retryDelayMs);
     } else {
-        LOGE("SetSocketProtector function not available in Go library!");
+        LOGE("[Protector] ❌ SetSocketProtector function not available in Go library!");
+        g_protectorState.initialized = false;
     }
+    
+    // Register C socket creator with Go library
+    // This allows Go to create sockets via C, bypassing Go runtime's socket management
+    register_c_socket_creator();
 }
 
 /**
@@ -1204,12 +1372,180 @@ Java_com_hyperxray_an_vpn_HyperVpnService_cleanupSocketProtector(
     JNIEnv* env,
     jobject thiz __attribute__((unused))
 ) {
+    LOGI("[Protector] Cleaning up socket protector...");
+    
+    // Clean up legacy globals
     if (g_vpnService != NULL) {
         (*env)->DeleteGlobalRef(env, g_vpnService);
         g_vpnService = NULL;
     }
     g_protectMethod = NULL;
-    LOGI("Socket protector cleaned up");
+    
+    // Clean up new state (vpnService is same reference, already cleaned)
+    g_protectorState.jvm = NULL;
+    g_protectorState.vpnService = NULL;
+    g_protectorState.protectMethod = NULL;
+    g_protectorState.initialized = false;
+    g_protectorState.verified = false;
+    // Keep maxRetries and retryDelayMs at default values for next init
+    
+    // Clear g_protector
+    g_protector = NULL;
+    
+    LOGI("[Protector] ✅ Socket protector cleaned up");
+}
+
+// Function pointer types for C-based socket creation
+typedef int (*CreateProtectedSocketFunc)(int domain, int type, int protocol);
+typedef int (*CreateProtectedSocketTCPFunc)(void);
+typedef int (*CreateProtectedSocketUDPFunc)(void);
+typedef void (*SetCSocketCreatorFunc)(CreateProtectedSocketFunc);
+
+// Function pointers for C socket creation
+static SetCSocketCreatorFunc go_SetCSocketCreator = NULL;
+
+/**
+ * Create a protected TCP socket using C (bypasses Go runtime)
+ * 
+ * This function creates a socket directly in C, protects it via VpnService.protect(),
+ * and returns the fd. This bypasses Go's runtime socket management which can
+ * interfere with socket protection.
+ * 
+ * @return socket fd on success, -1 on error
+ */
+static int create_protected_socket_c(int domain, int type, int protocol) {
+    LOGD("[CSocket] Creating protected socket: domain=%d, type=%d, protocol=%d", domain, type, protocol);
+    
+    // Create socket using C (not Go's syscall.Socket)
+    int fd = socket(domain, type, protocol);
+    if (fd < 0) {
+        LOGE("[CSocket] ❌ Failed to create socket: errno=%d", errno);
+        return -1;
+    }
+    
+    LOGD("[CSocket] Socket created: fd=%d", fd);
+    
+    // Protect the socket immediately
+    if (g_protector != NULL) {
+        bool protected = g_protector(fd);
+        if (!protected) {
+            LOGE("[CSocket] ❌ Failed to protect socket fd=%d", fd);
+            close(fd);
+            return -1;
+        }
+        LOGD("[CSocket] ✅ Socket fd=%d protected successfully", fd);
+    } else {
+        LOGE("[CSocket] ❌ g_protector is NULL, cannot protect socket fd=%d", fd);
+        close(fd);
+        return -1;
+    }
+    
+    return fd;
+}
+
+/**
+ * Create a protected TCP socket (convenience function)
+ */
+static int create_protected_tcp_socket(void) {
+    return create_protected_socket_c(AF_INET, SOCK_STREAM, 0);
+}
+
+/**
+ * Create a protected UDP socket (convenience function)
+ */
+static int create_protected_udp_socket(void) {
+    return create_protected_socket_c(AF_INET, SOCK_DGRAM, 0);
+}
+
+/**
+ * Register C socket creator with Go library
+ * This allows Go to call back into C to create protected sockets
+ */
+static void register_c_socket_creator(void) {
+    if (go_SetCSocketCreator == NULL) {
+        // Try to resolve the symbol
+        if (goLibHandle != NULL) {
+            go_SetCSocketCreator = (SetCSocketCreatorFunc)dlsym(goLibHandle, "SetCSocketCreator");
+            if (go_SetCSocketCreator == NULL) {
+                LOGD("[CSocket] SetCSocketCreator not found in Go library (optional)");
+                return;
+            }
+        } else {
+            LOGD("[CSocket] Go library not loaded, cannot register C socket creator");
+            return;
+        }
+    }
+    
+    // Register our C socket creator with Go
+    go_SetCSocketCreator(create_protected_socket_c);
+    LOGI("[CSocket] ✅ C socket creator registered with Go library");
+}
+
+/**
+ * Verify socket protection is working correctly
+ * Creates a test socket, protects it, and verifies the result
+ * 
+ * @return true if protection is verified working, false otherwise
+ */
+static bool verify_socket_protection(void) {
+    LOGI("[Protector] Verifying socket protection...");
+    
+    // Check if protector is initialized
+    if (!g_protectorState.initialized) {
+        LOGE("[Protector] ❌ Verification failed: protector not initialized");
+        return false;
+    }
+    
+    if (g_protector == NULL) {
+        LOGE("[Protector] ❌ Verification failed: g_protector is NULL");
+        return false;
+    }
+    
+    // Create a test socket
+    int testFd = socket(AF_INET, SOCK_STREAM, 0);
+    if (testFd < 0) {
+        LOGE("[Protector] ❌ Verification failed: could not create test socket (errno=%d)", errno);
+        return false;
+    }
+    
+    LOGD("[Protector] Created test socket fd=%d", testFd);
+    
+    // Try to protect the test socket
+    bool protectResult = g_protector(testFd);
+    
+    // Close the test socket
+    close(testFd);
+    
+    if (protectResult) {
+        g_protectorState.verified = true;
+        LOGI("[Protector] ✅ Verification PASSED: socket protection is working");
+        return true;
+    } else {
+        g_protectorState.verified = false;
+        LOGE("[Protector] ❌ Verification FAILED: protect() returned false for test socket");
+        return false;
+    }
+}
+
+/**
+ * Check if socket protector is verified
+ * 
+ * Java signature: private external fun isSocketProtectorVerified(): Boolean
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_hyperxray_an_vpn_HyperVpnService_isSocketProtectorVerified(
+    JNIEnv* env __attribute__((unused)),
+    jobject thiz __attribute__((unused))
+) {
+    // If already verified, return cached result
+    if (g_protectorState.verified) {
+        LOGD("[Protector] Already verified, returning true");
+        return JNI_TRUE;
+    }
+    
+    // Try to verify now
+    bool result = verify_socket_protection();
+    return result ? JNI_TRUE : JNI_FALSE;
 }
 
 /**
@@ -1279,12 +1615,39 @@ void callAiLogHelper(const char* tag, const char* level, const char* message) {
 }
 
 /**
- * Check if Xray gRPC is available
+ * Check if Xray gRPC is available (for XrayStatsManager)
  * 
  * Java signature: private external fun isXrayGrpcAvailableNative(): Boolean
  */
 JNIEXPORT jboolean JNICALL
 Java_com_hyperxray_an_core_monitor_XrayStatsManager_isXrayGrpcAvailableNative(
+    JNIEnv* env,
+    jobject thiz __attribute__((unused))
+) {
+    if (!goLibraryLoaded) {
+        LOGD("Go library not loaded, attempting to load...");
+        if (loadGoLibrary(env) != 0) {
+            LOGE("Failed to load Go library");
+            return JNI_FALSE;
+        }
+    }
+    
+    if (go_IsXrayGrpcAvailable == NULL) {
+        LOGD("IsXrayGrpcAvailable function not available");
+        return JNI_FALSE;
+    }
+    
+    bool result = go_IsXrayGrpcAvailable();
+    return result ? JNI_TRUE : JNI_FALSE;
+}
+
+/**
+ * Check if Xray gRPC is available (for HyperVpnService)
+ * 
+ * Java signature: private external fun isXrayGrpcAvailableNative(): Boolean
+ */
+JNIEXPORT jboolean JNICALL
+Java_com_hyperxray_an_vpn_HyperVpnService_isXrayGrpcAvailableNative(
     JNIEnv* env,
     jobject thiz __attribute__((unused))
 ) {
@@ -1329,6 +1692,86 @@ Java_com_hyperxray_an_core_monitor_XrayStatsManager_getXraySystemStatsNative(
     }
     
     char* result = go_GetXraySystemStats();
+    if (result == NULL) {
+        return NULL;
+    }
+    
+    jstring jresult = (*env)->NewStringUTF(env, result);
+    
+    // Free the C string
+    if (go_FreeString != NULL) {
+        go_FreeString(result);
+    } else {
+        free(result);
+    }
+    
+    return jresult;
+}
+
+/**
+ * Get Xray system stats from native gRPC client (for HyperVpnService)
+ * 
+ * Java signature: private external fun getXraySystemStatsNative(): String?
+ */
+JNIEXPORT jstring JNICALL
+Java_com_hyperxray_an_vpn_HyperVpnService_getXraySystemStatsNative(
+    JNIEnv* env,
+    jobject thiz __attribute__((unused))
+) {
+    if (!goLibraryLoaded) {
+        LOGD("Go library not loaded, attempting to load...");
+        if (loadGoLibrary(env) != 0) {
+            LOGE("Failed to load Go library");
+            return NULL;
+        }
+    }
+    
+    if (go_GetXraySystemStats == NULL) {
+        LOGD("GetXraySystemStats function not available");
+        return NULL;
+    }
+    
+    char* result = go_GetXraySystemStats();
+    if (result == NULL) {
+        return NULL;
+    }
+    
+    jstring jresult = (*env)->NewStringUTF(env, result);
+    
+    // Free the C string
+    if (go_FreeString != NULL) {
+        go_FreeString(result);
+    } else {
+        free(result);
+    }
+    
+    return jresult;
+}
+
+/**
+ * Get Xray traffic stats from native gRPC client (for HyperVpnService)
+ * 
+ * Java signature: private external fun getXrayTrafficStatsNative(): String?
+ */
+JNIEXPORT jstring JNICALL
+Java_com_hyperxray_an_vpn_HyperVpnService_getXrayTrafficStatsNative(
+    JNIEnv* env,
+    jobject thiz __attribute__((unused))
+) {
+    if (!goLibraryLoaded) {
+        LOGD("Go library not loaded, attempting to load...");
+        if (loadGoLibrary(env) != 0) {
+            LOGE("Failed to load Go library");
+            return NULL;
+        }
+    }
+    
+    if (go_GetXrayTrafficStats == NULL) {
+        LOGD("GetXrayTrafficStats function not available");
+        return NULL;
+    }
+    
+    char* result = go_GetXrayTrafficStats();
     if (result == NULL) {
         return NULL;
     }

@@ -363,23 +363,28 @@ func (t *HyperTunnel) Start() error {
 	// Test Protected Dialer BEFORE starting Xray
 	// This verifies that socket protection is working correctly
 	// and can reach the internet without VPN routing loop
+	// NOTE: This test can fail in certain conditions (tethering, restricted networks)
+	// but Xray may still work, so we continue with a warning instead of failing
 	connectivityErr := TestConnectivity()
 	if connectivityErr != nil {
-		logError("[Tunnel] ")
-		logError("[Tunnel] ❌ Protected Dialer connectivity test FAILED!")
-		logError("[Tunnel]    Error: %v", connectivityErr)
-		logError("[Tunnel] ")
-		logError("[Tunnel] This indicates:")
-		logError("[Tunnel]    1. Protected Dialer may be reporting SUCCESS but blocking traffic")
-		logError("[Tunnel]    2. Socket protection is not binding to correct network interface")
-		logError("[Tunnel]    3. Firewall is blocking outbound connections")
-		logError("[Tunnel]    4. Network connectivity issue")
-		logError("[Tunnel] ")
-		logError("[Tunnel] ⚠️ Cannot proceed - Protected Dialer is not working!")
-		logError("[Tunnel] ⚠️ Xray will not be able to connect to server.")
-		logError("[Tunnel] ")
-		// Don't fail - continue anyway, but log the issue
-		logWarn("[Tunnel] ⚠️ Continuing despite Protected Dialer test failure (may cause issues)")
+		logWarn("[Tunnel] ")
+		logWarn("[Tunnel] ⚠️ Protected Dialer connectivity test FAILED!")
+		logWarn("[Tunnel]    Error: %v", connectivityErr)
+		logWarn("[Tunnel] ")
+		logWarn("[Tunnel] This may indicate:")
+		logWarn("[Tunnel]    1. Tethering/Hotspot is active (can cause false negatives)")
+		logWarn("[Tunnel]    2. Network interface binding issue")
+		logWarn("[Tunnel]    3. Firewall blocking test connections")
+		logWarn("[Tunnel]    4. Temporary network connectivity issue")
+		logWarn("[Tunnel] ")
+		logWarn("[Tunnel] ℹ️ Proceeding anyway - Xray may still work correctly")
+		logWarn("[Tunnel] ℹ️ Socket protection (VpnService.protect) is still active")
+		logWarn("[Tunnel] ")
+		// NOTE: Don't fail here - the test can give false negatives when:
+		// - Tethering/Hotspot is active
+		// - Network is temporarily slow
+		// - Firewall blocks test endpoints but allows Xray server
+		// Xray will fail later with a more specific error if there's a real issue
 	} else {
 		logInfo("[Tunnel] ")
 		logInfo("[Tunnel] ✅ Protected Dialer connectivity test PASSED!")

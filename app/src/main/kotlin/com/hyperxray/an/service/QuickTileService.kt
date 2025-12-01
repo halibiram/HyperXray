@@ -104,7 +104,11 @@ class QuickTileService : TileService() {
         Intent(this, HyperVpnService::class.java).apply {
             this.action = action
         }.also { intent ->
-            startService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
         }
     }
 

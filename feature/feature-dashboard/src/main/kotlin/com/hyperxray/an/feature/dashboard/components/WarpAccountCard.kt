@@ -1,41 +1,40 @@
 package com.hyperxray.an.feature.dashboard.components
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.*
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.hyperxray.an.feature.dashboard.DashboardColors
 
-/**
- * Futuristic WARP Account card component
- * Displays Cloudflare WARP account information with modern glassmorphism design
- */
+private object WarpColors {
+    val Orange = Color(0xFFFF6B35)
+    val Amber = Color(0xFFFF8C42)
+    val Gold = Color(0xFFFFA500)
+    val Cyan = Color(0xFF00F5FF)
+    val Green = Color(0xFF00FF88)
+    val Yellow = Color(0xFFFFE500)
+    val Red = Color(0xFFFF3366)
+}
+
+
 @Composable
 fun WarpAccountCard(
     accountExists: Boolean,
@@ -46,10 +45,33 @@ fun WarpAccountCard(
     warpEnabled: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val warpGradient = DashboardColors.warpGradient()
-    val successColor = DashboardColors.successColor()
-    val errorColor = DashboardColors.errorColor()
-    val warningColor = DashboardColors.warningColor()
+    val infiniteTransition = rememberInfiniteTransition(label = "warp")
+    
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2000),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glow"
+    )
+    
+    val rotationAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(8000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "rotation"
+    )
+    
+    val primaryColor = when {
+        accountExists && warpEnabled -> WarpColors.Green
+        accountExists -> WarpColors.Orange
+        else -> Color(0xFF404060)
+    }
     
     Box(
         modifier = modifier
@@ -58,269 +80,229 @@ fun WarpAccountCard(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xFF000000).copy(alpha = 0.7f), // Obsidian glass base
-                        Color(0xFF0A0A0A).copy(alpha = 0.5f)
+                        Color(0xFF0A0A15).copy(alpha = 0.95f),
+                        Color(0xFF050510).copy(alpha = 0.9f)
                     )
                 )
             )
             .border(
-                width = 1.5.dp,
-                brush = Brush.linearGradient(warpGradient),
+                width = 2.dp,
+                brush = Brush.sweepGradient(
+                    colors = if (accountExists) {
+                        listOf(WarpColors.Orange, WarpColors.Amber, WarpColors.Gold, WarpColors.Orange)
+                    } else {
+                        listOf(Color(0xFF1A1A2E), Color(0xFF16213E), Color(0xFF1A1A2E))
+                    }
+                ),
                 shape = RoundedCornerShape(28.dp)
             )
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        colors = warpGradient.map { it.copy(alpha = 0.12f) } // Enhanced neon tint
+            .drawBehind {
+                if (accountExists) {
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                WarpColors.Orange.copy(alpha = glowAlpha * 0.15f),
+                                Color.Transparent
+                            ),
+                            radius = size.maxDimension
+                        )
                     )
-                )
+                }
+            }
+            .padding(28.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Header with icon and title
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    // Animated WARP Logo
+                    Box(
+                        modifier = Modifier.size(56.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        // WARP Icon Box
+                        // Rotating ring
+                        Canvas(modifier = Modifier.size(56.dp)) {
+                            drawArc(
+                                brush = Brush.sweepGradient(
+                                    colors = listOf(WarpColors.Orange, WarpColors.Amber, WarpColors.Gold, Color.Transparent)
+                                ),
+                                startAngle = rotationAngle,
+                                sweepAngle = 280f,
+                                useCenter = false,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+                            )
+                        }
+                        // Inner logo
                         Box(
                             modifier = Modifier
-                                .size(48.dp)
+                                .size(40.dp)
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(
-                                    Brush.linearGradient(warpGradient)
+                                    Brush.linearGradient(
+                                        colors = listOf(WarpColors.Orange, WarpColors.Amber)
+                                    )
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
-                            // Cloudflare WARP symbol (simplified as text for now)
                             Text(
                                 text = "W",
                                 style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Black,
+                                    fontFamily = FontFamily.Monospace
                                 ),
                                 color = Color.White
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "WARP Account",
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = (-0.3).sp
-                                ),
-                                color = Color.White
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = if (accountExists) "Cloudflare WARP" else "No account found",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (accountExists) successColor else Color(0xFF808080)
                             )
                         }
                     }
                     
-                    // Status indicator
-                    Box(
-                        modifier = Modifier
-                            .size(12.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(
-                                if (accountExists) {
-                                    if (warpEnabled) successColor else warningColor
-                                } else {
-                                    Color(0xFF404040)
-                                }
+                    Column {
+                        Box {
+                            Text(
+                                text = "CLOUDFLARE WARP",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Black,
+                                    letterSpacing = 2.sp,
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                color = WarpColors.Orange.copy(alpha = 0.3f),
+                                modifier = Modifier.blur(4.dp)
                             )
-                    )
-                }
-                
-                // Account details (only show if account exists)
-                AnimatedVisibility(
-                    visible = accountExists,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
-                ) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        // Account Type Badge
-                        accountType?.let { type ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(
-                                        Brush.horizontalGradient(
-                                            colors = listOf(
-                                                warpGradient[0].copy(alpha = 0.15f),
-                                                warpGradient[1].copy(alpha = 0.1f)
-                                            )
-                                        )
-                                    )
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(warpGradient[0])
-                                )
-                                Text(
-                                    text = "Type: $type",
-                                    style = MaterialTheme.typography.labelLarge.copy(
-                                        fontWeight = FontWeight.Medium
-                                    ),
-                                    color = warpGradient[0]
-                                )
-                            }
-                        }
-                        
-                        // License Status
-                        license?.let {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(
-                                        Brush.horizontalGradient(
-                                            colors = listOf(
-                                                successColor.copy(alpha = 0.15f),
-                                                successColor.copy(alpha = 0.1f)
-                                            )
-                                        )
-                                    )
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(successColor)
-                                )
-                                Text(
-                                    text = "WARP+ Licensed",
-                                    style = MaterialTheme.typography.labelLarge.copy(
-                                        fontWeight = FontWeight.Medium
-                                    ),
-                                    color = successColor
-                                )
-                            }
-                        } ?: run {
-                            if (warpEnabled) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(
-                                            Brush.horizontalGradient(
-                                                colors = listOf(
-                                                    warningColor.copy(alpha = 0.15f),
-                                                    warningColor.copy(alpha = 0.1f)
-                                                )
-                                            )
-                                        )
-                                        .padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(warningColor)
-                                    )
-                                    Text(
-                                        text = "Free WARP",
-                                        style = MaterialTheme.typography.labelLarge.copy(
-                                            fontWeight = FontWeight.Medium
-                                        ),
-                                        color = warningColor
-                                    )
-                                }
-                            }
-                        }
-                        
-                        // Public Key (truncated)
-                        publicKey?.let { key ->
-                            InfoRow(
-                                label = "Public Key",
-                                value = if (key.length > 32) {
-                                    "${key.take(16)}...${key.takeLast(8)}"
-                                } else {
-                                    key
-                                },
-                                color = warpGradient[1]
+                            Text(
+                                text = "CLOUDFLARE WARP",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Black,
+                                    letterSpacing = 2.sp,
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                color = Color.White
                             )
                         }
-                        
-                        // Endpoint
-                        endpoint?.let { ep ->
-                            InfoRow(
-                                label = "Endpoint",
-                                value = ep,
-                                color = warpGradient[2]
-                            )
-                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (accountExists) "ACCOUNT ACTIVE" else "NO ACCOUNT",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 1.sp
+                            ),
+                            color = if (accountExists) WarpColors.Green else Color(0xFF606080)
+                        )
                     }
                 }
                 
-                // No account message
-                AnimatedVisibility(
-                    visible = !accountExists,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                Brush.horizontalGradient(
-                                    colors = listOf(
-                                        Color(0xFF1A1A1A).copy(alpha = 0.6f),
-                                        Color(0xFF0F0F0F).copy(alpha = 0.4f)
-                                    )
-                                )
+                // Status orb
+                Box(
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(primaryColor, primaryColor.copy(alpha = 0.5f))
                             )
-                            .border(
-                                1.dp,
-                                Color(0xFF2A2A2A),
-                                RoundedCornerShape(12.dp)
-                            )
-                            .padding(16.dp)
+                        )
+                )
+            }
+
+
+            // Account Details
+            AnimatedVisibility(
+                visible = accountExists,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // Account Type & License Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "No WARP Account",
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = FontWeight.Medium
-                                ),
-                                color = Color(0xFF808080)
-                            )
-                            Text(
-                                text = "Register a new account or load existing configuration",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF606060)
+                        accountType?.let { type ->
+                            NeonInfoBadge(
+                                label = "TYPE",
+                                value = type.uppercase(),
+                                color = WarpColors.Orange,
+                                modifier = Modifier.weight(1f)
                             )
                         }
+                        
+                        NeonInfoBadge(
+                            label = "LICENSE",
+                            value = if (license != null) "WARP+" else "FREE",
+                            color = if (license != null) WarpColors.Green else WarpColors.Yellow,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    
+                    // Public Key
+                    publicKey?.let { key ->
+                        NeonInfoRow(
+                            label = "PUBLIC KEY",
+                            value = if (key.length > 32) "${key.take(12)}...${key.takeLast(8)}" else key,
+                            color = WarpColors.Cyan
+                        )
+                    }
+                    
+                    // Endpoint
+                    endpoint?.let { ep ->
+                        NeonInfoRow(
+                            label = "ENDPOINT",
+                            value = ep,
+                            color = WarpColors.Amber
+                        )
+                    }
+                    
+                    // WARP Status
+                    NeonInfoRow(
+                        label = "STATUS",
+                        value = if (warpEnabled) "⚡ ENABLED" else "◉ DISABLED",
+                        color = if (warpEnabled) WarpColors.Green else Color(0xFF606080)
+                    )
+                }
+            }
+            
+            // No Account State
+            AnimatedVisibility(
+                visible = !accountExists,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFF0A0A15).copy(alpha = 0.8f))
+                        .border(1.dp, Color(0xFF1A1A2E), RoundedCornerShape(16.dp))
+                        .padding(20.dp)
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "◉ NO WARP ACCOUNT",
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 1.sp
+                            ),
+                            color = Color(0xFF606080)
+                        )
+                        Text(
+                            text = "Register or load existing configuration",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = Color(0xFF404060)
+                        )
                     }
                 }
             }
@@ -329,7 +311,55 @@ fun WarpAccountCard(
 }
 
 @Composable
-private fun InfoRow(
+private fun NeonInfoBadge(
+    label: String,
+    value: String,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(color.copy(alpha = 0.1f))
+            .border(1.dp, color.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+            .padding(14.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    letterSpacing = 1.sp
+                ),
+                color = Color(0xFF808090)
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Box {
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    color = color.copy(alpha = 0.3f),
+                    modifier = Modifier.blur(2.dp)
+                )
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    color = color
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NeonInfoRow(
     label: String,
     value: String,
     color: Color,
@@ -339,34 +369,40 @@ private fun InfoRow(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(
-                Brush.horizontalGradient(
-                    colors = listOf(
-                        color.copy(alpha = 0.1f),
-                        color.copy(alpha = 0.05f)
-                    )
-                )
-            )
-            .padding(12.dp),
+            .background(color.copy(alpha = 0.08f))
+            .border(1.dp, color.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+            .padding(14.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = Color(0xFF808080)
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontWeight = FontWeight.Medium
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontFamily = FontFamily.Monospace,
+                letterSpacing = 1.sp
             ),
-            color = color,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.width(200.dp)
+            color = Color(0xFF808090)
         )
+        Box {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                ),
+                color = color.copy(alpha = 0.3f),
+                modifier = Modifier.blur(2.dp)
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                ),
+                color = color,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }
-
-

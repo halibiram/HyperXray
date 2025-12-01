@@ -110,7 +110,19 @@ class HyperVpnStateManager(private val context: Context) {
         val uptime: Long = 0, // seconds
         val latency: Long = 0, // milliseconds
         val packetLoss: Double = 0.0, // percentage
-        val throughput: Double = 0.0 // bytes per second
+        val throughput: Double = 0.0, // bytes per second
+        val grpcAvailable: Boolean = false, // gRPC availability from VPN service process
+        // Go runtime stats from gRPC (Xray-core embedded in native Go library)
+        val goAlloc: Long = 0,           // Go runtime allocated memory in bytes
+        val goTotalAlloc: Long = 0,      // Go runtime total allocated memory in bytes
+        val goSys: Long = 0,             // Go runtime system memory in bytes
+        val goMallocs: Long = 0,         // Go runtime total mallocs
+        val goFrees: Long = 0,           // Go runtime total frees
+        val goLiveObjects: Long = 0,     // Go runtime live objects (mallocs - frees)
+        val goPauseTotalNs: Long = 0,    // Go runtime total GC pause time in nanoseconds
+        val goNumGoroutine: Long = 0,    // Go runtime number of goroutines
+        val goNumGC: Long = 0,           // Go runtime number of GC cycles
+        val xrayUptime: Long = 0         // Xray-core uptime in seconds
     ) {
         val totalBytes: Long get() = txBytes + rxBytes
         val totalPackets: Long get() = txPackets + rxPackets
@@ -130,7 +142,19 @@ class HyperVpnStateManager(private val context: Context) {
                         uptime = obj.optLong("uptime", 0),
                         latency = obj.optLong("latency", 0),
                         packetLoss = obj.optDouble("packetLoss", 0.0),
-                        throughput = obj.optDouble("throughput", 0.0)
+                        throughput = obj.optDouble("throughput", 0.0),
+                        grpcAvailable = obj.optBoolean("grpcAvailable", false),
+                        // Go runtime stats
+                        goAlloc = obj.optLong("goAlloc", 0),
+                        goTotalAlloc = obj.optLong("goTotalAlloc", 0),
+                        goSys = obj.optLong("goSys", 0),
+                        goMallocs = obj.optLong("goMallocs", 0),
+                        goFrees = obj.optLong("goFrees", 0),
+                        goLiveObjects = obj.optLong("goLiveObjects", 0),
+                        goPauseTotalNs = obj.optLong("goPauseTotalNs", 0),
+                        goNumGoroutine = obj.optLong("goNumGoroutine", 0),
+                        goNumGC = obj.optLong("goNumGC", 0),
+                        xrayUptime = obj.optLong("xrayUptime", 0)
                     )
                 } catch (e: Exception) {
                     Log.e(TAG, "Error parsing stats JSON: ${e.message}", e)

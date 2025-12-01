@@ -222,7 +222,7 @@ fun AppNavHost(
             popExitTransition = { popExitTransition() }
         ) {
             ToolScreenWrapper(title = "Ping Test", navController = navController) {
-                PingTestTool()
+                ServerLatencyTesterTool()
             }
         }
 
@@ -246,7 +246,7 @@ fun AppNavHost(
             popExitTransition = { popExitTransition() }
         ) {
             ToolScreenWrapper(title = "Network Info", navController = navController) {
-                NetworkInfoTool()
+                IpInfoTool()
             }
         }
 
@@ -258,7 +258,7 @@ fun AppNavHost(
             popExitTransition = { popExitTransition() }
         ) {
             ToolScreenWrapper(title = "Speed Test", navController = navController) {
-                SpeedTestTool()
+                ServerLatencyTesterTool()
             }
         }
 
@@ -270,7 +270,7 @@ fun AppNavHost(
             popExitTransition = { popExitTransition() }
         ) {
             ToolScreenWrapper(title = "Port Scanner", navController = navController) {
-                PortScannerTool()
+                FirewallTesterTool()
             }
         }
 
@@ -282,7 +282,7 @@ fun AppNavHost(
             popExitTransition = { popExitTransition() }
         ) {
             ToolScreenWrapper(title = "Traceroute", navController = navController) {
-                TracerouteTool()
+                ServerLatencyTesterTool()
             }
         }
 
@@ -294,7 +294,7 @@ fun AppNavHost(
             popExitTransition = { popExitTransition() }
         ) {
             ToolScreenWrapper(title = "Wake on LAN", navController = navController) {
-                WakeOnLanTool()
+                MacAddressLookupTool()
             }
         }
 
@@ -306,7 +306,7 @@ fun AppNavHost(
             popExitTransition = { popExitTransition() }
         ) {
             ToolScreenWrapper(title = "Subnet Calculator", navController = navController) {
-                SubnetCalculatorTool()
+                IpInfoTool()
             }
         }
 
@@ -318,7 +318,7 @@ fun AppNavHost(
             popExitTransition = { popExitTransition() }
         ) {
             ToolScreenWrapper(title = "Whois Lookup", navController = navController) {
-                WhoisLookupTool()
+                GeoIpLookupTool()
             }
         }
 
@@ -330,7 +330,7 @@ fun AppNavHost(
             popExitTransition = { popExitTransition() }
         ) {
             ToolScreenWrapper(title = "DNS Lookup", navController = navController) {
-                DnsLookupTool()
+                DnsBenchmarkTool()
             }
         }
 
@@ -342,7 +342,7 @@ fun AppNavHost(
             popExitTransition = { popExitTransition() }
         ) {
             ToolScreenWrapper(title = "SSL Certificate Checker", navController = navController) {
-                SslCertificateCheckerTool()
+                FirewallTesterTool()
             }
         }
 
@@ -366,7 +366,7 @@ fun AppNavHost(
             popExitTransition = { popExitTransition() }
         ) {
             ToolScreenWrapper(title = "LAN Scanner", navController = navController) {
-                LanScannerTool()
+                IpInfoTool()
             }
         }
 
@@ -378,7 +378,7 @@ fun AppNavHost(
             popExitTransition = { popExitTransition() }
         ) {
             ToolScreenWrapper(title = "HTTP Client", navController = navController) {
-                HttpClientTool()
+                HttpHeadersViewerTool()
             }
         }
 
@@ -450,7 +450,7 @@ fun AppNavHost(
             popExitTransition = { popExitTransition() }
         ) {
             ToolScreenWrapper(title = "Password Generator", navController = navController) {
-                PasswordGeneratorTool()
+                Base64ConverterTool()
             }
         }
     }

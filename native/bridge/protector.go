@@ -1,6 +1,39 @@
 package bridge
 
+/*
+#include <stdlib.h>
+
+// C socket creator function type - creates a protected socket via JNI
+// This bypasses Go runtime's socket management which can interfere with protection
+typedef int (*c_socket_creator_func)(int domain, int type, int protocol);
+
+// Global C socket creator callback (set by JNI)
+static c_socket_creator_func g_c_socket_creator = NULL;
+
+// Set the C socket creator callback (static to avoid duplicate symbol errors)
+static void set_c_socket_creator(c_socket_creator_func creator) {
+    g_c_socket_creator = creator;
+}
+
+// Create a protected socket via C (returns fd or -1 on error)
+// Static to avoid duplicate symbol errors when linking
+static int create_protected_socket_via_c(int domain, int type, int protocol) {
+    if (g_c_socket_creator == NULL) {
+        return -1;
+    }
+    return g_c_socket_creator(domain, type, protocol);
+}
+
+// Check if C socket creator is available
+// Static to avoid duplicate symbol errors when linking
+static int is_c_socket_creator_available() {
+    return g_c_socket_creator != NULL ? 1 : 0;
+}
+*/
+import "C"
+
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -8,7 +41,114 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 )
+
+// ProtectionState represents the current state of socket protection
+type ProtectionState int
+
+const (
+	ProtectionStateUninitialized ProtectionState = iota
+	ProtectionStateInitialized
+	ProtectionStateVerified
+	ProtectionStateFailed
+)
+
+// String returns string representation of ProtectionState
+func (s ProtectionState) String() string {
+	switch s {
+	case ProtectionStateUninitialized:
+		return "Uninitialized"
+	case ProtectionStateInitialized:
+		return "Initialized"
+	case ProtectionStateVerified:
+		return "Verified"
+	case ProtectionStateFailed:
+		return "Failed"
+	default:
+		return "Unknown"
+	}
+}
+
+// ProtectionResult contains detailed protection outcome for diagnostics
+type ProtectionResult struct {
+	Success    bool      `json:"success"`
+	Retries    int       `json:"retries"`
+	Error      string    `json:"error,omitempty"`
+	Interface  string    `json:"interface,omitempty"`
+	PhysicalIP string    `json:"physicalIP,omitempty"`
+	Duration   int64     `json:"durationMs"`
+	Timestamp  time.Time `json:"timestamp"`
+}
+
+// ToJSON returns JSON representation of ProtectionResult
+func (r *ProtectionResult) ToJSON() string {
+	data, err := json.Marshal(r)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
+
+// DiagnosticLog represents a single diagnostic log entry
+type DiagnosticLog struct {
+	Timestamp  time.Time `json:"timestamp"`
+	Operation  string    `json:"operation"` // "init", "protect", "dial", "verify"
+	Fd         int       `json:"fd,omitempty"`
+	Success    bool      `json:"success"`
+	Error      string    `json:"error,omitempty"`
+	Interface  string    `json:"interface,omitempty"`
+	PhysicalIP string    `json:"physicalIP,omitempty"`
+	Duration   int64     `json:"durationMs"`
+}
+
+// Diagnostic log storage
+var (
+	diagnosticLogs     []DiagnosticLog
+	diagnosticLogsMu   sync.RWMutex
+	maxDiagnosticLogs  = 100
+	protectionState    = ProtectionStateUninitialized
+	protectionStateMu  sync.RWMutex
+)
+
+// addDiagnosticLog adds a log entry to the diagnostic log buffer
+func addDiagnosticLog(log DiagnosticLog) {
+	diagnosticLogsMu.Lock()
+	defer diagnosticLogsMu.Unlock()
+	
+	diagnosticLogs = append(diagnosticLogs, log)
+	// Keep only last N logs
+	if len(diagnosticLogs) > maxDiagnosticLogs {
+		diagnosticLogs = diagnosticLogs[len(diagnosticLogs)-maxDiagnosticLogs:]
+	}
+}
+
+// GetDiagnosticLogs returns recent diagnostic logs as JSON
+func GetDiagnosticLogs() string {
+	diagnosticLogsMu.RLock()
+	defer diagnosticLogsMu.RUnlock()
+	
+	data, err := json.Marshal(diagnosticLogs)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
+
+// GetProtectionState returns current protection state
+func GetProtectionState() ProtectionState {
+	protectionStateMu.RLock()
+	defer protectionStateMu.RUnlock()
+	return protectionState
+}
+
+// setProtectionState sets the protection state
+func setProtectionState(state ProtectionState) {
+	protectionStateMu.Lock()
+	defer protectionStateMu.Unlock()
+	protectionState = state
+	logInfo("[Protector] State changed to: %s", state.String())
+}
 
 // SocketProtector is a function that protects a socket from VPN routing
 // It should call VpnService.protect(fd) on Android
@@ -37,7 +177,48 @@ func SetSocketProtector(protector SocketProtector) {
 	protectorMutex.Lock()
 	defer protectorMutex.Unlock()
 	globalProtector = protector
-	logInfo("[Protector] Socket protector set")
+	
+	if protector != nil {
+		setProtectionState(ProtectionStateInitialized)
+		logInfo("[Protector] Socket protector set")
+	} else {
+		setProtectionState(ProtectionStateUninitialized)
+		logWarn("[Protector] Socket protector cleared")
+	}
+	
+	// Add diagnostic log
+	addDiagnosticLog(DiagnosticLog{
+		Timestamp: time.Now(),
+		Operation: "init",
+		Success:   protector != nil,
+	})
+}
+
+// C socket creator availability flag
+var cSocketCreatorAvailable bool
+
+//export SetCSocketCreator
+func SetCSocketCreator(creator unsafe.Pointer) {
+	C.set_c_socket_creator(C.c_socket_creator_func(creator))
+	cSocketCreatorAvailable = creator != nil
+	if creator != nil {
+		logInfo("[Protector] C socket creator set - will use C-based socket creation")
+	} else {
+		logWarn("[Protector] C socket creator cleared")
+	}
+}
+
+// IsCSocketCreatorAvailable returns true if C socket creator is available
+func IsCSocketCreatorAvailable() bool {
+	return C.is_c_socket_creator_available() == 1
+}
+
+// CreateProtectedSocketViaC creates a protected socket using C (bypasses Go runtime)
+// This is the preferred method as it avoids Go runtime's socket management
+// Returns fd on success, -1 on error
+func CreateProtectedSocketViaC(domain, sockType, protocol int) int {
+	fd := C.create_protected_socket_via_c(C.int(domain), C.int(sockType), C.int(protocol))
+	return int(fd)
 }
 
 // ProtectSocket protects a socket file descriptor from VPN routing
@@ -124,16 +305,22 @@ func GetLocalPhysicalIP() (net.IP, error) {
 		ifaceChan := make(chan string, 1)
 
 		go func() {
-			ip, iface, err := getLocalPhysicalIPInternalWithIface()
+			// Try aggressive lookup first - optimized for VPN scenarios
+			ip, iface, err := getLocalPhysicalIPInternalAggressive()
 			if err != nil {
-				errChan <- err
-				return
+				// Fallback to standard lookup if aggressive lookup fails
+				logDebug("[ProtectedDialer] Aggressive lookup failed, trying standard lookup...")
+				ip, iface, err = getLocalPhysicalIPInternalWithIface()
+				if err != nil {
+					errChan <- err
+					return
+				}
 			}
 			ipChan <- ip
 			ifaceChan <- iface
 		}()
 
-		// Wait for result with shorter timeout for first call
+		// Wait for result with timeout for first call (increased timeout for better success rate)
 		select {
 		case ip := <-ipChan:
 			iface := <-ifaceChan
@@ -143,12 +330,16 @@ func GetLocalPhysicalIP() (net.IP, error) {
 			physicalIPCache.timestamp = time.Now()
 			physicalIPCache.iface = iface
 			physicalIPCache.Unlock()
-			logInfo("[ProtectedDialer] ✅ Quick lookup succeeded: %s (interface: %s)", ip.String(), iface)
-			return ip, nil
+			if ip != nil {
+				logInfo("[ProtectedDialer] ✅ Quick lookup succeeded: %s (interface: %s)", ip.String(), iface)
+				return ip, nil
+			} else {
+				logWarn("[ProtectedDialer] ⚠️ Quick lookup returned nil IP (non-fatal)")
+			}
 		case err := <-errChan:
 			logWarn("[ProtectedDialer] ⚠️ Quick lookup failed: %v (non-fatal)", err)
 			// Continue to trigger async refresh
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(500 * time.Millisecond): // Reduced timeout for aggressive lookup
 			logWarn("[ProtectedDialer] ⚠️ Quick lookup timeout (non-fatal), triggering async refresh...")
 			// Continue to trigger async refresh
 		}
@@ -156,7 +347,7 @@ func GetLocalPhysicalIP() (net.IP, error) {
 		// Cache expired but has value - trigger async refresh
 		logDebug("[ProtectedDialer] Cache expired, triggering async refresh...")
 		go refreshPhysicalIPCache()
-		// Return stale cache value
+		// Return stale cache value (better than nil)
 		logDebug("[ProtectedDialer] ⚠️ Returning stale cache: %s (expired by %v)", 
 			cachedIP.String(), now.Sub(cachedTimestamp))
 		return cachedIP, nil
@@ -166,7 +357,9 @@ func GetLocalPhysicalIP() (net.IP, error) {
 	go refreshPhysicalIPCache()
 
 	// Return nil if quick lookup failed (non-fatal)
+	// Binding is optional - socket protection is sufficient
 	logWarn("[ProtectedDialer] ⚠️ No cached IP available, returning nil (non-fatal)")
+	logWarn("[ProtectedDialer] ⚠️ Socket binding will be skipped - protection is sufficient")
 	return nil, nil
 }
 
@@ -230,6 +423,71 @@ func InvalidatePhysicalIPCache() {
 	physicalIPCache.timestamp = time.Time{}
 	physicalIPCache.iface = ""
 	logInfo("[ProtectedDialer] Cache invalidated")
+}
+
+// getLocalPhysicalIPInternalAggressive performs aggressive physical IP lookup for VPN scenarios
+// This is optimized for when VPN is active and default route is TUN interface
+func getLocalPhysicalIPInternalAggressive() (net.IP, string, error) {
+	logDebug("[ProtectedDialer] Starting aggressive physical IP lookup...")
+
+	// Skip /proc/net/route check entirely when VPN is likely active
+	// Go directly to interface enumeration which is more reliable for VPN scenarios
+
+	// Try common physical interface names first (fast path)
+	commonPhysicalInterfaces := []string{
+		// WiFi interfaces (most common and reliable)
+		"wlan0", "wlan1", "wlan2",
+		// Ethernet (less common but fast)
+		"eth0", "eth1",
+		// Mobile data (may be slower but physical)
+		"rmnet0", "rmnet1", "rmnet_data0", "rmnet_data1",
+	}
+
+	for _, ifaceName := range commonPhysicalInterfaces {
+		ifaceObj, err := net.InterfaceByName(ifaceName)
+		if err != nil {
+			continue // Interface doesn't exist, try next
+		}
+
+		// Skip if interface is down
+		if ifaceObj.Flags&net.FlagUp == 0 {
+			continue
+		}
+
+		// Skip TUN interfaces
+		if strings.HasPrefix(ifaceName, "tun") || strings.HasPrefix(ifaceName, "wg") {
+			continue
+		}
+
+		// Get addresses (skip error checking for speed)
+		addrs, err := ifaceObj.Addrs()
+		if err != nil {
+			continue
+		}
+
+		// Find first valid IPv4 address
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			default:
+				continue
+			}
+
+			// Must be IPv4 Global Unicast
+			if ip.To4() != nil && ip.IsGlobalUnicast() {
+				logInfo("[ProtectedDialer] ✅ Aggressive lookup found IP: %s (interface: %s)", ip.String(), ifaceName)
+				return ip, ifaceName, nil
+			}
+		}
+	}
+
+	// If common interfaces didn't work, return nil (let standard lookup handle it)
+	logDebug("[ProtectedDialer] Aggressive lookup found no interfaces, falling back to standard lookup")
+	return nil, "", fmt.Errorf("no physical interfaces found in aggressive lookup")
 }
 
 // getLocalPhysicalIPInternal performs the actual physical IP lookup
@@ -369,12 +627,27 @@ func getPhysicalIPFromInterfacesWithIface() (net.IP, string, error) {
 	// On Android, try common interface names first (requires less permissions)
 	// This avoids the need for net.Interfaces() which may require special permissions
 	// Try multiple variations as Android devices use different naming conventions
+	// Prioritize interfaces that are likely to be active when VPN is running
+
+	// Extended list of common Android interface names - ordered by priority
 	commonInterfaces := []string{
-		"wlan0", "wlan1", "wlan2", "wlan3", // WiFi interfaces
-		"eth0", "eth1", // Ethernet interfaces
-		"rmnet0", "rmnet1", "rmnet2", "rmnet3", // Mobile data (older)
-		"rmnet_data0", "rmnet_data1", "rmnet_data2", "rmnet_data3", // Mobile data (newer)
-		"rmnet_ipa0", // Mobile data (some devices)
+		// WiFi interfaces (most common and reliable when VPN is active)
+		"wlan0", "wlan1", "wlan2", "wlan3", "wlan4",
+		// Ethernet interfaces (reliable but less common)
+		"eth0", "eth1", "eth2",
+		// Mobile data interfaces (older Android) - may be slower
+		"rmnet0", "rmnet1", "rmnet2", "rmnet3", "rmnet4", "rmnet5",
+		// Mobile data interfaces (newer Android)
+		"rmnet_data0", "rmnet_data1", "rmnet_data2", "rmnet_data3", "rmnet_data4",
+		// Mobile data interfaces (some devices)
+		"rmnet_ipa0", "rmnet_ipa1", "rmnet_ipa2",
+		// Alternative mobile data naming
+		"ccmni0", "ccmni1", "ccmni2", "ccmni3",
+		// Some devices use different naming
+		"p2p0", // WiFi Direct
+		"ap0",  // Access Point mode
+		// Additional interfaces that may appear on various devices
+		"tiwlan0", "ra0", "mlan0", // Alternative WiFi names
 	}
 	
 	for _, ifaceName := range commonInterfaces {
@@ -382,20 +655,26 @@ func getPhysicalIPFromInterfacesWithIface() (net.IP, string, error) {
 		if err != nil {
 			continue // Interface doesn't exist, try next
 		}
-		
+
 		// Check if interface is up
 		if ifaceObj.Flags&net.FlagUp == 0 {
 			logDebug("[ProtectedDialer] Interface %s is down, skipping...", ifaceName)
 			continue
 		}
-		
+
+		// Skip TUN interfaces (VPN virtual interfaces) - double check
+		if strings.HasPrefix(ifaceName, "tun") || strings.HasPrefix(ifaceName, "wg") {
+			logDebug("[ProtectedDialer] Skipping TUN interface: %s", ifaceName)
+			continue
+		}
+
 		// Get addresses for this interface
 		addrs, err := ifaceObj.Addrs()
 		if err != nil {
 			logDebug("[ProtectedDialer] Failed to get addresses for %s: %v", ifaceName, err)
 			continue
 		}
-		
+
 		// Find first valid Global Unicast IPv4 address
 		for _, addr := range addrs {
 			var ip net.IP
@@ -407,26 +686,34 @@ func getPhysicalIPFromInterfacesWithIface() (net.IP, string, error) {
 			default:
 				continue
 			}
-			
+
 			// Must be IPv4
 			if ip.To4() == nil {
 				continue
 			}
-			
+
 			// Must be Global Unicast (not loopback, multicast, etc.)
 			if !ip.IsGlobalUnicast() {
 				continue
 			}
-			
+
 			logInfo("[ProtectedDialer] ✅ Found IP via interface name lookup: %s (interface: %s)", ip.String(), ifaceName)
 			return ip, ifaceName, nil
 		}
 	}
 	
 	// Fallback to net.Interfaces() if common interface names didn't work
+	// On Android, this may fail with permission denied - handle gracefully
 	interfaces, err := net.Interfaces()
 	if err != nil {
-		return nil, "", fmt.Errorf("enumerate interfaces: %w", err)
+		// Permission denied is common on Android - log warning but don't fail
+		logWarn("[ProtectedDialer] ⚠️ net.Interfaces() failed: %v (permission denied is normal on Android)", err)
+		logWarn("[ProtectedDialer] ⚠️ Common interface names didn't work, and net.Interfaces() is unavailable")
+		logWarn("[ProtectedDialer] ℹ️  This is expected when VPN is active or on restricted Android environments")
+		logWarn("[ProtectedDialer] ℹ️  Socket protection will still work, only explicit IP binding is skipped")
+		logWarn("[ProtectedDialer] ✅ Returning nil - Xray connections will use default routing (protection active)")
+		// Return nil instead of error - binding is optional, protection is critical
+		return nil, "", nil
 	}
 	
 	logDebug("[ProtectedDialer] Found %d network interfaces via net.Interfaces()", len(interfaces))
@@ -549,46 +836,64 @@ func (d *ProtectedDialer) DialTCP(network, address string) (net.Conn, error) {
 	}
 	logInfo("[ProtectedDialer] ✅ DNS resolved: %s → %s", address, tcpAddr.IP.String())
 
-	// Create socket
-	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
-	if err != nil {
-		logError("[ProtectedDialer] ❌ Failed to create socket: %v", err)
-		return nil, fmt.Errorf("create socket: %w", err)
-	}
-	logDebug("[ProtectedDialer] Socket created: fd=%d", fd)
+	var fd int
+	var usedCSocket bool
 
-	// Get physical network IP for source binding
+	// Try to create socket via C first (bypasses Go runtime's socket management)
+	// This is critical because Go runtime can interfere with socket protection
+	if IsCSocketCreatorAvailable() {
+		logInfo("[ProtectedDialer] Using C-based socket creation (bypasses Go runtime)")
+		fd = CreateProtectedSocketViaC(syscall.AF_INET, syscall.SOCK_STREAM, 0)
+		if fd >= 0 {
+			usedCSocket = true
+			logInfo("[ProtectedDialer] ✅ C socket created and protected: fd=%d", fd)
+		} else {
+			logWarn("[ProtectedDialer] ⚠️ C socket creation failed, falling back to Go syscall")
+		}
+	}
+
+	// Fallback to Go syscall if C socket creation failed or unavailable
+	if fd < 0 {
+		var err error
+		fd, err = syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
+		if err != nil {
+			logError("[ProtectedDialer] ❌ Failed to create socket: %v", err)
+			return nil, fmt.Errorf("create socket: %w", err)
+		}
+		logDebug("[ProtectedDialer] Go socket created: fd=%d", fd)
+	}
+
+	// Get physical network IP for source binding (optional)
 	physicalIP, err := GetLocalPhysicalIP()
 	if err != nil {
 		logWarn("[ProtectedDialer] ⚠️ Failed to get physical IP: %v", err)
 		logWarn("[ProtectedDialer] ⚠️ Will proceed without explicit source binding (may use VPN IP)")
-		// Continue without binding - let OS choose source IP
 	} else if physicalIP != nil {
 		// Bind socket to physical IP before connecting
-		// This ensures packets use physical interface IP, not VPN virtual IP
 		var bindAddr syscall.SockaddrInet4
 		copy(bindAddr.Addr[:], physicalIP.To4())
-		bindAddr.Port = 0 // Let OS choose port
+		bindAddr.Port = 0
 		
 		err = syscall.Bind(fd, &bindAddr)
 		if err != nil {
-			syscall.Close(fd)
-			logError("[ProtectedDialer] ❌ Failed to bind to physical IP %s: %v", physicalIP.String(), err)
-			return nil, fmt.Errorf("bind to physical IP: %w", err)
+			logWarn("[ProtectedDialer] ⚠️ Failed to bind to physical IP %s: %v (non-fatal)", physicalIP.String(), err)
+		} else {
+			logInfo("[ProtectedDialer] ✅ Socket bound to physical IP: %s", physicalIP.String())
 		}
-		logInfo("[ProtectedDialer] ✅ Socket bound to physical IP: %s", physicalIP.String())
-	} else {
-		logWarn("[ProtectedDialer] ⚠️ Physical IP is nil (cache miss), will proceed without binding")
 	}
 
-	// PROTECT THE SOCKET BEFORE CONNECTING!
-	// This bypasses VPN routing policy
-	if !ProtectSocket(fd) {
-		syscall.Close(fd)
-		logError("[ProtectedDialer] ❌ Failed to protect socket %d", fd)
-		return nil, fmt.Errorf("failed to protect socket %d", fd)
+	// PROTECT THE SOCKET BEFORE CONNECTING (only if not already protected via C)
+	if !usedCSocket {
+		if !ProtectSocket(fd) {
+			syscall.Close(fd)
+			logError("[ProtectedDialer] ❌ Failed to protect socket %d", fd)
+			return nil, fmt.Errorf("failed to protect socket %d", fd)
+		}
+		logInfo("[ProtectedDialer] ✅ Socket %d protected via Go callback", fd)
 	}
-	logInfo("[ProtectedDialer] ✅ Socket %d protected successfully", fd)
+
+	// Socket is now protected (either via C or Go callback)
+	// CRITICAL: Do NOT call any Go runtime functions that might re-open the socket
 
 	// Convert address
 	var sa syscall.SockaddrInet4
@@ -639,6 +944,151 @@ func (d *ProtectedDialer) DialTCP(network, address string) (net.Conn, error) {
 	return conn, nil
 }
 
+// DialTCPWithDiagnostics dials a protected TCP connection with detailed diagnostics
+func (d *ProtectedDialer) DialTCPWithDiagnostics(network, address string) (net.Conn, *ProtectionResult, error) {
+	startTime := time.Now()
+	result := &ProtectionResult{
+		Timestamp: startTime,
+	}
+	
+	logInfo("[ProtectedDialer] DialTCPWithDiagnostics: %s %s", network, address)
+
+	// Check if socket protector is set
+	protectorMutex.RLock()
+	protector := globalProtector
+	protectorMutex.RUnlock()
+	
+	if protector == nil {
+		result.Success = false
+		result.Error = "socket protector not set"
+		result.Duration = time.Since(startTime).Milliseconds()
+		setProtectionState(ProtectionStateFailed)
+		return nil, result, fmt.Errorf("socket protector not set")
+	}
+
+	// Resolve address first
+	tcpAddr, err := net.ResolveTCPAddr(network, address)
+	if err != nil {
+		result.Success = false
+		result.Error = fmt.Sprintf("DNS resolution failed: %v", err)
+		result.Duration = time.Since(startTime).Milliseconds()
+		return nil, result, fmt.Errorf("resolve address: %w", err)
+	}
+
+	// Create socket
+	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		result.Success = false
+		result.Error = fmt.Sprintf("socket creation failed: %v", err)
+		result.Duration = time.Since(startTime).Milliseconds()
+		return nil, result, fmt.Errorf("create socket: %w", err)
+	}
+
+	// Get physical network IP for source binding
+	physicalIP, _ := GetLocalPhysicalIP()
+	if physicalIP != nil {
+		result.PhysicalIP = physicalIP.String()
+		
+		// Try to get interface name from cache
+		physicalIPCache.RLock()
+		result.Interface = physicalIPCache.iface
+		physicalIPCache.RUnlock()
+		
+		// Bind socket to physical IP
+		var bindAddr syscall.SockaddrInet4
+		copy(bindAddr.Addr[:], physicalIP.To4())
+		bindAddr.Port = 0
+		syscall.Bind(fd, &bindAddr) // Ignore error - binding is optional
+	}
+
+	// PROTECT THE SOCKET
+	if !ProtectSocket(fd) {
+		syscall.Close(fd)
+		result.Success = false
+		result.Error = "socket protection failed"
+		result.Duration = time.Since(startTime).Milliseconds()
+		setProtectionState(ProtectionStateFailed)
+		
+		// Add diagnostic log
+		addDiagnosticLog(DiagnosticLog{
+			Timestamp:  time.Now(),
+			Operation:  "protect",
+			Fd:         fd,
+			Success:    false,
+			Error:      "protection callback returned false",
+			Interface:  result.Interface,
+			PhysicalIP: result.PhysicalIP,
+			Duration:   result.Duration,
+		})
+		
+		return nil, result, fmt.Errorf("failed to protect socket %d", fd)
+	}
+	
+	setProtectionState(ProtectionStateVerified)
+
+	// Connect
+	var sa syscall.SockaddrInet4
+	copy(sa.Addr[:], tcpAddr.IP.To4())
+	sa.Port = tcpAddr.Port
+
+	timeout := time.Duration(d.Timeout) * time.Second
+	if timeout == 0 {
+		timeout = 10 * time.Second
+	}
+
+	connectDone := make(chan error, 1)
+	go func() {
+		err := syscall.Connect(fd, &sa)
+		connectDone <- err
+	}()
+
+	select {
+	case err := <-connectDone:
+		if err != nil {
+			syscall.Close(fd)
+			result.Success = false
+			result.Error = fmt.Sprintf("connect failed: %v", err)
+			result.Duration = time.Since(startTime).Milliseconds()
+			return nil, result, fmt.Errorf("connect: %w", err)
+		}
+	case <-time.After(timeout):
+		syscall.Close(fd)
+		result.Success = false
+		result.Error = "connection timeout"
+		result.Duration = time.Since(startTime).Milliseconds()
+		return nil, result, fmt.Errorf("connection timeout")
+	}
+
+	// Create net.Conn from fd
+	file := os.NewFile(uintptr(fd), "")
+	conn, err := net.FileConn(file)
+	file.Close()
+
+	if err != nil {
+		syscall.Close(fd)
+		result.Success = false
+		result.Error = fmt.Sprintf("FileConn failed: %v", err)
+		result.Duration = time.Since(startTime).Milliseconds()
+		return nil, result, fmt.Errorf("fileconn: %w", err)
+	}
+
+	result.Success = true
+	result.Duration = time.Since(startTime).Milliseconds()
+	
+	// Add diagnostic log
+	addDiagnosticLog(DiagnosticLog{
+		Timestamp:  time.Now(),
+		Operation:  "dial",
+		Fd:         fd,
+		Success:    true,
+		Interface:  result.Interface,
+		PhysicalIP: result.PhysicalIP,
+		Duration:   result.Duration,
+	})
+
+	return conn, result, nil
+}
+
 // DialUDP dials a protected UDP connection
 func (d *ProtectedDialer) DialUDP(network, address string) (*net.UDPConn, error) {
 	logDebug("[ProtectedDialer] Dialing UDP %s %s", network, address)
@@ -649,31 +1099,46 @@ func (d *ProtectedDialer) DialUDP(network, address string) (*net.UDPConn, error)
 		return nil, err
 	}
 
-	// Create socket
-	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_DGRAM, 0)
-	if err != nil {
-		return nil, fmt.Errorf("create socket: %w", err)
+	var fd int
+	var usedCSocket bool
+
+	// Try to create socket via C first (bypasses Go runtime's socket management)
+	if IsCSocketCreatorAvailable() {
+		logInfo("[ProtectedDialer] Using C-based UDP socket creation")
+		fd = CreateProtectedSocketViaC(syscall.AF_INET, syscall.SOCK_DGRAM, 0)
+		if fd >= 0 {
+			usedCSocket = true
+			logInfo("[ProtectedDialer] ✅ C UDP socket created and protected: fd=%d", fd)
+		} else {
+			logWarn("[ProtectedDialer] ⚠️ C UDP socket creation failed, falling back to Go syscall")
+		}
+	}
+
+	// Fallback to Go syscall if C socket creation failed or unavailable
+	if fd < 0 {
+		var err error
+		fd, err = syscall.Socket(syscall.AF_INET, syscall.SOCK_DGRAM, 0)
+		if err != nil {
+			return nil, fmt.Errorf("create socket: %w", err)
+		}
+		logDebug("[ProtectedDialer] Go UDP socket created: fd=%d", fd)
 	}
 
 	// Get physical network IP for source binding
 	physicalIP, err := GetLocalPhysicalIP()
 	if err != nil {
 		logWarn("[ProtectedDialer] ⚠️ Failed to get physical IP for UDP: %v", err)
-		logWarn("[ProtectedDialer] ⚠️ Will proceed without explicit source binding (may use VPN IP)")
-		// Continue without binding - let OS choose source IP
 		physicalIP = nil
 	}
 
-	// PROTECT THE SOCKET!
-	// Convert fd to int (on Windows, syscall.Socket returns Handle which is uintptr)
-	fdInt := int(fd)
-	if fdInt < 0 {
-		// Handle Windows uintptr case
-		fdInt = int(uintptr(fd))
-	}
-	if !ProtectSocket(fdInt) {
-		syscall.Close(fd)
-		return nil, fmt.Errorf("failed to protect socket")
+	// PROTECT THE SOCKET (only if not already protected via C)
+	fdInt := fd
+	if !usedCSocket {
+		if !ProtectSocket(fdInt) {
+			syscall.Close(fd)
+			return nil, fmt.Errorf("failed to protect socket")
+		}
+		logInfo("[ProtectedDialer] ✅ UDP socket %d protected via Go callback", fd)
 	}
 
 	// Bind to physical IP if available, otherwise bind to any address

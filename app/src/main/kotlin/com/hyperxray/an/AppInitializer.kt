@@ -11,7 +11,9 @@ import com.hyperxray.an.telemetry.*
 import com.hyperxray.an.workers.TlsRuntimeWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -32,7 +34,8 @@ class AppInitializer(
     private val application: Application
 ) {
     private val TAG = "AppInitializer"
-    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val supervisorJob = SupervisorJob()
+    private val applicationScope = CoroutineScope(supervisorJob + Dispatchers.Default)
     
     // AI Optimizer components (temporary - will be moved to feature modules)
     private var deepPolicyModel: DeepPolicyModel? = null
@@ -56,6 +59,23 @@ class AppInitializer(
      * Check if optimizer is ready
      */
     fun isOptimizerReady(): Boolean = optimizerReady
+    
+    /**
+     * Cleanup resources when Application is terminating.
+     * Should be called from HyperXrayApplication.onTerminate()
+     */
+    fun cleanup() {
+        Log.d(TAG, "AppInitializer cleanup - cancelling coroutine scope")
+        applicationScope.cancel()
+        
+        // Cleanup AI optimizer components
+        deepPolicyModel = null
+        modelVerifier = null
+        fallbackHandler = null
+        profileManager = null
+        optimizerOrchestrator = null
+        optimizerReady = false
+    }
 
     /**
      * Initialize all app components.
