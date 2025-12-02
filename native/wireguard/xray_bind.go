@@ -22,11 +22,27 @@ import (
 // under high traffic (thousands of packets per second).
 // ============================================================================
 
+// ============================================================================
+// PERFORMANCE TUNING CONSTANTS
+// ============================================================================
+// These values are optimized for high-throughput VPN usage on Android devices
+// with 4GB+ RAM. Increase RAM usage for better performance.
+// ============================================================================
+
 const (
 	// PacketBufferSize is the maximum size for packet buffers.
-	// WireGuard MTU is typically 1420, but we use 2048 for safety margin
-	// to handle any encapsulation overhead.
-	PacketBufferSize = 2048
+	// Using 4KB (page-aligned) for better memory efficiency and to handle
+	// jumbo frames and any encapsulation overhead.
+	PacketBufferSize = 4096
+
+	// QueueSize is the size of send/receive queues.
+	// 131072 entries = ~512MB max queue memory (131072 * 4096)
+	// This prevents packet drops under extreme burst traffic.
+	QueueSize = 131072
+
+	// PreallocatedBuffers is the number of buffers to pre-allocate in the pool.
+	// Pre-warming the pool reduces allocation latency during traffic spikes.
+	PreallocatedBuffers = 4096
 )
 
 // packetBufferPool is a global pool for packet buffers to reduce GC pressure.
@@ -36,6 +52,19 @@ var packetBufferPool = sync.Pool{
 		buf := make([]byte, PacketBufferSize)
 		return &buf
 	},
+}
+
+// init pre-warms the buffer pool to reduce allocation latency during traffic spikes.
+func init() {
+	// Pre-allocate buffers to avoid cold-start allocation delays
+	buffers := make([]*[]byte, PreallocatedBuffers)
+	for i := 0; i < PreallocatedBuffers; i++ {
+		buffers[i] = getPacketBuffer()
+	}
+	// Return all buffers to the pool
+	for i := 0; i < PreallocatedBuffers; i++ {
+		putPacketBuffer(buffers[i])
+	}
 }
 
 // getPacketBuffer retrieves a buffer from the pool.
@@ -91,7 +120,7 @@ type XrayBind struct {
 
 	closed    int32
 	closeOnce sync.Once
-	connMu    sync.Mutex
+	connMu    sync.RWMutex // RWMutex allows concurrent readers, exclusive writer
 
 	// Handshake and keepalive state
 	lastHandshakeTime    atomic.Int64  // Unix nano timestamp of last handshake response
@@ -128,8 +157,8 @@ func NewXrayBind(xrayWrapper *bridge.XrayWrapper, endpoint string) (*XrayBind, e
 	bind := &XrayBind{
 		xrayWrapper:   xrayWrapper,
 		endpoint:      addrPort,
-		recvQueue:     make(chan []byte, 2048),
-		sendQueue:     make(chan []byte, 2048),
+		recvQueue:     make(chan []byte, QueueSize), // Max queue size to prevent packet drops
+		sendQueue:     make(chan []byte, QueueSize), // Max queue size to prevent packet drops
 		keepaliveStop: make(chan struct{}),
 	}
 
@@ -298,37 +327,66 @@ func (b *XrayBind) ParseEndpoint(s string) (conn.Endpoint, error) {
 
 func (b *XrayBind) processOutgoing() {
 	for data := range b.sendQueue {
-		if len(data) == 0 {
-			continue
-		}
+		// SAFETY: We own 'data' from this point until we return it to the pool.
+		// Use a helper function to ensure exactly-once buffer return.
+		b.processOutgoingPacket(data)
+	}
+}
 
-		b.connMu.Lock()
-		conn := b.udpConn
-		b.connMu.Unlock()
+// processOutgoingPacket handles a single outgoing packet with strict buffer ownership.
+// SAFETY: This function takes ownership of 'data' and guarantees it will be returned
+// to the pool exactly once (if it came from the pool) before returning.
+func (b *XrayBind) processOutgoingPacket(data []byte) {
+	// SAFETY: Track whether buffer has been returned to pool.
+	// Using a flag ensures we never double-free or leak the buffer.
+	isPooled := cap(data) == PacketBufferSize
+	returned := false
 
-		if conn == nil {
-			// Return buffer to pool if it came from pool (check capacity)
-			if cap(data) == PacketBufferSize {
-				putPacketBuffer(&data)
-			}
-			continue
-		}
-
-		// Write directly to XrayUDPConn
-		_, err := conn.Write(data)
-		
-		// OPTIMIZATION: Return buffer to pool after write completes.
-		// The data has been copied to the network stack at this point.
-		if cap(data) == PacketBufferSize {
+	// SAFETY: Defer ensures buffer is returned even on panic.
+	// The 'returned' flag prevents double-free if we return early.
+	defer func() {
+		if isPooled && !returned {
 			putPacketBuffer(&data)
 		}
-		
-		if err != nil {
-			// Log error but continue
-			fmt.Printf("[XrayBind] Write error: %v\n", err)
-			// Try to reconnect
-			b.reconnect()
-		}
+	}()
+
+	// Skip empty packets (buffer will be returned by defer)
+	if len(data) == 0 {
+		return
+	}
+
+	// Local copy pattern: acquire read lock, copy pointer, release lock
+	// This allows concurrent readers while reconnect() holds exclusive write lock
+	b.connMu.RLock()
+	conn := b.udpConn
+	b.connMu.RUnlock()
+
+	// No connection available (buffer will be returned by defer)
+	if conn == nil {
+		return
+	}
+
+	// Write to XrayUDPConn (using local copy, safe from reconnect)
+	// SAFETY: conn.Write copies data to the network stack, so we can
+	// safely return the buffer to the pool after this call completes.
+	_, err := conn.Write(data)
+
+	// SAFETY: Return buffer to pool immediately after write.
+	// We do this before error handling to ensure the buffer is freed
+	// even if reconnect() takes a long time or panics.
+	if isPooled {
+		putPacketBuffer(&data)
+		returned = true
+		// SAFETY: Clear the slice header to prevent accidental reuse.
+		// After this point, 'data' should not be accessed.
+		data = nil
+	}
+
+	// Handle write errors (buffer already returned at this point)
+	if err != nil {
+		fmt.Printf("[XrayBind] Write error: %v\n", err)
+		// Try to reconnect
+		b.reconnect()
 	}
 }
 
@@ -339,16 +397,18 @@ func (b *XrayBind) processIncoming() {
 			return
 		}
 
-		b.connMu.Lock()
+		// Local copy pattern: acquire read lock, copy pointer, release lock
+		// This allows concurrent readers while reconnect() holds exclusive write lock
+		b.connMu.RLock()
 		conn := b.udpConn
-		b.connMu.Unlock()
+		b.connMu.RUnlock()
 
 		if conn == nil {
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
-		// Read from XrayUDPConn with timeout
+		// Read from XrayUDPConn with timeout (using local copy, safe from reconnect)
 		data, err := conn.Read(100 * time.Millisecond)
 		if err != nil {
 			// Timeout is expected, continue
@@ -519,9 +579,10 @@ func (b *XrayBind) sendKeepalive() {
 // sendRawKeepalivePacket sends a minimal WireGuard transport data packet
 // This is used when no callback is available to trigger WireGuard's internal keepalive
 func (b *XrayBind) sendRawKeepalivePacket() {
-	b.connMu.Lock()
+	// Local copy pattern: acquire read lock, copy pointer, release lock
+	b.connMu.RLock()
 	conn := b.udpConn
-	b.connMu.Unlock()
+	b.connMu.RUnlock()
 
 	if conn == nil {
 		return

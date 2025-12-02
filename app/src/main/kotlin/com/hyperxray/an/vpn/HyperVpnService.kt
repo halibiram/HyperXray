@@ -253,7 +253,7 @@ class HyperVpnService : VpnService() {
     private external fun isSocketProtectorVerified(): Boolean
     
     /**
-     * Called from native code to log to AiLogHelper
+     * Called from native code to log to AiLogHelper (single message - legacy)
      * This method is called via JNI from Go code
      */
     @Suppress("unused")
@@ -264,6 +264,38 @@ class HyperVpnService : VpnService() {
             "INFO", "I" -> AiLogHelper.i(tag, message)
             "DEBUG", "D" -> AiLogHelper.d(tag, message)
             else -> AiLogHelper.d(tag, message)
+        }
+    }
+    
+    /**
+     * Called from native code to log multiple messages in a batch
+     * This method significantly reduces JNI overhead by processing multiple
+     * log messages in a single JNI transition.
+     * 
+     * OPTIMIZATION: Native code buffers log messages and flushes them in batches:
+     * - When buffer is full (50 entries)
+     * - When buffer size exceeds 4KB
+     * - Every 500ms
+     * - Immediately on ERROR level logs
+     * 
+     * @param tags Array of log tags
+     * @param levels Array of log levels (ERROR, WARN, INFO, DEBUG)
+     * @param messages Array of log messages
+     */
+    @Suppress("unused")
+    private fun logBatchToAiLogHelper(tags: Array<String>, levels: Array<String>, messages: Array<String>) {
+        val count = minOf(tags.size, levels.size, messages.size)
+        for (i in 0 until count) {
+            val tag = tags[i]
+            val level = levels[i]
+            val message = messages[i]
+            when (level.uppercase()) {
+                "ERROR", "E" -> AiLogHelper.e(tag, message)
+                "WARN", "W" -> AiLogHelper.w(tag, message)
+                "INFO", "I" -> AiLogHelper.i(tag, message)
+                "DEBUG", "D" -> AiLogHelper.d(tag, message)
+                else -> AiLogHelper.d(tag, message)
+            }
         }
     }
     
@@ -806,9 +838,9 @@ class HyperVpnService : VpnService() {
                 // Use default blocking mode (setBlocking(false) can cause VPN connection issues on some Android versions)
                 builder.addAddress("10.0.0.2", 30)
                 builder.addRoute("0.0.0.0", 0)
-                // Force lower MTU for WireGuard over Xray (adds overhead)
-                // 1280 is conservative and prevents fragmentation issues
-                builder.setMtu(1280)
+                // MTU for WireGuard over Xray
+                // 1420 is optimal for most networks while avoiding fragmentation
+                builder.setMtu(1420)
                 
                 // CRITICAL: Add DNS servers - without DNS, builder.establish() may hang
                 // Use fallback DNS servers if prefs DNS is not available
@@ -834,7 +866,7 @@ class HyperVpnService : VpnService() {
                 Log.d(TAG, "  - Blocking: true (default blocking mode)")
                 Log.d(TAG, "  - Address: 10.0.0.2/30")
                 Log.d(TAG, "  - Route: 0.0.0.0/0")
-                Log.d(TAG, "  - MTU: 1280")
+                Log.d(TAG, "  - MTU: 1420")
                 Log.d(TAG, "  - DNS servers: ${dnsServers.joinToString(", ")}")
                 AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: VPN Builder configured (blocking mode, DNS: ${dnsServers.size} servers)")
                 
@@ -991,6 +1023,7 @@ class HyperVpnService : VpnService() {
                 
                 // Detach file descriptor to transfer ownership to native code
                 // This prevents fdsan ownership exchange errors
+                // CRITICAL: After detachFd(), we MUST track the raw FD for cleanup if native fails
                 val fdInt = try {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         currentTunFd.detachFd()
@@ -1015,6 +1048,29 @@ class HyperVpnService : VpnService() {
                 
                 AiLogHelper.d(TAG, "✅ VPN START: TUN fd detached: $fdInt")
                 
+                // CRITICAL: Track whether native code took ownership of the FD
+                // If native code fails to start, we MUST close the FD manually to prevent leak
+                var nativeTookOwnership = false
+                
+                // CRITICAL: Helper function to safely close a detached FD
+                // Uses ParcelFileDescriptor.adoptFd() to re-wrap the raw FD and close it properly
+                // Defined here so it's accessible in both the try block and outer catch
+                val safeCloseFdHelper: (Int) -> Unit = { fd ->
+                    if (fd >= 0) {
+                        try {
+                            AiLogHelper.w(TAG, "🧹 Closing leaked TUN fd=$fd via adoptFd()")
+                            ParcelFileDescriptor.adoptFd(fd).close()
+                            AiLogHelper.i(TAG, "✅ Successfully closed leaked TUN fd=$fd")
+                        } catch (e: Exception) {
+                            AiLogHelper.e(TAG, "❌ Failed to close leaked TUN fd=$fd: ${e.message}", e)
+                        }
+                    }
+                }
+                
+                // Store fdInt in a variable accessible to outer catch block
+                // This allows cleanup if an exception occurs after detach but before native call
+                var detachedFdForCleanup: Int = fdInt
+                
                 // After detaching, the ParcelFileDescriptor is invalid, so clear the reference
                 // Native code now owns the file descriptor
                 synchronized(tunFdLock) {
@@ -1030,6 +1086,7 @@ class HyperVpnService : VpnService() {
                     val errorMsg = "ApplicationInfo is null - cannot get native library directory"
                     AiLogHelper.e(TAG, "❌ VPN START: $errorMsg")
                     broadcastError(errorMsg, -14, "applicationInfo returned null")
+                    safeCloseFdHelper(fdInt) // CRITICAL: Close leaked FD
                     return@launch
                 }
                 
@@ -1038,6 +1095,7 @@ class HyperVpnService : VpnService() {
                     val errorMsg = "Native library directory is null or empty"
                     AiLogHelper.e(TAG, "❌ VPN START: $errorMsg")
                     broadcastError(errorMsg, -14, "applicationInfo.nativeLibraryDir returned null/empty")
+                    safeCloseFdHelper(fdInt) // CRITICAL: Close leaked FD
                     return@launch
                 }
                 
@@ -1046,6 +1104,7 @@ class HyperVpnService : VpnService() {
                     val errorMsg = "Files directory path is null or empty"
                     AiLogHelper.e(TAG, "❌ VPN START: $errorMsg")
                     broadcastError(errorMsg, -14, "filesDir.absolutePath returned null/empty")
+                    safeCloseFdHelper(fdInt) // CRITICAL: Close leaked FD
                     return@launch
                 }
                 
@@ -1068,7 +1127,7 @@ class HyperVpnService : VpnService() {
                 // Call native method in IO dispatcher context (already in coroutine, but ensure IO dispatcher)
                 val result = withContext(Dispatchers.IO) {
                     try {
-                        startHyperTunnel(
+                        val nativeResult = startHyperTunnel(
                             tunFd = fdInt,
                             wgConfigJSON = wgConfig,
                             xrayConfigJSON = xrayConfigWithApi,
@@ -1077,30 +1136,46 @@ class HyperVpnService : VpnService() {
                             nativeLibDir = nativeLibDir,
                             filesDir = filesDirPath
                         )
+                        // If native returned 0, it successfully took ownership of the FD
+                        if (nativeResult == 0) {
+                            nativeTookOwnership = true
+                            detachedFdForCleanup = -1 // Mark as handled, don't cleanup in outer catch
+                        }
+                        nativeResult
                     } catch (e: UnsatisfiedLinkError) {
                         val errorMsg = "startHyperTunnel() failed with UnsatisfiedLinkError: ${e.message}"
                         AiLogHelper.e(TAG, errorMsg, e)
                         broadcastError("JNI call failed: ${e.message}", -14, e.stackTraceToString())
-                        // File descriptor was detached, native code should handle cleanup
-                        // If native code didn't start, the fd will be closed by the system when process exits
-                        // Note: tunFd is already null after detachFd()
+                        // CRITICAL: Native code never started, FD is leaked! Close it manually.
+                        safeCloseFdHelper(fdInt)
+                        detachedFdForCleanup = -1 // Mark as handled
                         return@withContext -1
                     } catch (e: Exception) {
                         val errorMsg = "startHyperTunnel() threw exception: ${e.message}"
                         AiLogHelper.e(TAG, errorMsg, e)
                         broadcastError("Unexpected error: ${e.message}", -14, e.stackTraceToString())
-                        // File descriptor was detached, native code should handle cleanup
-                        // If native code didn't start, the fd will be closed by the system when process exits
-                        // Note: tunFd is already null after detachFd()
+                        // CRITICAL: Native code never started, FD is leaked! Close it manually.
+                        safeCloseFdHelper(fdInt)
+                        detachedFdForCleanup = -1 // Mark as handled
                         return@withContext -1
                     }
                 }
                 
                 if (result == -1) {
+                    // Native call returned -1 but didn't throw exception
+                    // This means JNI wrapper returned early (e.g., library not loaded)
+                    // FD was NOT passed to Go code, so we need to close it
+                    if (!nativeTookOwnership) {
+                        AiLogHelper.w(TAG, "⚠️ Native returned -1 without taking FD ownership, closing fd=$fdInt")
+                        safeCloseFdHelper(fdInt)
+                        detachedFdForCleanup = -1 // Mark as handled
+                    }
                     return@launch
                 }
                 
                 if (result == 0) {
+                    // Success - native code owns the FD now
+                    nativeTookOwnership = true
                     isRunning = true
                     startTime = System.currentTimeMillis()
                     
@@ -1152,15 +1227,34 @@ class HyperVpnService : VpnService() {
                     startStatsMonitoring()
                 } else {
                     handleTunnelError(result)
-                    // File descriptor was detached, native code owns it now
-                    // ErrorTunnelStartFailed (-2) means native code already called tunnel.Stop() and closed TUN
-                    // Other errors mean native code didn't start, but fd was detached so we can't close it
-                    // The fd will be closed by the system when process exits
-                    // Note: tunFd is already null after detachFd()
+                    // CRITICAL: Determine if native code took ownership based on error code
+                    // Error codes from native/JNI:
+                    // -2: ErrorTunnelStartFailed - Go code created tunnel but Start() failed, cleanup() was called (FD closed)
+                    // -30: Socket protector not initialized (JNI level, before Go code)
+                    // -35: Socket protection verification failed (JNI level, before Go code)
+                    // -100: Go library not loaded (JNI level, before Go code)
+                    // -101: Function pointer NULL (JNI level, before Go code)
+                    // -102: String conversion failed (JNI level, before Go code)
+                    // Other negative: Go code error, may or may not have closed FD
+                    
+                    val jniLevelErrors = setOf(-30, -35, -100, -101, -102)
+                    
                     if (result == -2) {
+                        // Go code's cleanup() was called, which closes TUN device
                         AiLogHelper.d(TAG, "Native code already closed TUN (ErrorTunnelStartFailed)")
-                    } else {
-                        AiLogHelper.w(TAG, "Native code failed to start, fd was detached and will be closed by system")
+                        nativeTookOwnership = true // Go code handled cleanup
+                        detachedFdForCleanup = -1 // Mark as handled
+                    } else if (result in jniLevelErrors) {
+                        // JNI-level error: Go code never received the FD
+                        AiLogHelper.w(TAG, "JNI-level error ($result), native never received FD, closing fd=$fdInt")
+                        safeCloseFdHelper(fdInt)
+                        detachedFdForCleanup = -1 // Mark as handled
+                    } else if (result < 0) {
+                        // Other Go-level errors (-1, -3, -4, -5, etc.): Go code received FD
+                        // Go code's NewHyperTunnel or Start failed, cleanup() was called
+                        // With our fix, Go code now properly closes TUN in all error paths
+                        AiLogHelper.w(TAG, "Go-level error ($result), native handled FD cleanup")
+                        detachedFdForCleanup = -1 // Mark as handled by Go
                     }
                 }
                 
@@ -1179,6 +1273,10 @@ class HyperVpnService : VpnService() {
                         tunFd = null
                     }
                 }
+                // Note: detachedFdForCleanup and safeCloseFdHelper are not accessible here
+                // because they're defined inside the try block after detachFd()
+                // This is intentional - if exception occurs before detachFd(), tunFd?.close() handles it
+                // If exception occurs after detachFd() but before native call, the inner catch handles it
             } finally {
                 isStarting = false
             }
@@ -1459,8 +1557,9 @@ class HyperVpnService : VpnService() {
                     
                 } catch (e: Exception) {
                     AiLogHelper.e(TAG, "Error getting stats: ${e.message}", e)
-                    broadcastError("Stats error: ${e.message}", -4, e.stackTraceToString())
-                    delay(5000)
+                    // Don't broadcast error for transient stats failures - just log and retry
+                    // This prevents UI from showing error state for temporary issues
+                    delay(1000) // Keep same interval even on error to maintain consistent updates
                 }
             }
         }
@@ -2096,7 +2195,7 @@ class HyperVpnService : VpnService() {
             put("address", "172.16.0.2/32")
             put("addressV6", "")
             put("dns", "1.1.1.1")
-            put("mtu", 1280)
+            put("mtu", 1420)
             put("peerPublicKey", "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=")
             put("endpoint", "162.159.192.1:2408")
             put("allowedIPs", "0.0.0.0/0, ::/0")

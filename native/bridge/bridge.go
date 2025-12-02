@@ -161,6 +161,23 @@ type WireGuardParsedConfig struct {
 	PersistentKeepalive int    `json:"persistentKeepalive"`
 }
 
+// SessionState represents the state of a VPN session
+type SessionState int32
+
+const (
+	SessionStateIdle     SessionState = iota // Not running
+	SessionStateStarting                     // Start() in progress
+	SessionStateRunning                      // Running normally
+	SessionStateStopping                     // Stop() in progress
+	SessionStateStopped                      // Stopped, cleanup complete
+)
+
+// CleanupTimeout is the maximum time to wait for cleanup before force termination
+const CleanupTimeout = 5 * time.Second
+
+// GoroutineExitTimeout is the maximum time for goroutines to exit after context cancellation
+const GoroutineExitTimeout = 2 * time.Second
+
 // HyperTunnel represents the main tunnel instance
 type HyperTunnel struct {
 	config     TunnelConfig
@@ -181,6 +198,13 @@ type HyperTunnel struct {
 	startTime  time.Time
 	lastHandshake time.Time
 	handshakeRTT int64 // Cached handshake RTT in milliseconds
+	
+	// Session lifecycle management (for port conflict/zombie fix)
+	sessionCtx    context.Context    // Context for this session, cancelled on Stop()
+	sessionCancel context.CancelFunc // Cancel function to signal all goroutines to stop
+	cleanupWg     sync.WaitGroup     // WaitGroup to track goroutines for cleanup
+	cleanupDone   chan struct{}      // Channel signaled when cleanup is complete
+	state         atomic.Int32       // Atomic session state for thread-safe transitions
 }
 
 // NewHyperTunnel creates a new tunnel instance
@@ -263,25 +287,39 @@ func NewHyperTunnel(config TunnelConfig) (*HyperTunnel, error) {
 		if err != nil {
 			logError("[Tunnel] ❌ Failed to create Xray instance: %v", err)
 			logError("[Tunnel] ❌ Cannot continue without Xray - returning error")
+			// CRITICAL: Close TUN device to prevent FD leak
+			logError("[Tunnel] 🧹 Closing TUN device to prevent FD leak...")
+			tunDev.Close()
 			return nil, fmt.Errorf("failed to create Xray instance: %w", err)
 		} else {
 			logInfo("[Tunnel] ✅ Xray instance created")
 		}
 	} else {
 		logError("[Tunnel] ❌ XrayConfig is empty or invalid: '%s' (length: %d)", config.XrayConfig, len(config.XrayConfig))
+		// CRITICAL: Close TUN device to prevent FD leak
+		logError("[Tunnel] 🧹 Closing TUN device to prevent FD leak...")
+		tunDev.Close()
 		return nil, fmt.Errorf("XrayConfig is empty or invalid (must not be empty or '{}')")
 	}
 
-	// Create tunnel instance
-	tunnel := &HyperTunnel{
-		config:       config,
-		wgConfig:     &wgConfig,
-		tunDevice:    tunDev,
-		xrayInstance: xrayInst,
-		stopChan:     make(chan struct{}),
-	}
+	// Create session context for lifecycle management
+	sessionCtx, sessionCancel := context.WithCancel(context.Background())
 
-	logInfo("HyperTunnel instance created successfully")
+	// Create tunnel instance with session lifecycle fields
+	tunnel := &HyperTunnel{
+		config:        config,
+		wgConfig:      &wgConfig,
+		tunDevice:     tunDev,
+		xrayInstance:  xrayInst,
+		stopChan:      make(chan struct{}),
+		sessionCtx:    sessionCtx,
+		sessionCancel: sessionCancel,
+		cleanupDone:   make(chan struct{}),
+	}
+	// Initialize state to Idle
+	tunnel.state.Store(int32(SessionStateIdle))
+
+	logInfo("HyperTunnel instance created successfully (with session context)")
 	return tunnel, nil
 }
 
@@ -317,13 +355,37 @@ func createTUNFromFd(fd int, mtu int) (tun.Device, string, error) {
 
 // Start starts the tunnel with full diagnostics
 func (t *HyperTunnel) Start() error {
-	if t.running.Load() {
-		return fmt.Errorf("already running")
+	// Atomic state transition: Idle -> Starting
+	// This prevents race conditions when Start() is called concurrently
+	if !t.state.CompareAndSwap(int32(SessionStateIdle), int32(SessionStateStarting)) {
+		currentState := SessionState(t.state.Load())
+		if currentState == SessionStateRunning {
+			return fmt.Errorf("already running")
+		}
+		return fmt.Errorf("invalid state for Start(): %d", currentState)
 	}
+	
+	// Ensure we reset state on failure
+	startSuccess := false
+	defer func() {
+		if !startSuccess {
+			t.state.Store(int32(SessionStateIdle))
+		}
+	}()
 	
 	logInfo("[Tunnel] ========================================")
 	logInfo("[Tunnel] Starting HyperTunnel with Diagnostics")
 	logInfo("[Tunnel] ========================================")
+	
+	// Create fresh session context for this session
+	// This ensures all goroutines can be cancelled when Stop() is called
+	if t.sessionCancel != nil {
+		// Cancel any previous context (shouldn't happen, but be safe)
+		t.sessionCancel()
+	}
+	t.sessionCtx, t.sessionCancel = context.WithCancel(context.Background())
+	t.cleanupDone = make(chan struct{})
+	logInfo("[Tunnel] ✅ Session context created for lifecycle management")
 	
 	// ===== PRE-CHECK: Network Diagnostics =====
 	// NOTE: We skip this check before VPN starts because socket protection
@@ -543,8 +605,15 @@ func (t *HyperTunnel) Start() error {
 	t.running.Store(true)
 	t.startTime = time.Now()
 	
-	go t.collectStats()
-	go t.monitorHandshake() // NEW: Monitor for handshake success
+	// Transition state to Running
+	t.state.Store(int32(SessionStateRunning))
+	startSuccess = true
+	
+	// Start goroutines with session context for coordinated shutdown
+	// Track them with WaitGroup for cleanup
+	t.cleanupWg.Add(2)
+	go t.collectStatsWithContext(t.sessionCtx)
+	go t.monitorHandshakeWithContext(t.sessionCtx)
 	
 	logInfo("[Tunnel] ")
 	logInfo("[Tunnel] ========================================")
@@ -554,6 +623,7 @@ func (t *HyperTunnel) Start() error {
 	logInfo("[Tunnel] Now waiting for WireGuard handshake...")
 	logInfo("[Tunnel] If handshake fails after 30s, there may be")
 	logInfo("[Tunnel] an issue with UDP routing through Xray.")
+	logInfo("[Tunnel] Session context active for lifecycle management")
 	
 	return nil
 }
@@ -675,16 +745,29 @@ func maskPrivateKey(config string) string {
 	return result
 }
 
-// Stop stops the tunnel IMMEDIATELY (aggressive cleanup)
+// Stop stops the tunnel with proper lifecycle management
 func (t *HyperTunnel) Stop() error {
-	logInfo("[Tunnel] ⚡ IMMEDIATE STOP: Stopping HyperTunnel...")
+	logInfo("[Tunnel] ⚡ STOP: Stopping HyperTunnel with lifecycle management...")
 
-	if !t.running.Load() {
-		logInfo("[Tunnel] Tunnel not running, nothing to stop")
+	// Atomic state transition: Running -> Stopping
+	currentState := SessionState(t.state.Load())
+	if currentState != SessionStateRunning && currentState != SessionStateStarting {
+		logInfo("[Tunnel] Tunnel not running (state: %d), nothing to stop", currentState)
 		return nil
 	}
+	
+	// Try to transition to Stopping state
+	if !t.state.CompareAndSwap(int32(currentState), int32(SessionStateStopping)) {
+		logWarn("[Tunnel] State changed during stop, current: %d", t.state.Load())
+	}
 
-	// IMMEDIATELY signal stop to all goroutines
+	// STEP 1: Cancel session context to signal all goroutines to stop
+	if t.sessionCancel != nil {
+		logInfo("[Tunnel] Cancelling session context...")
+		t.sessionCancel()
+	}
+
+	// STEP 2: Signal stop via stopChan (for legacy goroutines)
 	select {
 	case <-t.stopChan:
 		// Already closed
@@ -692,54 +775,151 @@ func (t *HyperTunnel) Stop() error {
 		close(t.stopChan)
 	}
 	
-	// IMMEDIATELY mark as not running (before cleanup)
+	// STEP 3: Mark as not running
 	t.running.Store(false)
 
-	// Aggressive cleanup - kill everything immediately
+	// STEP 4: Wait for goroutines to exit with timeout
+	logInfo("[Tunnel] Waiting for goroutines to exit (timeout: %v)...", GoroutineExitTimeout)
+	goroutinesDone := make(chan struct{})
+	go func() {
+		t.cleanupWg.Wait()
+		close(goroutinesDone)
+	}()
+	
+	select {
+	case <-goroutinesDone:
+		logInfo("[Tunnel] ✅ All goroutines exited gracefully")
+	case <-time.After(GoroutineExitTimeout):
+		logWarn("[Tunnel] ⚠️ Goroutine exit timeout - some goroutines may still be running")
+	}
+
+	// STEP 5: Cleanup all resources
 	t.cleanup()
 
-	logInfo("[Tunnel] ✅ Tunnel stopped immediately")
+	// STEP 6: Signal cleanup complete
+	select {
+	case <-t.cleanupDone:
+		// Already closed
+	default:
+		close(t.cleanupDone)
+	}
+
+	// STEP 7: Transition to Stopped state
+	t.state.Store(int32(SessionStateStopped))
+
+	logInfo("[Tunnel] ✅ Tunnel stopped with lifecycle management complete")
 
 	return nil
 }
 
-// cleanup cleans up all resources
-func (t *HyperTunnel) cleanup() {
-	logInfo("[Tunnel] Starting cleanup...")
+// WaitForCleanup waits for cleanup to complete with a timeout
+// Returns true if cleanup completed, false if timeout
+func (t *HyperTunnel) WaitForCleanup(timeout time.Duration) bool {
+	select {
+	case <-t.cleanupDone:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
+}
+
+// GetState returns the current session state
+func (t *HyperTunnel) GetState() SessionState {
+	return SessionState(t.state.Load())
+}
+
+// CleanupResult tracks the result of cleanup operation
+type CleanupResult struct {
+	Success         bool
+	Duration        time.Duration
+	ResourcesClosed []string
+	Errors          []error
+	ForcedStop      bool
+}
+
+// cleanup cleans up all resources with tracking
+func (t *HyperTunnel) cleanup() *CleanupResult {
+	startTime := time.Now()
+	result := &CleanupResult{
+		Success:         true,
+		ResourcesClosed: make([]string, 0),
+		Errors:          make([]error, 0),
+	}
 	
-	// Close bind first (this will stop health check goroutine and UDP connection)
+	logInfo("[Cleanup] ========================================")
+	logInfo("[Cleanup] Starting comprehensive resource cleanup...")
+	logInfo("[Cleanup] ========================================")
+	
+	// STEP 1: Close XrayBind first (stops health check goroutine and UDP connection)
 	if t.xrayBind != nil {
-		logInfo("[Tunnel] Closing XrayBind...")
+		logInfo("[Cleanup] Step 1/4: Closing XrayBind...")
 		t.xrayBind.Close()
 		t.xrayBind = nil
-		logInfo("[Tunnel] ✅ XrayBind closed")
+		result.ResourcesClosed = append(result.ResourcesClosed, "XrayBind")
+		logInfo("[Cleanup] ✅ XrayBind closed")
+	} else {
+		logDebug("[Cleanup] Step 1/4: XrayBind already nil, skipping")
 	}
 
-	// Stop Xray (this will close all UDP connections and their goroutines)
+	// STEP 2: Stop Xray (closes all UDP connections and their goroutines)
 	if t.xrayInstance != nil {
-		logInfo("[Tunnel] Stopping Xray instance...")
-		t.xrayInstance.Stop()
+		logInfo("[Cleanup] Step 2/4: Stopping Xray instance...")
+		if err := t.xrayInstance.Stop(); err != nil {
+			logError("[Cleanup] ⚠️ Xray stop error: %v", err)
+			result.Errors = append(result.Errors, err)
+		}
 		t.xrayInstance = nil
-		logInfo("[Tunnel] ✅ Xray instance stopped")
+		result.ResourcesClosed = append(result.ResourcesClosed, "XrayInstance")
+		logInfo("[Cleanup] ✅ Xray instance stopped")
+	} else {
+		logDebug("[Cleanup] Step 2/4: Xray instance already nil, skipping")
 	}
 
-	// Stop WireGuard
+	// STEP 3: Stop WireGuard
 	if t.wgDevice != nil {
-		logInfo("[Tunnel] Closing WireGuard device...")
+		logInfo("[Cleanup] Step 3/4: Closing WireGuard device...")
 		t.wgDevice.Close()
 		t.wgDevice = nil
-		logInfo("[Tunnel] ✅ WireGuard device closed")
+		result.ResourcesClosed = append(result.ResourcesClosed, "WireGuardDevice")
+		logInfo("[Cleanup] ✅ WireGuard device closed")
+	} else {
+		logDebug("[Cleanup] Step 3/4: WireGuard device already nil, skipping")
 	}
 
-	// Close TUN
+	// STEP 4: Close TUN device
 	if t.tunDevice != nil {
-		logInfo("[Tunnel] Closing TUN device...")
-		t.tunDevice.Close()
+		logInfo("[Cleanup] Step 4/4: Closing TUN device...")
+		if err := t.tunDevice.Close(); err != nil {
+			logError("[Cleanup] ⚠️ TUN close error: %v", err)
+			result.Errors = append(result.Errors, err)
+		}
 		t.tunDevice = nil
-		logInfo("[Tunnel] ✅ TUN device closed")
+		result.ResourcesClosed = append(result.ResourcesClosed, "TUNDevice")
+		logInfo("[Cleanup] ✅ TUN device closed")
+	} else {
+		logDebug("[Cleanup] Step 4/4: TUN device already nil, skipping")
 	}
 	
-	logInfo("[Tunnel] ✅ Cleanup complete")
+	// Calculate duration and log summary
+	result.Duration = time.Since(startTime)
+	result.Success = len(result.Errors) == 0
+	
+	logInfo("[Cleanup] ========================================")
+	logInfo("[Cleanup] Cleanup Summary:")
+	logInfo("[Cleanup]   Duration: %v", result.Duration)
+	logInfo("[Cleanup]   Resources closed: %d (%v)", len(result.ResourcesClosed), result.ResourcesClosed)
+	logInfo("[Cleanup]   Errors: %d", len(result.Errors))
+	if result.Success {
+		logInfo("[Cleanup] ✅ CLEANUP COMPLETE - All resources released")
+	} else {
+		logWarn("[Cleanup] ⚠️ CLEANUP COMPLETE WITH ERRORS")
+		for i, err := range result.Errors {
+			logError("[Cleanup]   Error %d: %v", i+1, err)
+		}
+	}
+	logInfo("[Cleanup] ========================================")
+	
+	return result
 }
 
 // GetStats returns tunnel statistics
@@ -805,13 +985,35 @@ func (t *HyperTunnel) GetXrayInstance() *XrayWrapper {
 }
 
 
-// collectStats periodically collects tunnel statistics
+// collectStats periodically collects tunnel statistics (legacy, uses stopChan)
 func (t *HyperTunnel) collectStats() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {
 		select {
+		case <-t.stopChan:
+			return
+		case <-ticker.C:
+			t.updateStats()
+		}
+	}
+}
+
+// collectStatsWithContext periodically collects tunnel statistics with context support
+// This version uses session context for coordinated shutdown
+func (t *HyperTunnel) collectStatsWithContext(ctx context.Context) {
+	defer t.cleanupWg.Done()
+	defer logInfo("[Stats] collectStatsWithContext goroutine exiting")
+	
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			logInfo("[Stats] Context cancelled, stopping stats collection")
+			return
 		case <-t.stopChan:
 			return
 		case <-ticker.C:
@@ -955,7 +1157,7 @@ func parseHandshake(ipc string) int64 {
 	return lastHandshakeSec
 }
 
-// monitorHandshake monitors WireGuard handshake status with retry on connection issues
+// monitorHandshake monitors WireGuard handshake status with retry on connection issues (legacy)
 func (t *HyperTunnel) monitorHandshake() {
 	logInfo("[Handshake] Starting handshake monitor...")
 
@@ -1042,6 +1244,79 @@ func (t *HyperTunnel) attemptHandshakeRecovery() {
 			logError("[Handshake] ❌ Recovery failed: %v", err)
 		} else {
 			logInfo("[Handshake] ✅ Recovery initiated, waiting for new handshake...")
+		}
+	}
+}
+
+// monitorHandshakeWithContext monitors WireGuard handshake status with context support
+// This version uses session context for coordinated shutdown
+func (t *HyperTunnel) monitorHandshakeWithContext(ctx context.Context) {
+	defer t.cleanupWg.Done()
+	defer logInfo("[Handshake] monitorHandshakeWithContext goroutine exiting")
+	
+	logInfo("[Handshake] Starting handshake monitor (with context)...")
+
+	checkInterval := 1 * time.Second
+	timeout := 1 * time.Hour
+	startTime := time.Now()
+	
+	var lastSuccessfulHandshake int64
+	var consecutiveFailures int
+	const maxConsecutiveFailures = 12
+
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			logInfo("[Handshake] Context cancelled, stopping handshake monitor")
+			return
+		case <-t.stopChan:
+			return
+		case <-ticker.C:
+			if !t.running.Load() {
+				return
+			}
+
+			// Check handshake status
+			if t.wgDevice != nil {
+				ipc, err := t.wgDevice.IpcGet()
+				if err == nil {
+					handshake := parseHandshake(ipc)
+					if handshake > 0 {
+						if lastSuccessfulHandshake == 0 {
+							logInfo("[Handshake] ✅ SUCCESS! Handshake completed at %d", handshake)
+							logInfo("[Handshake] ✅ VPN tunnel is now fully operational!")
+						}
+						
+						handshakeAge := time.Now().Unix() - handshake
+						if handshakeAge > 180 && lastSuccessfulHandshake > 0 {
+							consecutiveFailures++
+							logWarn("[Handshake] ⚠️ Handshake is stale (%d seconds old), failures: %d/%d", 
+								handshakeAge, consecutiveFailures, maxConsecutiveFailures)
+							
+							if consecutiveFailures >= maxConsecutiveFailures {
+								logWarn("[Handshake] 🔄 Connection seems unhealthy, attempting recovery...")
+								t.attemptHandshakeRecovery()
+								consecutiveFailures = 0
+							}
+						} else {
+							consecutiveFailures = 0
+							lastSuccessfulHandshake = handshake
+						}
+						continue
+					}
+				}
+			}
+
+			elapsed := time.Since(startTime)
+			logDebug("[Handshake] Waiting... (%v elapsed)", elapsed.Round(time.Second))
+
+			if elapsed > timeout && lastSuccessfulHandshake == 0 {
+				logError("[Handshake] ❌ TIMEOUT! No handshake after %v", timeout)
+				return
+			}
 		}
 	}
 }

@@ -25,6 +25,13 @@ require (
 
 require google.golang.org/grpc v1.76.0
 
+// Replace WireGuard-go with our forked version that has extended rekey timers
+// This prevents connection drops during rekey by extending:
+// - RekeyAfterTime from 120s (2 min) to 7200s (2 hours)
+// - RejectAfterTime from 180s (3 min) to 10800s (3 hours)
+// Fork patches are needed because WireGuard timers are package-level constants
+replace golang.zx2c4.com/wireguard => ./wireguard-go-fork
+
 require (
 	github.com/andybalholm/brotli v1.0.6 // indirect
 	github.com/cloudflare/circl v1.6.1 // indirect

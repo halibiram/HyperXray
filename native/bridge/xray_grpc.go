@@ -42,7 +42,17 @@ func NewXrayGrpcClient(apiPort int) (*XrayGrpcClient, error) {
 	// Create StatsService client
 	client := command.NewStatsServiceClient(conn)
 
-	logInfo("[XrayGrpc] ✅ gRPC client created for %s (connection will be established asynchronously)", address)
+	logInfo("[XrayGrpc] ✅ gRPC client created for %s", address)
+	
+	// CRITICAL FIX: Trigger initial connection attempt
+	// gRPC uses lazy connection - without this, connection stays in IDLE state
+	// until first RPC call or explicit Connect() call
+	logInfo("[XrayGrpc] Triggering initial connection attempt...")
+	conn.Connect()
+	
+	// Check initial state after Connect()
+	initialState := conn.GetState()
+	logInfo("[XrayGrpc] Initial connection state after Connect(): %v", initialState)
 
 	return &XrayGrpcClient{
 		conn:   conn,
@@ -52,6 +62,8 @@ func NewXrayGrpcClient(apiPort int) (*XrayGrpcClient, error) {
 }
 
 // waitForConnection waits for gRPC connection to be ready
+// CRITICAL FIX: gRPC lazy connection - must call Connect() to initiate connection
+// Without Connect(), connection stays in IDLE state forever!
 func (c *XrayGrpcClient) waitForConnection(maxWait time.Duration) error {
 	if c.conn == nil {
 		return fmt.Errorf("connection is nil")
@@ -69,13 +81,43 @@ func (c *XrayGrpcClient) waitForConnection(maxWait time.Duration) error {
 	// Log initial state
 	logDebug("[XrayGrpc] Waiting for connection (initial state: %v, maxWait: %v)", state, maxWait)
 	
+	// CRITICAL FIX: If connection is IDLE, we must explicitly trigger connection attempt
+	// gRPC uses lazy connection - it won't connect until we either:
+	// 1. Call Connect() explicitly
+	// 2. Make an RPC call
+	// Without this, WaitForStateChange() will wait forever in IDLE state!
+	if state == connectivity.Idle {
+		logInfo("[XrayGrpc] Connection is IDLE, triggering connection attempt with Connect()...")
+		c.conn.Connect()
+		state = c.conn.GetState()
+		logDebug("[XrayGrpc] After Connect(): state=%v", state)
+	}
+	
 	startTime := time.Now()
+	retryCount := 0
+	maxRetries := 3
+	
 	for {
 		if !c.conn.WaitForStateChange(ctx, state) {
-			// Context expired
+			// Context expired or no state change
 			currentState := c.conn.GetState()
 			elapsed := time.Since(startTime)
-			logWarn("[XrayGrpc] Connection wait timeout: state=%v (waited %v, maxWait: %v)", currentState, elapsed, maxWait)
+			
+			// CRITICAL FIX: If still IDLE after timeout, try Connect() again
+			if currentState == connectivity.Idle && retryCount < maxRetries {
+				retryCount++
+				logWarn("[XrayGrpc] Connection still IDLE after wait, retry #%d: calling Connect() again...", retryCount)
+				c.conn.Connect()
+				state = c.conn.GetState()
+				if state == connectivity.Ready {
+					logInfo("[XrayGrpc] ✅ Connection is now ready after retry #%d (elapsed: %v)", retryCount, time.Since(startTime))
+					return nil
+				}
+				// Continue waiting with remaining time
+				continue
+			}
+			
+			logWarn("[XrayGrpc] Connection wait timeout: state=%v (waited %v, maxWait: %v, retries: %d)", currentState, elapsed, maxWait, retryCount)
 			return fmt.Errorf("connection not ready: state=%v (waited %v)", currentState, elapsed)
 		}
 
@@ -95,7 +137,14 @@ func (c *XrayGrpcClient) waitForConnection(maxWait time.Duration) error {
 		if state == connectivity.TransientFailure {
 			// TransientFailure is recoverable - continue waiting
 			logDebug("[XrayGrpc] Connection in transient failure (recoverable), continuing to wait...")
-			// Don't return error immediately, allow retry
+			// Trigger reconnection attempt
+			c.conn.Connect()
+		}
+		
+		// CRITICAL FIX: If back to IDLE, trigger connection again
+		if state == connectivity.Idle {
+			logDebug("[XrayGrpc] Connection went back to IDLE, triggering Connect() again...")
+			c.conn.Connect()
 		}
 
 		// Continue waiting for IDLE or CONNECTING states
@@ -106,8 +155,8 @@ func (c *XrayGrpcClient) waitForConnection(maxWait time.Duration) error {
 
 // GetSystemStats queries system statistics from Xray-core
 func (c *XrayGrpcClient) GetSystemStats() (*command.SysStatsResponse, error) {
-	// Wait for connection to be ready (max 5 seconds - increased for slower devices)
-	if err := c.waitForConnection(5 * time.Second); err != nil {
+	// Wait for connection to be ready (max 100ms - minimal wait for fast feedback)
+	if err := c.waitForConnection(100 * time.Millisecond); err != nil {
 		logError("[XrayGrpc] Connection not ready: %v", err)
 		return nil, fmt.Errorf("connection not ready: %w", err)
 	}
@@ -129,8 +178,8 @@ func (c *XrayGrpcClient) GetSystemStats() (*command.SysStatsResponse, error) {
 // QueryTrafficStats queries traffic statistics from Xray-core
 // Returns uplink and downlink bytes, matching Kotlin CoreStatsClient pattern matching logic
 func (c *XrayGrpcClient) QueryTrafficStats() (uplink, downlink int64, err error) {
-	// Wait for connection to be ready (max 5 seconds - increased for slower devices)
-	if err := c.waitForConnection(5 * time.Second); err != nil {
+	// Wait for connection to be ready (max 100ms - minimal wait for fast feedback)
+	if err := c.waitForConnection(100 * time.Millisecond); err != nil {
 		logError("[XrayGrpc] Connection not ready for traffic stats: %v", err)
 		return 0, 0, fmt.Errorf("connection not ready: %w", err)
 	}

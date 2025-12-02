@@ -245,6 +245,13 @@ object ConfigInjector {
      * Used for optimization when starting multiple instances - common config is injected once,
      * then each instance only needs this quick port injection.
      * 
+     * CRITICAL: Xray-core gRPC API requires THREE components to work:
+     * 1. api section with tag, listen address, and services
+     * 2. api inbound (dokodemo-door) to receive gRPC requests
+     * 3. routing rule to route api inbound traffic to api handler
+     * 
+     * Without all three, gRPC client will stay in IDLE state and never connect!
+     * 
      * @param configContent Pre-processed config content (from injectCommonConfig)
      * @param apiPort API port to inject
      * @return Config JSON string with API port injected
@@ -267,18 +274,111 @@ object ConfigInjector {
         AiLogHelper.d(TAG, "🔧 CONFIG API PORT: Injecting API port: $effectivePort")
         val jsonObject = JSONObject(configContent)
         
+        // ===== STEP 1: Add API section =====
         val apiObject = JSONObject()
         apiObject.put("tag", "api")
-        apiObject.put("listen", "127.0.0.1:$effectivePort")
+        // CRITICAL: For Xray-core embedded in Go library, we don't use listen address
+        // The gRPC server is started internally by Xray-core on the specified port
+        // We need to use the new format without "listen" field
         val servicesArray = org.json.JSONArray()
         servicesArray.put("StatsService")
         apiObject.put("services", servicesArray)
-
         jsonObject.put("api", apiObject)
+        AiLogHelper.d(TAG, "✅ CONFIG API PORT: API section added (tag: api, services: [StatsService])")
+        
+        // ===== STEP 2: Add API inbound (dokodemo-door) =====
+        // This inbound receives gRPC requests and routes them to the API handler
+        var inboundsArray = jsonObject.optJSONArray("inbounds")
+        if (inboundsArray == null) {
+            inboundsArray = org.json.JSONArray()
+        }
+        
+        // Check if api inbound already exists
+        var apiInboundExists = false
+        for (i in 0 until inboundsArray.length()) {
+            val inbound = inboundsArray.getJSONObject(i)
+            val tag = inbound.optString("tag", "")
+            if (tag == "api-inbound" || tag == "api_inbound") {
+                apiInboundExists = true
+                // Update port if different
+                val existingPort = inbound.optInt("port", 0)
+                if (existingPort != effectivePort) {
+                    inbound.put("port", effectivePort)
+                    AiLogHelper.d(TAG, "✅ CONFIG API PORT: Updated existing api-inbound port from $existingPort to $effectivePort")
+                }
+                break
+            }
+        }
+        
+        if (!apiInboundExists) {
+            val apiInbound = JSONObject()
+            apiInbound.put("tag", "api-inbound")
+            apiInbound.put("port", effectivePort)
+            apiInbound.put("listen", "127.0.0.1")
+            apiInbound.put("protocol", "dokodemo-door")
+            
+            val apiInboundSettings = JSONObject()
+            apiInboundSettings.put("address", "127.0.0.1")
+            apiInbound.put("settings", apiInboundSettings)
+            
+            inboundsArray.put(apiInbound)
+            AiLogHelper.d(TAG, "✅ CONFIG API PORT: Added api-inbound (dokodemo-door on 127.0.0.1:$effectivePort)")
+        }
+        
+        jsonObject.put("inbounds", inboundsArray)
+        
+        // ===== STEP 3: Add routing rule for API =====
+        // This rule routes traffic from api-inbound to the api handler
+        var routingObject = jsonObject.optJSONObject("routing")
+        if (routingObject == null) {
+            routingObject = JSONObject()
+        }
+        
+        var rulesArray = routingObject.optJSONArray("rules")
+        if (rulesArray == null) {
+            rulesArray = org.json.JSONArray()
+        }
+        
+        // Check if api routing rule already exists
+        var apiRuleExists = false
+        for (i in 0 until rulesArray.length()) {
+            val rule = rulesArray.getJSONObject(i)
+            val outboundTag = rule.optString("outboundTag", "")
+            if (outboundTag == "api") {
+                apiRuleExists = true
+                break
+            }
+        }
+        
+        if (!apiRuleExists) {
+            val apiRule = JSONObject()
+            apiRule.put("type", "field")
+            val inboundTagArray = org.json.JSONArray()
+            inboundTagArray.put("api-inbound")
+            apiRule.put("inboundTag", inboundTagArray)
+            apiRule.put("outboundTag", "api")
+            
+            // Insert at the beginning of rules array so it takes priority
+            val newRulesArray = org.json.JSONArray()
+            newRulesArray.put(apiRule)
+            for (i in 0 until rulesArray.length()) {
+                newRulesArray.put(rulesArray.getJSONObject(i))
+            }
+            routingObject.put("rules", newRulesArray)
+            AiLogHelper.d(TAG, "✅ CONFIG API PORT: Added routing rule (api-inbound → api)")
+        }
+        
+        // Ensure domainStrategy is set for routing
+        if (!routingObject.has("domainStrategy")) {
+            routingObject.put("domainStrategy", "AsIs")
+        }
+        
+        jsonObject.put("routing", routingObject)
 
         val finalConfig = jsonObject.toString(2)
         val duration = System.currentTimeMillis() - startTime
-        AiLogHelper.d(TAG, "✅ CONFIG API PORT: API port injected (port: $effectivePort, duration: ${duration}ms)")
+        AiLogHelper.i(TAG, "✅ CONFIG API PORT: Full API injection completed (port: $effectivePort, duration: ${duration}ms)")
+        AiLogHelper.d(TAG, "✅ CONFIG API PORT: API components: api section + api-inbound (dokodemo-door) + routing rule")
         return finalConfig
     }
 }

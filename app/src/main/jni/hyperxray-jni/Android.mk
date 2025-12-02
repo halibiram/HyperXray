@@ -6,7 +6,7 @@ LOCAL_PATH := $(call my-dir)
 include $(CLEAR_VARS)
 
 LOCAL_MODULE := hyperxray-jni
-LOCAL_SRC_FILES := hyperxray-jni.c
+LOCAL_SRC_FILES := hyperxray-jni.c log_buffer.c
 
 # Link against log library for Android logging and dl library for dlopen/dlsym
 LOCAL_LDLIBS := -llog -ldl

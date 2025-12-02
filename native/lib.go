@@ -57,17 +57,20 @@ static bool call_protector(int fd) {
 */
 import "C"
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"runtime/debug"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/hyperxray/native/bridge"
 	"github.com/hyperxray/native/dns"
-	// REMOVED: "github.com/hyperxray/native/xray" - MultiInstanceManager removed
 )
 
 var (
@@ -75,12 +78,24 @@ var (
 	tunnelLock sync.Mutex
 	lastError  string
 	
-	// REMOVED: Multi-instance manager
-	// multiManager and multiManagerLock removed as part of architectural cleanup
+	// Global session management for port conflict/zombie fix
+	globalSessionCtx    context.Context    // Global context for current session
+	globalSessionCancel context.CancelFunc // Cancel function for global session
+	sessionMu           sync.Mutex         // Mutex for session state
+	
+	// Signal handling for graceful shutdown
+	signalChan chan os.Signal
+	signalOnce sync.Once
 	
 	// Counter for GetXrayLogs diagnostic logging
 	getXrayLogsCallCount int
 	getXrayLogsCallCountMu sync.Mutex
+)
+
+// Cleanup timeouts
+const (
+	CleanupTimeout        = 5 * time.Second // Max time to wait for previous session cleanup
+	SignalCleanupTimeout  = 3 * time.Second // Max time to wait for cleanup after signal
 )
 
 // Error codes
@@ -96,6 +111,9 @@ const (
 	ErrorXrayConnectivityFailed = -20
 	ErrorXrayServerUnreachable  = -21
 	ErrorXrayTLSFailed          = -22
+	ErrorCleanupTimeout       = -40  // Previous session cleanup timed out
+	ErrorPortStillInUse       = -41  // Port binding failed after cleanup
+	ErrorForceStopRequired    = -42  // Had to force stop previous session
 	ErrorPanic                = -99
 )
 
@@ -168,6 +186,57 @@ func logWarn(format string, args ...interface{}) {
 	levelC := C.CString("WARN")
 	defer C.free(unsafe.Pointer(levelC))
 	C.safe_callAiLogHelper(tag, levelC, msgC)
+}
+
+// initSignalHandler initializes signal handling for graceful shutdown
+// This is called once on first StartHyperTunnel call
+func initSignalHandler() {
+	signalOnce.Do(func() {
+		signalChan = make(chan os.Signal, 1)
+		signal.Notify(signalChan, syscall.SIGTERM, syscall.SIGINT)
+		
+		go func() {
+			for sig := range signalChan {
+				logInfo("[Signal] Received signal: %v", sig)
+				logInfo("[Signal] Initiating graceful shutdown...")
+				
+				// Cancel global session context
+				sessionMu.Lock()
+				if globalSessionCancel != nil {
+					globalSessionCancel()
+				}
+				sessionMu.Unlock()
+				
+				// Stop tunnel with timeout
+				tunnelLock.Lock()
+				if tunnel != nil {
+					logInfo("[Signal] Stopping tunnel...")
+					tunnel.Stop()
+					
+					// Wait for cleanup with timeout
+					cleanupDone := make(chan struct{})
+					go func() {
+						tunnel.WaitForCleanup(SignalCleanupTimeout)
+						close(cleanupDone)
+					}()
+					
+					select {
+					case <-cleanupDone:
+						logInfo("[Signal] ✅ Graceful shutdown complete")
+					case <-time.After(SignalCleanupTimeout):
+						logWarn("[Signal] ⚠️ Cleanup timeout, forcing shutdown")
+					}
+					
+					tunnel = nil
+				}
+				tunnelLock.Unlock()
+				
+				logInfo("[Signal] Shutdown complete")
+			}
+		}()
+		
+		logInfo("[Signal] Signal handler initialized (SIGTERM, SIGINT)")
+	})
 }
 
 // WireGuardConfig represents WireGuard configuration
@@ -257,12 +326,21 @@ func StartHyperTunnel(tunFd C.int, wgConfigJSON, xrayConfigJSON, warpEndpoint, w
 				tunnel.Stop()
 				tunnel = nil
 			}
+			// Cancel global session on panic
+			sessionMu.Lock()
+			if globalSessionCancel != nil {
+				globalSessionCancel()
+			}
+			sessionMu.Unlock()
 		}
 	}()
 
 	logInfo("========================================")
 	logInfo("StartHyperTunnel called")
 	logInfo("========================================")
+
+	// Initialize signal handler (once)
+	initSignalHandler()
 
 	// Verify protector is set
 	if C.g_protector == nil {
@@ -274,14 +352,47 @@ func StartHyperTunnel(tunFd C.int, wgConfigJSON, xrayConfigJSON, warpEndpoint, w
 	tunnelLock.Lock()
 	defer tunnelLock.Unlock()
 
-	// Check if tunnel already running
-	// If tunnel exists, stop it first to allow restart
+	// ===== FORCE CLEANUP: Stop previous session if exists =====
+	// This prevents "bind: address already in use" errors on quick restart
 	if tunnel != nil {
-		logInfo("Tunnel already exists, stopping it first to allow restart...")
+		logInfo("[Lifecycle] ⚠️ Previous tunnel exists, forcing cleanup...")
+		
+		// Cancel previous global session context
+		sessionMu.Lock()
+		if globalSessionCancel != nil {
+			logInfo("[Lifecycle] Cancelling previous global session context...")
+			globalSessionCancel()
+		}
+		sessionMu.Unlock()
+		
+		// Stop the tunnel
+		logInfo("[Lifecycle] Stopping previous tunnel...")
 		tunnel.Stop()
+		
+		// Wait for cleanup with timeout
+		logInfo("[Lifecycle] Waiting for cleanup (timeout: %v)...", CleanupTimeout)
+		cleanupComplete := tunnel.WaitForCleanup(CleanupTimeout)
+		
+		if !cleanupComplete {
+			logWarn("[Lifecycle] ⚠️ Cleanup timeout! Force terminating...")
+			// Force cleanup already happened in Stop(), just log warning
+			lastError = "Previous session cleanup timed out"
+		} else {
+			logInfo("[Lifecycle] ✅ Previous tunnel cleanup complete")
+		}
+		
 		tunnel = nil
-		logInfo("Previous tunnel stopped, proceeding with new tunnel creation")
+		logInfo("[Lifecycle] Previous tunnel reference cleared")
+		
+		// Small delay to allow ports to be released
+		time.Sleep(100 * time.Millisecond)
 	}
+	
+	// Create new global session context
+	sessionMu.Lock()
+	globalSessionCtx, globalSessionCancel = context.WithCancel(context.Background())
+	sessionMu.Unlock()
+	logInfo("[Lifecycle] ✅ New global session context created")
 
 	// Validate TUN file descriptor
 	tunFdInt := int(tunFd)

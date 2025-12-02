@@ -5,12 +5,54 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 
 	xnet "github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/transport/internet"
 )
+
+// SO_BINDTODEVICE constant for Linux/Android
+// This binds the socket to a specific network interface
+const SO_BINDTODEVICE = 25
+
+// Bootstrap DNS configuration
+// These are hardcoded IPs used to resolve VPN server hostname BEFORE tunnel is established
+var (
+	bootstrapDNSServers = []string{
+		"8.8.8.8:53",      // Google DNS Primary
+		"1.1.1.1:53",      // Cloudflare DNS Primary
+		"8.8.4.4:53",      // Google DNS Secondary
+		"1.0.0.1:53",      // Cloudflare DNS Secondary
+		"9.9.9.9:53",      // Quad9 DNS
+		"208.67.222.222:53", // OpenDNS
+	}
+	
+	// Cache for bootstrap DNS resolutions to avoid repeated lookups
+	bootstrapDNSCache     = make(map[string]bootstrapDNSEntry)
+	bootstrapDNSCacheMu   sync.RWMutex
+	bootstrapDNSCacheTTL  = 5 * time.Minute
+)
+
+// bootstrapDNSEntry represents a cached DNS resolution
+type bootstrapDNSEntry struct {
+	ip        net.IP
+	timestamp time.Time
+}
+
+// Physical interface names to try for SO_BINDTODEVICE
+// Ordered by priority (WiFi first, then mobile data)
+var physicalInterfaceNames = []string{
+	// WiFi interfaces (most common)
+	"wlan0", "wlan1", "wlan2",
+	// Ethernet
+	"eth0", "eth1",
+	// Mobile data (various Android naming conventions)
+	"rmnet0", "rmnet1", "rmnet_data0", "rmnet_data1",
+	"rmnet_ipa0", "ccmni0", "ccmni1",
+}
 
 // ProtectedXrayDialer implements Xray's internet.SystemDialer interface
 // It ensures all sockets are protected before connecting
@@ -90,7 +132,15 @@ func (d *ProtectedXrayDialer) Dial(ctx context.Context, source xnet.Address, des
 		logInfo("[XrayDialer] ℹ️  Socket protection will still work, only explicit source binding is skipped")
 	}
 
-	// Use net.Dialer with Control callback for socket protection and source binding
+	// Detect physical interface for SO_BINDTODEVICE
+	physicalIface := detectPhysicalInterface()
+	if physicalIface != "" {
+		logInfo("[XrayDialer] ✅ Physical interface detected: %s", physicalIface)
+	} else {
+		logWarn("[XrayDialer] ⚠️ No physical interface detected for SO_BINDTODEVICE")
+	}
+
+	// Use net.Dialer with Control callback for socket protection and interface binding
 	// This is the modern, platform-independent approach
 	dialer := net.Dialer{
 		Timeout:   30 * time.Second,
@@ -98,59 +148,86 @@ func (d *ProtectedXrayDialer) Dial(ctx context.Context, source xnet.Address, des
 		Control: func(network, address string, c syscall.RawConn) error {
 			var protectErr error
 			var bindErr error
+			var deviceBindErr error
+			
 			err := c.Control(func(fd uintptr) {
 				fdInt := int(fd)
 				
-				// CRITICAL: Protect socket FIRST, before any other operations
+				// ============================================================
+				// STEP 1: PROTECT SOCKET (CRITICAL - MUST SUCCEED)
+				// ============================================================
 				// On Android, socket must be protected immediately after creation
-				// to prevent it from being routed through VPN
-				logInfo("[XrayDialer] Protecting socket fd: %d (BEFORE bind)...", fdInt)
+				// to prevent it from being routed through VPN (routing loop)
+				logInfo("[XrayDialer] [STEP 1/3] Protecting socket fd: %d...", fdInt)
 				if !ProtectSocket(fdInt) {
-					protectErr = fmt.Errorf("failed to protect socket %d", fdInt)
-					logError("[XrayDialer] ❌ Protection result: FAILED (socket %d)", fdInt)
-					return // Don't continue if protection fails
+					protectErr = fmt.Errorf("FATAL: failed to protect socket %d - blocking connection to prevent routing loop", fdInt)
+					logError("[XrayDialer] ❌ FATAL: Protection FAILED (socket %d)", fdInt)
+					logError("[XrayDialer] ❌ Connection will be BLOCKED to prevent routing loop")
+					return // Don't continue if protection fails - this is FATAL
+				}
+				logInfo("[XrayDialer] ✅ [STEP 1/3] Socket %d protected successfully", fdInt)
+				
+				// ============================================================
+				// STEP 2: BIND TO PHYSICAL INTERFACE (SO_BINDTODEVICE)
+				// ============================================================
+				// This explicitly binds the socket to the physical network interface
+				// (e.g., wlan0, rmnet_data0) to ensure traffic bypasses VPN routing
+				// This is a secondary protection layer in addition to VpnService.protect()
+				logInfo("[XrayDialer] [STEP 2/3] Binding socket to physical interface...")
+				if physicalIface != "" {
+					deviceBindErr = bindSocketToDevice(fdInt, physicalIface)
+					if deviceBindErr != nil {
+						// SO_BINDTODEVICE may fail due to permissions (requires CAP_NET_RAW)
+						// This is non-fatal as VpnService.protect() is the primary protection
+						logWarn("[XrayDialer] ⚠️ SO_BINDTODEVICE failed: %v (non-fatal)", deviceBindErr)
+						logInfo("[XrayDialer] ℹ️  This is normal on Android - VpnService.protect() is primary protection")
+					} else {
+						logInfo("[XrayDialer] ✅ [STEP 2/3] Socket bound to interface: %s", physicalIface)
+					}
 				} else {
-					logInfo("[XrayDialer] ✅ Protection result: SUCCESS (socket %d protected)", fdInt)
+					logInfo("[XrayDialer] ℹ️  [STEP 2/3] Skipping SO_BINDTODEVICE (no interface detected)")
 				}
 				
-				// Then, bind to physical IP if available
-				// This ensures packets use physical interface, not VPN
-				// Note: Binding may fail on Android due to permissions, but protection is more important
-				if physicalIP != nil && network == "tcp" {
+				// ============================================================
+				// STEP 3: BIND TO PHYSICAL IP ADDRESS (OPTIONAL)
+				// ============================================================
+				// This binds the socket to the physical interface's IP address
+				// Provides additional assurance that traffic uses physical network
+				logInfo("[XrayDialer] [STEP 3/3] Binding socket to physical IP...")
+				if physicalIP != nil && (network == "tcp" || network == "tcp4" || network == "tcp6") {
 					var bindAddr syscall.SockaddrInet4
 					copy(bindAddr.Addr[:], physicalIP.To4())
 					bindAddr.Port = 0 // Let OS choose port
 
-					// Convert fd to appropriate type for syscall.Bind
-					// On Android, syscall.Socket returns int, so we can use it directly
-					if err := syscall.Bind(int(fd), &bindAddr); err != nil {
+					if err := syscall.Bind(fdInt, &bindAddr); err != nil {
 						bindErr = fmt.Errorf("failed to bind to physical IP %s: %w", physicalIP.String(), err)
-						logWarn("[XrayDialer] ⚠️ Socket binding failed: %v", bindErr)
-						logInfo("[XrayDialer] ℹ️  This is often normal on Android when:")
-						logInfo("[XrayDialer]    - VPN is active (TUN interface is default route)")
-						logInfo("[XrayDialer]    - Physical IP detection fails due to cache miss")
-						logInfo("[XrayDialer]    - Socket permissions are restricted")
-						logInfo("[XrayDialer] ℹ️  Connection will proceed with socket protection only")
-						// Bind failure is not fatal - socket protection is more important
+						logWarn("[XrayDialer] ⚠️ IP binding failed: %v (non-fatal)", bindErr)
 					} else {
-						logInfo("[XrayDialer] ✅ Socket bound to physical IP: %s", physicalIP.String())
+						logInfo("[XrayDialer] ✅ [STEP 3/3] Socket bound to physical IP: %s", physicalIP.String())
 					}
-				} else if physicalIP == nil && network == "tcp" {
-					logInfo("[XrayDialer] ℹ️  Skipping socket binding (no physical IP available)")
-					logInfo("[XrayDialer] ℹ️  This is expected when VPN is active or IP detection fails")
+				} else if physicalIP == nil {
+					logInfo("[XrayDialer] ℹ️  [STEP 3/3] Skipping IP binding (no physical IP available)")
 				}
 			})
+			
 			if err != nil {
-				return err
+				return fmt.Errorf("control callback error: %w", err)
 			}
-			// Protection error is fatal - return it
+			
+			// Protection error is FATAL - return it to block the connection
 			if protectErr != nil {
 				return protectErr
 			}
-			// Bind error is not fatal - just log it
-			if bindErr != nil {
-				logWarn("[XrayDialer] ⚠️ Bind failed but continuing (protection succeeded): %v", bindErr)
+			
+			// Device bind and IP bind errors are non-fatal - just log them
+			// VpnService.protect() is the primary protection mechanism
+			if deviceBindErr != nil {
+				logDebug("[XrayDialer] Note: SO_BINDTODEVICE failed but continuing (protection succeeded)")
 			}
+			if bindErr != nil {
+				logDebug("[XrayDialer] Note: IP bind failed but continuing (protection succeeded)")
+			}
+			
 			return nil
 		},
 	}
@@ -274,36 +351,71 @@ func initXrayProtectedDialer() error {
 	return nil
 }
 
-// resolveDomainProtected resolves a domain name using protected DNS resolver
-// This ensures DNS queries go through physical network, not VPN
+// resolveDomainProtected resolves a domain name using Bootstrap DNS
+// This is CRITICAL for avoiding DNS deadlock:
+// - VPN is not yet established
+// - System DNS may try to use VPN (which isn't up)
+// - We use hardcoded DNS IPs to resolve the VPN server hostname
+// - DNS queries are sent through protected sockets on physical interface
 func resolveDomainProtected(domain string) (net.IP, error) {
-	// Try multiple DNS servers in order
-	dnsServers := []string{
-		"8.8.8.8:53",      // Google DNS
-		"1.1.1.1:53",      // Cloudflare DNS
-		"8.8.4.4:53",      // Google DNS secondary
-		"1.0.0.1:53",      // Cloudflare DNS secondary
+	logInfo("[BootstrapDNS] ========================================")
+	logInfo("[BootstrapDNS] Resolving domain: %s", domain)
+	logInfo("[BootstrapDNS] Using Bootstrap DNS (bypasses VPN routing)")
+	logInfo("[BootstrapDNS] ========================================")
+	
+	// Check cache first
+	bootstrapDNSCacheMu.RLock()
+	if entry, ok := bootstrapDNSCache[domain]; ok {
+		if time.Since(entry.timestamp) < bootstrapDNSCacheTTL {
+			bootstrapDNSCacheMu.RUnlock()
+			logInfo("[BootstrapDNS] ✅ Cache hit: %s → %s (age: %v)", domain, entry.ip.String(), time.Since(entry.timestamp))
+			return entry.ip, nil
+		}
+	}
+	bootstrapDNSCacheMu.RUnlock()
+	
+	// Detect physical interface for binding DNS queries
+	physicalIface := detectPhysicalInterface()
+	if physicalIface != "" {
+		logInfo("[BootstrapDNS] Physical interface for DNS: %s", physicalIface)
 	}
 	
+	// Try bootstrap DNS servers in order
 	var lastErr error
-	for _, dnsServer := range dnsServers {
-		logInfo("[XrayDialer] Trying DNS server: %s for domain: %s", dnsServer, domain)
+	for _, dnsServer := range bootstrapDNSServers {
+		logInfo("[BootstrapDNS] Trying DNS server: %s", dnsServer)
 		
-		ip, err := resolveDomainUDPProtected(domain, dnsServer)
+		ip, err := resolveDomainUDPProtected(domain, dnsServer, physicalIface)
 		if err == nil {
-			logInfo("[XrayDialer] ✅ DNS resolution successful via %s: %s → %s", dnsServer, domain, ip.String())
+			logInfo("[BootstrapDNS] ✅ Resolution successful via %s: %s → %s", dnsServer, domain, ip.String())
+			
+			// Cache the result
+			bootstrapDNSCacheMu.Lock()
+			bootstrapDNSCache[domain] = bootstrapDNSEntry{
+				ip:        ip,
+				timestamp: time.Now(),
+			}
+			bootstrapDNSCacheMu.Unlock()
+			
 			return ip, nil
 		}
 		
-		logWarn("[XrayDialer] ⚠️ DNS resolution failed via %s: %v", dnsServer, err)
+		logWarn("[BootstrapDNS] ⚠️ DNS server %s failed: %v", dnsServer, err)
 		lastErr = err
 	}
 	
-	return nil, fmt.Errorf("all DNS servers failed, last error: %w", lastErr)
+	logError("[BootstrapDNS] ❌ All Bootstrap DNS servers failed!")
+	logError("[BootstrapDNS] ❌ This may indicate:")
+	logError("[BootstrapDNS]    1. No network connectivity")
+	logError("[BootstrapDNS]    2. All DNS servers blocked by firewall")
+	logError("[BootstrapDNS]    3. Socket protection not working")
+	
+	return nil, fmt.Errorf("bootstrap DNS resolution failed for %s: %w", domain, lastErr)
 }
 
 // resolveDomainUDPProtected resolves domain using UDP DNS query with protected socket
-func resolveDomainUDPProtected(domain, dnsServer string) (net.IP, error) {
+// The socket is protected via VpnService.protect() AND bound to physical interface
+func resolveDomainUDPProtected(domain, dnsServer, physicalIface string) (net.IP, error) {
 	// Parse DNS server address
 	addr, err := net.ResolveUDPAddr("udp", dnsServer)
 	if err != nil {
@@ -317,31 +429,45 @@ func resolveDomainUDPProtected(domain, dnsServer string) (net.IP, error) {
 	}
 	defer syscall.Close(fd)
 	
-	// Protect the socket BEFORE any network operations
-	// Convert fd to int for ProtectSocket
 	fdInt := int(fd)
-	if !ProtectSocket(fdInt) {
-		return nil, fmt.Errorf("failed to protect DNS query socket")
-	}
-	logInfo("[XrayDialer] ✅ DNS query socket protected (fd=%d)", fdInt)
 	
-	// Try to bind to physical IP for extra assurance
-	// This ensures the socket uses physical network interface
+	// ============================================================
+	// STEP 1: PROTECT SOCKET (CRITICAL)
+	// ============================================================
+	if !ProtectSocket(fdInt) {
+		return nil, fmt.Errorf("FATAL: failed to protect DNS socket - cannot proceed")
+	}
+	logDebug("[BootstrapDNS] ✅ DNS socket protected (fd=%d)", fdInt)
+	
+	// ============================================================
+	// STEP 2: BIND TO PHYSICAL INTERFACE (SO_BINDTODEVICE)
+	// ============================================================
+	if physicalIface != "" {
+		if err := bindSocketToDevice(fdInt, physicalIface); err != nil {
+			logDebug("[BootstrapDNS] ⚠️ SO_BINDTODEVICE failed for DNS socket: %v (non-fatal)", err)
+		} else {
+			logDebug("[BootstrapDNS] ✅ DNS socket bound to interface: %s", physicalIface)
+		}
+	}
+	
+	// ============================================================
+	// STEP 3: BIND TO PHYSICAL IP (OPTIONAL)
+	// ============================================================
 	physicalIP, _ := GetLocalPhysicalIP()
 	if physicalIP != nil {
 		var bindAddr syscall.SockaddrInet4
 		copy(bindAddr.Addr[:], physicalIP.To4())
 		bindAddr.Port = 0
 		if err := syscall.Bind(fd, &bindAddr); err != nil {
-			logWarn("[XrayDialer] ⚠️ Failed to bind DNS socket to physical IP %s: %v (non-fatal)", physicalIP.String(), err)
+			logDebug("[BootstrapDNS] ⚠️ IP binding failed: %v (non-fatal)", err)
 		} else {
-			logInfo("[XrayDialer] ✅ DNS socket bound to physical IP: %s", physicalIP.String())
+			logDebug("[BootstrapDNS] ✅ DNS socket bound to IP: %s", physicalIP.String())
 		}
 	}
 	
-	// Connect the UDP socket to the DNS server
-	// This is important on Android - it ensures the socket uses the correct route
-	// after protection. Without connect(), sendto() may still use VPN route.
+	// ============================================================
+	// STEP 4: CONNECT AND SEND DNS QUERY
+	// ============================================================
 	sa := &syscall.SockaddrInet4{
 		Port: addr.Port,
 	}
@@ -349,21 +475,21 @@ func resolveDomainUDPProtected(domain, dnsServer string) (net.IP, error) {
 	
 	err = syscall.Connect(fd, sa)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect UDP socket to DNS server: %w", err)
+		return nil, fmt.Errorf("failed to connect to DNS server: %w", err)
 	}
-	logInfo("[XrayDialer] ✅ DNS socket connected to %s", dnsServer)
+	logDebug("[BootstrapDNS] ✅ Connected to DNS server: %s", dnsServer)
 	
-	// Build simple DNS query (A record)
+	// Build and send DNS query
 	query := buildDNSQuery(domain)
-	
-	// Send DNS query using Write (since socket is connected)
 	_, err = syscall.Write(fd, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send DNS query: %w", err)
 	}
-	logInfo("[XrayDialer] ✅ DNS query sent for %s", domain)
+	logDebug("[BootstrapDNS] ✅ DNS query sent for: %s", domain)
 	
-	// Receive DNS response with timeout using goroutine and channel
+	// ============================================================
+	// STEP 5: RECEIVE DNS RESPONSE WITH TIMEOUT
+	// ============================================================
 	buffer := make([]byte, 512)
 	recvDone := make(chan struct {
 		n   int
@@ -378,16 +504,16 @@ func resolveDomainUDPProtected(domain, dnsServer string) (net.IP, error) {
 		}{n, err}
 	}()
 	
-	// Wait for response or timeout (5 seconds)
+	// Wait for response or timeout (3 seconds per server)
 	select {
 	case result := <-recvDone:
 		if result.err != nil {
 			return nil, fmt.Errorf("failed to receive DNS response: %w", result.err)
 		}
 		buffer = buffer[:result.n]
-		logInfo("[XrayDialer] ✅ DNS response received (%d bytes)", result.n)
-	case <-time.After(5 * time.Second):
-		return nil, fmt.Errorf("DNS query timeout after 5 seconds")
+		logDebug("[BootstrapDNS] ✅ DNS response received (%d bytes)", result.n)
+	case <-time.After(3 * time.Second):
+		return nil, fmt.Errorf("DNS query timeout after 3 seconds")
 	}
 	
 	// Parse DNS response
@@ -514,3 +640,102 @@ func parseDNSResponse(response []byte, domain string) (net.IP, error) {
 	return nil, fmt.Errorf("no A record found in DNS response")
 }
 
+
+// ============================================================
+// PHYSICAL INTERFACE BINDING HELPERS
+// ============================================================
+
+// bindSocketToDevice binds a socket to a specific network interface using SO_BINDTODEVICE
+// This is a Linux/Android-specific syscall that ensures traffic goes through the specified interface
+// Note: This requires CAP_NET_RAW capability, which VpnService.protect() provides indirectly
+func bindSocketToDevice(fd int, ifaceName string) error {
+	if ifaceName == "" {
+		return fmt.Errorf("interface name is empty")
+	}
+	
+	// SO_BINDTODEVICE expects a null-terminated string
+	// We use setsockoptString which handles this correctly
+	err := setsockoptString(fd, syscall.SOL_SOCKET, SO_BINDTODEVICE, ifaceName)
+	if err != nil {
+		return fmt.Errorf("SO_BINDTODEVICE(%s) failed: %w", ifaceName, err)
+	}
+	
+	return nil
+}
+
+// setsockoptString sets a string socket option (like SO_BINDTODEVICE)
+// This is equivalent to setsockopt(fd, level, opt, ifname, strlen(ifname)+1)
+func setsockoptString(fd, level, opt int, s string) error {
+	// Convert string to null-terminated byte slice
+	b := make([]byte, len(s)+1)
+	copy(b, s)
+	b[len(s)] = 0 // Null terminator
+	
+	// Use raw syscall for setsockopt
+	_, _, errno := syscall.Syscall6(
+		syscall.SYS_SETSOCKOPT,
+		uintptr(fd),
+		uintptr(level),
+		uintptr(opt),
+		uintptr(unsafe.Pointer(&b[0])),
+		uintptr(len(b)),
+		0,
+	)
+	
+	if errno != 0 {
+		return errno
+	}
+	return nil
+}
+
+// detectPhysicalInterface finds the first available physical network interface
+// Returns empty string if no physical interface is found
+func detectPhysicalInterface() string {
+	for _, ifaceName := range physicalInterfaceNames {
+		iface, err := net.InterfaceByName(ifaceName)
+		if err != nil {
+			continue // Interface doesn't exist
+		}
+		
+		// Check if interface is up
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		
+		// Check if interface has an IP address
+		addrs, err := iface.Addrs()
+		if err != nil || len(addrs) == 0 {
+			continue
+		}
+		
+		// Found a valid physical interface
+		logDebug("[XrayDialer] Detected physical interface: %s (flags: %v)", ifaceName, iface.Flags)
+		return ifaceName
+	}
+	
+	return ""
+}
+
+// ClearBootstrapDNSCache clears the bootstrap DNS cache
+// Call this when network state changes
+func ClearBootstrapDNSCache() {
+	bootstrapDNSCacheMu.Lock()
+	defer bootstrapDNSCacheMu.Unlock()
+	bootstrapDNSCache = make(map[string]bootstrapDNSEntry)
+	logInfo("[BootstrapDNS] Cache cleared")
+}
+
+// GetBootstrapDNSCacheStats returns cache statistics for diagnostics
+func GetBootstrapDNSCacheStats() (entries int, oldestAge time.Duration) {
+	bootstrapDNSCacheMu.RLock()
+	defer bootstrapDNSCacheMu.RUnlock()
+	
+	entries = len(bootstrapDNSCache)
+	for _, entry := range bootstrapDNSCache {
+		age := time.Since(entry.timestamp)
+		if age > oldestAge {
+			oldestAge = age
+		}
+	}
+	return
+}

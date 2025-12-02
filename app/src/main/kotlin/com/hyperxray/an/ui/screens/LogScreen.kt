@@ -8,7 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -17,12 +17,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -32,9 +32,21 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hyperxray.an.ui.screens.log.*
 import com.hyperxray.an.ui.theme.ScrollbarDefaults
 import com.hyperxray.an.viewmodel.LogViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import my.nanihadesuka.compose.LazyColumnScrollbar
+
+/**
+ * Wrapper class for log entries with stable unique IDs.
+ * This ensures Compose can efficiently track and recycle items.
+ */
+@Immutable
+data class StableLogEntry(
+    val id: Long,
+    val content: String
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,10 +78,26 @@ fun LogScreen(
     var isAutoScrollEnabled by remember { mutableStateOf(true) }
     var isLive by remember { mutableStateOf(true) }
     
-    // Calculate stats
-    val stats by remember(filteredEntries) {
-        derivedStateOf {
-            calculateLogStats(filteredEntries)
+    // OPTIMIZATION 1: Create stable log entries with unique IDs
+    // Use a monotonic counter to generate stable IDs that don't change when list updates
+    val stableEntries = remember(filteredEntries) {
+        filteredEntries.mapIndexed { index, content ->
+            // Use content hash + reversed index for stable ID (newest first = highest ID)
+            StableLogEntry(
+                id = (filteredEntries.size - index).toLong() * 31 + content.hashCode().toLong(),
+                content = content
+            )
+        }
+    }
+    
+    // OPTIMIZATION 2: Move stats calculation to background thread
+    var stats by remember { mutableStateOf(LogStats()) }
+    LaunchedEffect(filteredEntries) {
+        withContext(Dispatchers.Default) {
+            val calculatedStats = calculateLogStats(filteredEntries)
+            withContext(Dispatchers.Main) {
+                stats = calculatedStats
+            }
         }
     }
     
@@ -105,8 +133,10 @@ fun LogScreen(
         }
     }
 
-    // Scroll behavior
+    // Scroll behavior - track if user is scrolling for animation optimization
     val isUserScrolledAway = remember { mutableStateOf(false) }
+    val isScrolling by remember { derivedStateOf { listState.isScrollInProgress } }
+    
     LaunchedEffect(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) {
         if (listState.firstVisibleItemIndex > 0 || 
             (listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset > 20)) {
@@ -127,47 +157,15 @@ fun LogScreen(
         }
     }
 
-    // Animated background
-    val infiniteTransition = rememberInfiniteTransition(label = "bg")
-    val gradientOffset by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1000f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(20000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "gradientOffset"
-    )
-
-    // Main Container
+    // Main Container with optimized animated background
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF030308))
-            .drawBehind {
-                // Subtle animated gradient orbs
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            LogColorPalette.NeonCyan.copy(alpha = 0.03f),
-                            Color.Transparent
-                        ),
-                        center = Offset(gradientOffset % size.width, size.height * 0.3f),
-                        radius = size.width * 0.5f
-                    )
-                )
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            LogColorPalette.NeonPurple.copy(alpha = 0.02f),
-                            Color.Transparent
-                        ),
-                        center = Offset(size.width - (gradientOffset % size.width), size.height * 0.7f),
-                        radius = size.width * 0.4f
-                    )
-                )
-            }
     ) {
+        // OPTIMIZATION 3: Isolate animated background in separate composable with graphicsLayer
+        // This prevents the animation from invalidating the entire tree
+        AnimatedBackground(isScrolling = isScrolling)
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -223,7 +221,7 @@ fun LogScreen(
             Spacer(modifier = Modifier.height(4.dp))
 
             // Log List
-            if (filteredEntries.isEmpty()) {
+            if (stableEntries.isEmpty()) {
                 EmptyLogsView()
             } else {
                 LazyColumnScrollbar(
@@ -239,14 +237,16 @@ fun LogScreen(
                         contentPadding = PaddingValues(bottom = 80.dp, top = 4.dp),
                         reverseLayout = true
                     ) {
-                        itemsIndexed(
-                            items = filteredEntries,
-                            key = { index, logEntry -> "${index}_${logEntry.hashCode()}" }
-                        ) { _, logEntry ->
+                        // OPTIMIZATION 4: Use stable keys and contentType for efficient recycling
+                        items(
+                            items = stableEntries,
+                            key = { entry -> entry.id },
+                            contentType = { "log_entry" }
+                        ) { stableEntry ->
                             LogEntryItem(
-                                logEntry = logEntry,
+                                logEntry = stableEntry.content,
                                 onClick = {
-                                    selectedLogEntry = logEntry
+                                    selectedLogEntry = stableEntry.content
                                     scope.launch { sheetState.show() }
                                 }
                             )
@@ -539,6 +539,66 @@ private fun EmptyLogsView() {
                 }
             }
         }
+    }
+}
+
+/**
+ * OPTIMIZATION 3: Isolated animated background composable.
+ * Uses graphicsLayer to isolate invalidations from the rest of the UI tree.
+ * Animation is paused during scrolling to reduce GPU load.
+ */
+@Composable
+private fun AnimatedBackground(isScrolling: Boolean) {
+    // Only animate when not scrolling to save GPU cycles
+    val targetAlpha = if (isScrolling) 0f else 1f
+    val animatedAlpha by animateFloatAsState(
+        targetValue = targetAlpha,
+        animationSpec = tween(300),
+        label = "bgAlpha"
+    )
+    
+    // Skip animation entirely when scrolling
+    if (animatedAlpha > 0.01f) {
+        val infiniteTransition = rememberInfiniteTransition(label = "bg")
+        val gradientOffset by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1000f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(20000, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "gradientOffset"
+        )
+        
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                // graphicsLayer isolates this composable's invalidations
+                .graphicsLayer { alpha = animatedAlpha }
+                .drawBehind {
+                    // Subtle animated gradient orbs
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                LogColorPalette.NeonCyan.copy(alpha = 0.03f),
+                                Color.Transparent
+                            ),
+                            center = Offset(gradientOffset % size.width, size.height * 0.3f),
+                            radius = size.width * 0.5f
+                        )
+                    )
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                LogColorPalette.NeonPurple.copy(alpha = 0.02f),
+                                Color.Transparent
+                            ),
+                            center = Offset(size.width - (gradientOffset % size.width), size.height * 0.7f),
+                            radius = size.width * 0.4f
+                        )
+                    )
+                }
+        )
     }
 }
 

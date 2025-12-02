@@ -221,25 +221,100 @@ func CreateProtectedSocketViaC(domain, sockType, protocol int) int {
 	return int(fd)
 }
 
+// ErrProtectionFailed is returned when socket protection fails
+// This is a fatal error - connections MUST NOT proceed without protection
+var ErrProtectionFailed = fmt.Errorf("socket protection failed - connection blocked to prevent routing loop")
+
+// ErrProtectorNotSet is returned when no protector callback is configured
+var ErrProtectorNotSet = fmt.Errorf("socket protector not set - call SetSocketProtector first")
+
 // ProtectSocket protects a socket file descriptor from VPN routing
+// Returns true on success, false on failure
+// CRITICAL: If this returns false, the socket MUST NOT be used for network operations
+// as it will cause a routing loop (VPN traffic routed through VPN)
 func ProtectSocket(fd int) bool {
 	protectorMutex.RLock()
 	protector := globalProtector
 	protectorMutex.RUnlock()
 
 	if protector == nil {
-		logWarn("[Protector] No protector set, socket %d not protected!", fd)
+		logError("[Protector] ❌ FATAL: No protector set, socket %d CANNOT be protected!", fd)
+		logError("[Protector] ❌ Connection will be BLOCKED to prevent routing loop")
+		setProtectionState(ProtectionStateFailed)
+		addDiagnosticLog(DiagnosticLog{
+			Timestamp: time.Now(),
+			Operation: "protect",
+			Fd:        fd,
+			Success:   false,
+			Error:     "protector not set",
+		})
 		return false
 	}
 
-	result := protector(fd)
-	if result {
-		logDebug("[Protector] ✅ Socket %d protected", fd)
-	} else {
-		logError("[Protector] ❌ Failed to protect socket %d", fd)
+	// Attempt protection with retries for transient failures
+	const maxRetries = 3
+	var result bool
+	var lastErr string
+	
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		result = protector(fd)
+		if result {
+			logInfo("[Protector] ✅ Socket %d protected (attempt %d/%d)", fd, attempt, maxRetries)
+			setProtectionState(ProtectionStateVerified)
+			addDiagnosticLog(DiagnosticLog{
+				Timestamp: time.Now(),
+				Operation: "protect",
+				Fd:        fd,
+				Success:   true,
+			})
+			return true
+		}
+		
+		lastErr = fmt.Sprintf("protection attempt %d failed", attempt)
+		logWarn("[Protector] ⚠️ Socket %d protection attempt %d/%d failed", fd, attempt, maxRetries)
+		
+		if attempt < maxRetries {
+			// Brief delay before retry
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 
-	return result
+	// All retries exhausted - this is a FATAL error
+	logError("[Protector] ❌ FATAL: Failed to protect socket %d after %d attempts", fd, maxRetries)
+	logError("[Protector] ❌ Connection will be BLOCKED to prevent routing loop")
+	logError("[Protector] ❌ Possible causes:")
+	logError("[Protector]    1. VpnService.protect() returned false")
+	logError("[Protector]    2. VPN service not properly initialized")
+	logError("[Protector]    3. Socket already closed or invalid")
+	
+	setProtectionState(ProtectionStateFailed)
+	addDiagnosticLog(DiagnosticLog{
+		Timestamp: time.Now(),
+		Operation: "protect",
+		Fd:        fd,
+		Success:   false,
+		Error:     lastErr,
+	})
+	
+	return false
+}
+
+// ProtectSocketStrict is the strict version that returns an error
+// Use this when you need explicit error handling
+func ProtectSocketStrict(fd int) error {
+	protectorMutex.RLock()
+	protector := globalProtector
+	protectorMutex.RUnlock()
+
+	if protector == nil {
+		return ErrProtectorNotSet
+	}
+
+	if !ProtectSocket(fd) {
+		return fmt.Errorf("%w: fd=%d", ErrProtectionFailed, fd)
+	}
+
+	return nil
 }
 
 // ProtectConn protects a net.Conn from VPN routing

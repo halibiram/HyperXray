@@ -6,6 +6,9 @@
  * requires Java_* prefixed functions. This wrapper bridges the gap.
  * 
  * Uses dlopen/dlsym to dynamically load Go library functions at runtime.
+ * 
+ * OPTIMIZATION: Log messages are buffered and flushed in batches to reduce
+ * JNI overhead. See log_buffer.h for details.
  */
 
 #include <jni.h>
@@ -18,6 +21,9 @@
 #include <sys/socket.h>  // For socket() in verification
 #include <netinet/in.h>  // For AF_INET
 #include <android/log.h>
+
+// Log buffering for reduced JNI overhead
+#include "log_buffer.h"
 
 #define LOG_TAG "HyperXray-JNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -130,7 +136,8 @@ static SocketProtectorState g_protectorState = {
 };
 
 // Legacy globals for backward compatibility (will be migrated to g_protectorState)
-static JavaVM* g_jvm = NULL;
+// NOTE: NOT static - exported for log_buffer.c to use via extern
+JavaVM* g_jvm = NULL;
 static jobject g_vpnService = NULL;
 static jmethodID g_protectMethod = NULL;
 
@@ -339,6 +346,9 @@ static int loadGoLibrary(JNIEnv *env) {
 JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
     LOGI("JNI_OnLoad called");
     
+    // Initialize log buffer for batched JNI logging
+    log_buffer_init();
+    
     // Ensure g_protector is initialized to NULL before Go library loads
     // This ensures the symbol exists when Go library tries to resolve it
     g_protector = NULL;
@@ -365,6 +375,9 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
  */
 JNIEXPORT void JNI_OnUnload(JavaVM* vm, void* reserved) {
     LOGI("JNI_OnUnload called");
+    
+    // Cleanup log buffer (flushes remaining logs)
+    log_buffer_cleanup();
     
     if (goLibHandle != NULL) {
         dlclose(goLibHandle);
@@ -1100,7 +1113,8 @@ Java_com_hyperxray_an_vpn_HyperVpnService_dnsResolve(
 }
 
 // Global reference to HyperVpnService instance and logToAiLogHelper method
-static jobject g_serviceInstance = NULL;
+// NOTE: NOT static - exported for log_buffer.c to use via extern
+jobject g_serviceInstance = NULL;
 static jmethodID g_logToAiLogHelperMethodID = NULL;
 
 /**
@@ -1549,10 +1563,45 @@ Java_com_hyperxray_an_vpn_HyperVpnService_isSocketProtectorVerified(
 }
 
 /**
- * Call AiLogHelper from native code
+ * Call AiLogHelper from native code (BUFFERED VERSION)
  * This function is called from Go code via CGO
+ * 
+ * OPTIMIZATION: Instead of calling JNI for every log message, logs are
+ * buffered and flushed in batches to reduce JNI overhead.
+ * 
+ * Flush triggers:
+ * - Buffer full (50 entries)
+ * - Buffer size exceeds 4KB
+ * - Time interval exceeded (500ms)
+ * - ERROR level log (immediate flush)
  */
 void callAiLogHelper(const char* tag, const char* level, const char* message) {
+    // Always log to Android logcat immediately (low overhead)
+    int priority = ANDROID_LOG_DEBUG;
+    if (level != NULL) {
+        switch (level[0]) {
+            case 'E': case 'e': priority = ANDROID_LOG_ERROR; break;
+            case 'W': case 'w': priority = ANDROID_LOG_WARN; break;
+            case 'I': case 'i': priority = ANDROID_LOG_INFO; break;
+            default: priority = ANDROID_LOG_DEBUG; break;
+        }
+    }
+    __android_log_print(priority, tag ? tag : "HyperXray", "%s", message ? message : "");
+    
+    // If JNI not ready, skip buffering (already logged to logcat)
+    if (g_jvm == NULL || g_serviceInstance == NULL) {
+        return;
+    }
+    
+    // Add to buffer (will flush automatically when needed)
+    log_buffer_add(tag, level, message);
+}
+
+/**
+ * Legacy single-message JNI call (kept for backward compatibility)
+ * Use callAiLogHelper() instead for buffered logging
+ */
+void callAiLogHelperDirect(const char* tag, const char* level, const char* message) {
     if (g_jvm == NULL || g_serviceInstance == NULL || g_logToAiLogHelperMethodID == NULL) {
         // Fallback to Android log if callback not set
         __android_log_print(
