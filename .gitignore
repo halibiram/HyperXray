@@ -73,3 +73,6 @@ __pycache__/
 # Temporary installer files
 %TEMP%go-installer.msi
 *.msi
+# K
+iro IDE files
+.kiro/
