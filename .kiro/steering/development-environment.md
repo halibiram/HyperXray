@@ -53,6 +53,20 @@ GO=/path/to/custom/go  # If not using system Go
 - Check `adb logcat -s GoLog:*` for Go runtime logs
 
 ## Common Issues
-- **NDK not found**: Ensure `ANDROID_NDK_HOME` is set correctly
+- **NDK not found**: Ensure `ANDROID_NDK_HOME` is set correctly, or use Gradle task which auto-detects
 - **Go build fails**: Verify Go version is 1.25+ with `go version`
 - **Signing error**: Check `store.properties` has valid keystore path
+- **WireGuard handshake every 2 min**: Native library not rebuilt after fork patch - run `.\gradlew buildNativeGo`
+- **Nested wireguard-go-fork folders**: Delete `native/wireguard-go-fork/wireguard-go-fork/` (setup script bug)
+
+## Native Library Build (Windows)
+```bash
+# Preferred method - auto-detects NDK
+.\gradlew buildNativeGo
+
+# Manual method - requires NDK_HOME
+set NDK_HOME=C:\Users\halil\AppData\Local\Android\Sdk\ndk\28.2.13676358
+scripts\build-native.bat
+```
+
+Output: `app/src/main/jniLibs/{arch}/libhyperxray.so`

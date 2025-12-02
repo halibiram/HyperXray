@@ -16,6 +16,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
@@ -33,6 +34,39 @@ private object ChartColors {
     val Green = Color(0xFF00FF88)
     val DeepSpace = Color(0xFF000011)
     val GridLine = Color(0xFF1A1A2E)
+}
+
+// Holographic Shimmer Effect
+@Composable
+private fun Modifier.holographicShimmer(): Modifier {
+    val infiniteTransition = rememberInfiniteTransition(label = "holographic")
+    val shimmerOffset by infiniteTransition.animateFloat(
+        initialValue = -500f,
+        targetValue = 1500f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(3000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shimmerOffset"
+    )
+    
+    return this.drawWithContent {
+        drawContent()
+        drawRect(
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    Color.Transparent,
+                    ChartColors.Cyan.copy(alpha = 0.1f),
+                    ChartColors.Magenta.copy(alpha = 0.15f),
+                    ChartColors.Purple.copy(alpha = 0.1f),
+                    Color.Transparent
+                ),
+                start = Offset(shimmerOffset, 0f),
+                end = Offset(shimmerOffset + 300f, size.height)
+            ),
+            blendMode = BlendMode.Screen
+        )
+    }
 }
 
 
@@ -113,6 +147,7 @@ fun FuturisticTrafficChart(
                 ),
                 shape = RoundedCornerShape(28.dp)
             )
+            .holographicShimmer()
             .drawBehind {
                 drawCircle(
                     brush = Brush.radialGradient(

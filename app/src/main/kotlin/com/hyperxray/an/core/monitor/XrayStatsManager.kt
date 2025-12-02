@@ -425,6 +425,7 @@ class XrayStatsManager(
             // PREFER: Get Go runtime stats from HyperVpnStateManager (VPN service process)
             // This is more reliable because VPN service process has direct access to native tunnel
             val tunnelStats = hyperVpnStateManager?.stats?.value
+            Log.d(TAG, "📊 Checking HyperVpnStateManager stats - tunnelStats: ${tunnelStats != null}, grpcAvailable: ${tunnelStats?.grpcAvailable}, goAlloc: ${tunnelStats?.goAlloc}, xrayUptime: ${tunnelStats?.xrayUptime}")
             if (tunnelStats != null && tunnelStats.grpcAvailable && tunnelStats.goAlloc > 0) {
                 Log.d(TAG, "Using Go runtime stats from HyperVpnStateManager (VPN service process)")
                 

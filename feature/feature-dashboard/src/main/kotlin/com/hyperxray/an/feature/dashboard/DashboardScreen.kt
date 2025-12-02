@@ -460,6 +460,7 @@ private fun FuturisticStatCard(
                     )
                 )
                 .animatedNeonBorder(colors = gradientColors)
+                .holographicShimmer()
                 .padding(24.dp)
         ) {
             Column {

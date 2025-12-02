@@ -277,9 +277,6 @@ object ConfigInjector {
         // ===== STEP 1: Add API section =====
         val apiObject = JSONObject()
         apiObject.put("tag", "api")
-        // CRITICAL: For Xray-core embedded in Go library, we don't use listen address
-        // The gRPC server is started internally by Xray-core on the specified port
-        // We need to use the new format without "listen" field
         val servicesArray = org.json.JSONArray()
         servicesArray.put("StatsService")
         apiObject.put("services", servicesArray)
@@ -317,8 +314,12 @@ object ConfigInjector {
             apiInbound.put("listen", "127.0.0.1")
             apiInbound.put("protocol", "dokodemo-door")
             
+            // CRITICAL FIX: dokodemo-door for gRPC API needs empty settings
+            // The "address" field was causing Xray-core to not listen on the port
+            // because dokodemo-door with address tries to forward to that address
+            // instead of accepting gRPC connections directly
             val apiInboundSettings = JSONObject()
-            apiInboundSettings.put("address", "127.0.0.1")
+            // Empty settings - no address field needed for API inbound
             apiInbound.put("settings", apiInboundSettings)
             
             inboundsArray.put(apiInbound)

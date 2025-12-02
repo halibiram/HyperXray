@@ -201,47 +201,58 @@ func ensureDebugLogging(configJSON string) string {
 
 // parseApiPortFromConfig extracts API port from Xray config JSON
 // Returns 0 if API port is not found (not an error, just means gRPC is not configured)
+// 
+// Xray-core gRPC API uses dokodemo-door inbound with tag "api-inbound" or "api_inbound"
+// The port is extracted from this inbound's "port" field
 func parseApiPortFromConfig(configJSON string) (int, error) {
 	var config map[string]interface{}
 	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
 		return 0, fmt.Errorf("failed to parse config: %w", err)
 	}
 
-	// Check if "api" section exists
-	apiSection, ok := config["api"].(map[string]interface{})
-	if !ok {
+	// Check if "api" section exists (required for gRPC to work)
+	_, hasApi := config["api"].(map[string]interface{})
+	if !hasApi {
 		logDebug("[Xray] No API section found in config (gRPC not configured)")
 		return 0, nil // Not an error, just means gRPC is not configured
 	}
 
-	// Get "listen" field
-	listen, ok := apiSection["listen"].(string)
+	// Look for api-inbound in inbounds array
+	// This is the dokodemo-door inbound that receives gRPC requests
+	inbounds, ok := config["inbounds"].([]interface{})
 	if !ok {
-		logDebug("[Xray] No listen field in API section")
+		logDebug("[Xray] No inbounds array found in config")
 		return 0, nil
 	}
 
-	// Parse "127.0.0.1:PORT" format
-	// Extract port number after the colon
-	parts := strings.Split(listen, ":")
-	if len(parts) != 2 {
-		logWarn("[Xray] Invalid listen format: %s (expected 127.0.0.1:PORT)", listen)
-		return 0, nil
+	for _, inbound := range inbounds {
+		inboundMap, ok := inbound.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		tag, _ := inboundMap["tag"].(string)
+		if tag == "api-inbound" || tag == "api_inbound" {
+			// Found the API inbound, extract port
+			port, ok := inboundMap["port"].(float64)
+			if !ok {
+				logWarn("[Xray] api-inbound found but no valid port field")
+				return 0, nil
+			}
+
+			portInt := int(port)
+			if portInt <= 0 || portInt > 65535 {
+				logWarn("[Xray] Invalid API port number: %d", portInt)
+				return 0, nil
+			}
+
+			logInfo("[Xray] ✅ Parsed API port from api-inbound: %d", portInt)
+			return portInt, nil
+		}
 	}
 
-	var port int
-	if _, err := fmt.Sscanf(parts[1], "%d", &port); err != nil {
-		logWarn("[Xray] Failed to parse port from listen: %s, error: %v", listen, err)
-		return 0, nil
-	}
-
-	if port <= 0 || port > 65535 {
-		logWarn("[Xray] Invalid port number: %d", port)
-		return 0, nil
-	}
-
-	logInfo("[Xray] ✅ Parsed API port from config: %d", port)
-	return port, nil
+	logDebug("[Xray] No api-inbound found in inbounds array")
+	return 0, nil
 }
 
 // NewXrayWrapper creates Xray instance from JSON config

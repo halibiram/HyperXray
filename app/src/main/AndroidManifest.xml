@@ -72,8 +72,7 @@
             android:name="com.hyperxray.an.vpn.HyperVpnService"
             android:exported="true"
             android:foregroundServiceType="specialUse"
-            android:permission="android.permission.BIND_VPN_SERVICE"
-            android:process=":native">
+            android:permission="android.permission.BIND_VPN_SERVICE">
             <intent-filter>
                 <action android:name="android.net.VpnService" />
                 <action android:name="com.hyperxray.an.HYPER_VPN_START" />

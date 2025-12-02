@@ -17,6 +17,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -32,6 +33,41 @@ private object WarpColors {
     val Green = Color(0xFF00FF88)
     val Yellow = Color(0xFFFFE500)
     val Red = Color(0xFFFF3366)
+    val Purple = Color(0xFF8B5CF6)
+    val Magenta = Color(0xFFFF00FF)
+}
+
+// Holographic Shimmer Effect
+@Composable
+private fun Modifier.holographicShimmer(): Modifier {
+    val infiniteTransition = rememberInfiniteTransition(label = "holographic")
+    val shimmerOffset by infiniteTransition.animateFloat(
+        initialValue = -500f,
+        targetValue = 1500f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(3000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shimmerOffset"
+    )
+    
+    return this.drawWithContent {
+        drawContent()
+        drawRect(
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    Color.Transparent,
+                    WarpColors.Cyan.copy(alpha = 0.1f),
+                    WarpColors.Magenta.copy(alpha = 0.15f),
+                    WarpColors.Purple.copy(alpha = 0.1f),
+                    Color.Transparent
+                ),
+                start = Offset(shimmerOffset, 0f),
+                end = Offset(shimmerOffset + 300f, size.height)
+            ),
+            blendMode = BlendMode.Screen
+        )
+    }
 }
 
 
@@ -96,6 +132,7 @@ fun WarpAccountCard(
                 ),
                 shape = RoundedCornerShape(28.dp)
             )
+            .holographicShimmer()
             .drawBehind {
                 if (accountExists) {
                     drawCircle(

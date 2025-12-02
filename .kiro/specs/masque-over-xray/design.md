@@ -193,6 +193,113 @@ type MasqueConfig struct {
 }
 ```
 
+### 5. Settings UI Integration (app/src/main/kotlin/.../ui/settings/)
+
+Tunnel tipi seçimi için Settings ekranına yeni bileşenler:
+
+```kotlin
+// TunnelMode enum
+enum class TunnelMode(val displayName: String) {
+    WIREGUARD("WireGuard over Xray"),
+    MASQUE("MASQUE over Xray")
+}
+
+// SettingsViewModel extension
+class SettingsViewModel : ViewModel() {
+    private val _tunnelMode = MutableStateFlow(TunnelMode.WIREGUARD)
+    val tunnelMode: StateFlow<TunnelMode> = _tunnelMode.asStateFlow()
+    
+    fun setTunnelMode(mode: TunnelMode) {
+        _tunnelMode.value = mode
+        // Persist to DataStore
+        viewModelScope.launch {
+            settingsRepository.setTunnelMode(mode)
+        }
+    }
+}
+
+// Settings UI Composable
+@Composable
+fun TunnelModeSelector(
+    currentMode: TunnelMode,
+    onModeSelected: (TunnelMode) -> Unit
+) {
+    Column {
+        Text("Tunnel Mode", style = MaterialTheme.typography.titleMedium)
+        TunnelMode.values().forEach { mode ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onModeSelected(mode) }
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(
+                    selected = currentMode == mode,
+                    onClick = { onModeSelected(mode) }
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column {
+                    Text(mode.displayName)
+                    Text(
+                        text = when (mode) {
+                            TunnelMode.WIREGUARD -> "UDP tabanlı, düşük gecikme"
+                            TunnelMode.MASQUE -> "HTTP/3 tabanlı, yüksek sansür direnci"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+```
+
+### 6. SettingsRepository Extension
+
+```kotlin
+// SettingsRepository.kt
+interface SettingsRepository {
+    // Existing methods...
+    
+    // New tunnel mode methods
+    suspend fun getTunnelMode(): TunnelMode
+    suspend fun setTunnelMode(mode: TunnelMode)
+    fun observeTunnelMode(): Flow<TunnelMode>
+}
+
+// DataStore keys
+object SettingsKeys {
+    val TUNNEL_MODE = stringPreferencesKey("tunnel_mode")
+}
+```
+
+### 7. VPN Service Integration
+
+```kotlin
+// HyperVpnService.kt
+class HyperVpnService : VpnService() {
+    
+    private suspend fun getTunnelMode(): TunnelMode {
+        return settingsRepository.getTunnelMode()
+    }
+    
+    private fun createTunnelConfig(): TunnelConfig {
+        val mode = runBlocking { getTunnelMode() }
+        
+        return TunnelConfig(
+            tunFd = tunFd,
+            xrayConfig = xrayConfig,
+            tunnelMode = mode.name.lowercase(),  // "wireguard" or "masque"
+            // Mode-specific config
+            wgConfig = if (mode == TunnelMode.WIREGUARD) wgConfigJson else null,
+            masqueConfig = if (mode == TunnelMode.MASQUE) masqueConfigJson else null
+        )
+    }
+}
+```
+
 ## Data Models
 
 ### Capsule Format (RFC 9484)

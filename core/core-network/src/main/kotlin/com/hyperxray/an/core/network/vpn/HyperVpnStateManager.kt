@@ -208,7 +208,11 @@ class HyperVpnStateManager(private val context: Context) {
                 ACTION_STATS_UPDATE -> {
                     val statsJson = intent.getStringExtra(EXTRA_STATS)
                     if (statsJson != null) {
-                        _stats.value = TunnelStats.fromJson(statsJson)
+                        val newStats = TunnelStats.fromJson(statsJson)
+                        _stats.value = newStats
+                        Log.d(TAG, "📊 Stats updated - grpcAvailable: ${newStats.grpcAvailable}, goAlloc: ${newStats.goAlloc}, xrayUptime: ${newStats.xrayUptime}")
+                    } else {
+                        Log.w(TAG, "⚠️ ACTION_STATS_UPDATE received but statsJson is null")
                     }
                 }
                 

@@ -17,6 +17,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.platform.LocalConfiguration
@@ -39,6 +40,39 @@ private object NeonColors {
     val Pink = Color(0xFFFF0080)
     val Yellow = Color(0xFFFFE500)
     val Red = Color(0xFFFF3366)
+}
+
+// Holographic Shimmer Effect
+@Composable
+private fun Modifier.holographicShimmer(): Modifier {
+    val infiniteTransition = rememberInfiniteTransition(label = "holographic")
+    val shimmerOffset by infiniteTransition.animateFloat(
+        initialValue = -500f,
+        targetValue = 1500f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(3000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "shimmerOffset"
+    )
+    
+    return this.drawWithContent {
+        drawContent()
+        drawRect(
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    Color.Transparent,
+                    NeonColors.Cyan.copy(alpha = 0.1f),
+                    NeonColors.Magenta.copy(alpha = 0.15f),
+                    NeonColors.Purple.copy(alpha = 0.1f),
+                    Color.Transparent
+                ),
+                start = Offset(shimmerOffset, 0f),
+                end = Offset(shimmerOffset + 300f, size.height)
+            ),
+            blendMode = BlendMode.Screen
+        )
+    }
 }
 
 
@@ -112,6 +146,7 @@ fun HyperVpnControlCard(
                 ),
                 shape = RoundedCornerShape(28.dp)
             )
+            .holographicShimmer()
             .drawBehind {
                 if (isConnected) {
                     drawCircle(

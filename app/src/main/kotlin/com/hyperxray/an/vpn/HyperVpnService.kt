@@ -838,6 +838,18 @@ class HyperVpnService : VpnService() {
                 // Use default blocking mode (setBlocking(false) can cause VPN connection issues on some Android versions)
                 builder.addAddress("10.0.0.2", 30)
                 builder.addRoute("0.0.0.0", 0)
+                
+                // CRITICAL: Add IPv6 address and route to capture ALL traffic
+                // Without IPv6 route, apps like Instagram/WhatsApp may bypass VPN
+                // causing EPERM errors when they try to send DNS queries outside VPN
+                try {
+                    builder.addAddress("fd00::2", 126)  // IPv6 address for TUN
+                    builder.addRoute("::", 0)           // Route ALL IPv6 traffic through VPN
+                    Log.d(TAG, "✅ IPv6 routing enabled (fd00::2/126, ::/0)")
+                } catch (e: Exception) {
+                    Log.w(TAG, "⚠️ IPv6 routing not supported: ${e.message}")
+                }
+                
                 // MTU for WireGuard over Xray
                 // 1420 is optimal for most networks while avoiding fragmentation
                 builder.setMtu(1420)
@@ -861,13 +873,22 @@ class HyperVpnService : VpnService() {
                     }
                 }
                 
+                // Add IPv6 DNS servers to handle IPv6 DNS queries
+                try {
+                    builder.addDnsServer("2001:4860:4860::8888") // Google IPv6 DNS
+                    builder.addDnsServer("2606:4700:4700::1111") // Cloudflare IPv6 DNS
+                    Log.d(TAG, "✅ IPv6 DNS servers added")
+                } catch (e: Exception) {
+                    Log.w(TAG, "⚠️ IPv6 DNS servers not supported: ${e.message}")
+                }
+                
                 Log.d(TAG, "VPN Builder configured:")
                 Log.d(TAG, "  - Session: HyperXray VPN")
                 Log.d(TAG, "  - Blocking: true (default blocking mode)")
-                Log.d(TAG, "  - Address: 10.0.0.2/30")
-                Log.d(TAG, "  - Route: 0.0.0.0/0")
+                Log.d(TAG, "  - Address: 10.0.0.2/30, fd00::2/126")
+                Log.d(TAG, "  - Route: 0.0.0.0/0, ::/0")
                 Log.d(TAG, "  - MTU: 1420")
-                Log.d(TAG, "  - DNS servers: ${dnsServers.joinToString(", ")}")
+                Log.d(TAG, "  - DNS servers: ${dnsServers.joinToString(", ")} + IPv6 DNS")
                 AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: VPN Builder configured (blocking mode, DNS: ${dnsServers.size} servers)")
                 
                 // Establish VPN interface with timeout protection
@@ -2166,6 +2187,10 @@ class HyperVpnService : VpnService() {
                 return getDefaultXrayConfig()
             }
             
+            // CRITICAL: Add API section for gRPC stats
+            // This enables Xray-core's StatsService for traffic monitoring
+            addApiSectionToConfig(resultConfig)
+            
             val finalConfigJson = resultConfig.toString()
             AiLogHelper.i(TAG, "✅ CONFIG LOAD: Successfully loaded $protocol config from profile: $serverAddress:$serverPort")
             AiLogHelper.d(TAG, "📋 CONFIG LOAD: Final config JSON length: ${finalConfigJson.length} bytes")
@@ -2385,8 +2410,42 @@ class HyperVpnService : VpnService() {
         }
     }
     
+    /**
+     * Add API section to Xray config for gRPC stats
+     * This enables StatsService for traffic monitoring via gRPC
+     */
+    private fun addApiSectionToConfig(config: JSONObject) {
+        try {
+            // Add API section with StatsService
+            config.put("api", JSONObject().apply {
+                put("tag", "api")
+                put("listen", "127.0.0.1:10085")
+                put("services", JSONArray().apply {
+                    put("StatsService")
+                })
+            })
+            
+            // Add stats section to enable statistics collection
+            config.put("stats", JSONObject())
+            
+            // Add policy section to enable per-outbound stats
+            if (!config.has("policy")) {
+                config.put("policy", JSONObject())
+            }
+            val policy = config.getJSONObject("policy")
+            policy.put("system", JSONObject().apply {
+                put("statsOutboundUplink", true)
+                put("statsOutboundDownlink", true)
+            })
+            
+            AiLogHelper.d(TAG, "🔧 CONFIG: Added API section for gRPC stats (port: 10085)")
+        } catch (e: Exception) {
+            AiLogHelper.e(TAG, "❌ CONFIG: Failed to add API section: ${e.message}", e)
+        }
+    }
+    
     private fun getDefaultXrayConfig(): String {
-        return JSONObject().apply {
+        val config = JSONObject().apply {
             // Empty inbounds array (not needed for WireGuard over Xray-core)
             put("inbounds", JSONArray())
 
@@ -2414,7 +2473,12 @@ class HyperVpnService : VpnService() {
                 put("access", "")
                 put("error", "")
             })
-        }.toString()
+        }
+        
+        // Add API section for gRPC stats
+        addApiSectionToConfig(config)
+        
+        return config.toString()
     }
     
     /**

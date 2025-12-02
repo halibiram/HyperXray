@@ -50,6 +50,33 @@ var bufferPool = sync.Pool{
 - Enable CGO with proper NDK toolchain
 - Test on all target architectures before release
 
+## Native Build Commands
+```bash
+# Build native Go library (recommended - uses Gradle task)
+.\gradlew buildNativeGo
+
+# Alternative: Direct script (requires NDK_HOME env var)
+set NDK_HOME=C:\Users\halil\AppData\Local\Android\Sdk\ndk\28.2.13676358
+scripts\build-native.bat
+```
+
+## WireGuard Fork (CRITICAL)
+The project uses a patched WireGuard-go fork at `native/wireguard-go-fork/` with extended rekey timers:
+- `RekeyAfterTime`: 2 hours (default: 120s)
+- `RejectAfterTime`: 3 hours (default: 180s)
+
+**Important rules:**
+1. NEVER delete or modify `native/wireguard-go-fork/` without understanding the rekey patch
+2. Timer constants are in `native/wireguard-go-fork/device/constants.go`
+3. The `go.mod` has a `replace` directive pointing to this fork
+4. If you see nested `wireguard-go-fork/wireguard-go-fork/` folders, delete the inner one - it's a setup script bug
+5. After any WireGuard fork changes, MUST rebuild native library with `.\gradlew buildNativeGo`
+
+## NDK Configuration
+- NDK path: `C:\Users\halil\AppData\Local\Android\Sdk\ndk\28.2.13676358`
+- The Gradle task `buildNativeGo` auto-detects NDK from `local.properties` or environment
+- If build fails with "NDK not found", set `NDK_HOME` environment variable
+
 ## Debugging
 - Use `log.Printf` for Go-side logging
 - Check `adb logcat -s GoLog:*` for output

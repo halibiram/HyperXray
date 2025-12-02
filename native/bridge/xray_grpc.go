@@ -61,9 +61,59 @@ func NewXrayGrpcClient(apiPort int) (*XrayGrpcClient, error) {
 	}, nil
 }
 
-// waitForConnection waits for gRPC connection to be ready
-// CRITICAL FIX: gRPC lazy connection - must call Connect() to initiate connection
-// Without Connect(), connection stays in IDLE state forever!
+// checkConnection checks if gRPC connection is ready WITHOUT blocking
+// CRITICAL FIX: This is NON-BLOCKING to prevent traffic lockup
+// If connection is not ready, it triggers Connect() and returns error immediately
+// The caller should handle the error gracefully (e.g., return cached/default values)
+func (c *XrayGrpcClient) checkConnection() error {
+	if c.conn == nil {
+		return fmt.Errorf("connection is nil")
+	}
+
+	state := c.conn.GetState()
+	
+	// If already ready, return immediately
+	if state == connectivity.Ready {
+		return nil
+	}
+	
+	// If IDLE, trigger connection attempt (non-blocking)
+	if state == connectivity.Idle {
+		logDebug("[XrayGrpc] Connection is IDLE, triggering Connect() (non-blocking)...")
+		c.conn.Connect()
+		// Check state again after Connect()
+		state = c.conn.GetState()
+		if state == connectivity.Ready {
+			return nil
+		}
+	}
+	
+	// If CONNECTING, just return error - don't wait
+	// The connection will be ready on next call
+	if state == connectivity.Connecting {
+		logDebug("[XrayGrpc] Connection is CONNECTING, will be ready soon...")
+		return fmt.Errorf("connection not ready yet: state=%v", state)
+	}
+	
+	// If TransientFailure, trigger reconnection (non-blocking)
+	if state == connectivity.TransientFailure {
+		logDebug("[XrayGrpc] Connection in TransientFailure, triggering reconnect...")
+		c.conn.Connect()
+		return fmt.Errorf("connection in transient failure: state=%v", state)
+	}
+	
+	// If Shutdown, connection is dead
+	if state == connectivity.Shutdown {
+		return fmt.Errorf("connection shutdown: state=%v", state)
+	}
+	
+	// Unknown state
+	return fmt.Errorf("connection not ready: state=%v", state)
+}
+
+// waitForConnection waits for gRPC connection to be ready with polling
+// Uses a simple polling approach with Connect() calls to trigger connection attempts
+// NOTE: This is only used for background verification, not for stats queries
 func (c *XrayGrpcClient) waitForConnection(maxWait time.Duration) error {
 	if c.conn == nil {
 		return fmt.Errorf("connection is nil")
@@ -74,100 +124,57 @@ func (c *XrayGrpcClient) waitForConnection(maxWait time.Duration) error {
 		return nil // Already ready
 	}
 
-	// Wait for connection to be ready
-	ctx, cancel := context.WithTimeout(context.Background(), maxWait)
-	defer cancel()
-
-	// Log initial state
+	startTime := time.Now()
+	pollInterval := 10 * time.Millisecond
+	
 	logDebug("[XrayGrpc] Waiting for connection (initial state: %v, maxWait: %v)", state, maxWait)
 	
-	// CRITICAL FIX: If connection is IDLE, we must explicitly trigger connection attempt
-	// gRPC uses lazy connection - it won't connect until we either:
-	// 1. Call Connect() explicitly
-	// 2. Make an RPC call
-	// Without this, WaitForStateChange() will wait forever in IDLE state!
-	if state == connectivity.Idle {
-		logInfo("[XrayGrpc] Connection is IDLE, triggering connection attempt with Connect()...")
-		c.conn.Connect()
-		state = c.conn.GetState()
-		logDebug("[XrayGrpc] After Connect(): state=%v", state)
-	}
+	// Trigger initial connection attempt
+	c.conn.Connect()
 	
-	startTime := time.Now()
-	retryCount := 0
-	maxRetries := 3
-	
-	for {
-		if !c.conn.WaitForStateChange(ctx, state) {
-			// Context expired or no state change
-			currentState := c.conn.GetState()
-			elapsed := time.Since(startTime)
-			
-			// CRITICAL FIX: If still IDLE after timeout, try Connect() again
-			if currentState == connectivity.Idle && retryCount < maxRetries {
-				retryCount++
-				logWarn("[XrayGrpc] Connection still IDLE after wait, retry #%d: calling Connect() again...", retryCount)
-				c.conn.Connect()
-				state = c.conn.GetState()
-				if state == connectivity.Ready {
-					logInfo("[XrayGrpc] ✅ Connection is now ready after retry #%d (elapsed: %v)", retryCount, time.Since(startTime))
-					return nil
-				}
-				// Continue waiting with remaining time
-				continue
-			}
-			
-			logWarn("[XrayGrpc] Connection wait timeout: state=%v (waited %v, maxWait: %v, retries: %d)", currentState, elapsed, maxWait, retryCount)
-			return fmt.Errorf("connection not ready: state=%v (waited %v)", currentState, elapsed)
-		}
-
+	for time.Since(startTime) < maxWait {
 		state = c.conn.GetState()
-		elapsed := time.Since(startTime)
-		logDebug("[XrayGrpc] Connection state changed: %v (elapsed: %v)", state, elapsed)
 		
 		if state == connectivity.Ready {
-			logInfo("[XrayGrpc] ✅ Connection is now ready (elapsed: %v)", elapsed)
+			logDebug("[XrayGrpc] ✅ Connection ready (elapsed: %v)", time.Since(startTime))
 			return nil
 		}
-
+		
 		if state == connectivity.Shutdown {
-			return fmt.Errorf("connection shutdown: state=%v", state)
+			return fmt.Errorf("connection shutdown")
 		}
 		
-		if state == connectivity.TransientFailure {
-			// TransientFailure is recoverable - continue waiting
-			logDebug("[XrayGrpc] Connection in transient failure (recoverable), continuing to wait...")
-			// Trigger reconnection attempt
+		// If IDLE or TransientFailure, trigger reconnection
+		if state == connectivity.Idle || state == connectivity.TransientFailure {
 			c.conn.Connect()
 		}
 		
-		// CRITICAL FIX: If back to IDLE, trigger connection again
-		if state == connectivity.Idle {
-			logDebug("[XrayGrpc] Connection went back to IDLE, triggering Connect() again...")
-			c.conn.Connect()
-		}
-
-		// Continue waiting for IDLE or CONNECTING states
-		// IDLE state means connection is not yet established but can become ready
-		// CONNECTING state means connection is in progress
+		time.Sleep(pollInterval)
 	}
+	
+	finalState := c.conn.GetState()
+	logWarn("[XrayGrpc] Connection wait timeout: state=%v (waited %v)", finalState, time.Since(startTime))
+	return fmt.Errorf("connection not ready: state=%v (waited %v)", finalState, time.Since(startTime))
 }
 
 // GetSystemStats queries system statistics from Xray-core
+// NON-BLOCKING: Returns error immediately if connection not ready
 func (c *XrayGrpcClient) GetSystemStats() (*command.SysStatsResponse, error) {
-	// Wait for connection to be ready (max 100ms - minimal wait for fast feedback)
-	if err := c.waitForConnection(100 * time.Millisecond); err != nil {
-		logError("[XrayGrpc] Connection not ready: %v", err)
+	// NON-BLOCKING check - don't wait for connection
+	if err := c.checkConnection(); err != nil {
+		// Don't log as error - this is expected during connection establishment
+		logDebug("[XrayGrpc] Connection not ready for system stats: %v", err)
 		return nil, fmt.Errorf("connection not ready: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// Use short timeout (500ms) to prevent blocking
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
 	req := &command.SysStatsRequest{}
 	resp, err := c.client.GetSysStats(ctx, req)
 	if err != nil {
-		logError("[XrayGrpc] GetSysStats failed: %v", err)
+		logDebug("[XrayGrpc] GetSysStats failed: %v", err)
 		return nil, fmt.Errorf("get sys stats: %w", err)
 	}
 
@@ -177,14 +184,17 @@ func (c *XrayGrpcClient) GetSystemStats() (*command.SysStatsResponse, error) {
 
 // QueryTrafficStats queries traffic statistics from Xray-core
 // Returns uplink and downlink bytes, matching Kotlin CoreStatsClient pattern matching logic
+// NON-BLOCKING: Returns error immediately if connection not ready
 func (c *XrayGrpcClient) QueryTrafficStats() (uplink, downlink int64, err error) {
-	// Wait for connection to be ready (max 100ms - minimal wait for fast feedback)
-	if err := c.waitForConnection(100 * time.Millisecond); err != nil {
-		logError("[XrayGrpc] Connection not ready for traffic stats: %v", err)
+	// NON-BLOCKING check - don't wait for connection
+	if err := c.checkConnection(); err != nil {
+		// Don't log as error - this is expected during connection establishment
+		logDebug("[XrayGrpc] Connection not ready for traffic stats: %v", err)
 		return 0, 0, fmt.Errorf("connection not ready: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// Use short timeout (500ms) to prevent blocking
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
 	// Query all stats with empty pattern
