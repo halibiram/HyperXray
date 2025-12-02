@@ -20,6 +20,69 @@ import (
 	_ "github.com/xtls/xray-core/main/distro/all"
 )
 
+// ============================================================================
+// BUFFER POOL FOR MEMORY OPTIMIZATION
+// ============================================================================
+// Using sync.Pool to reduce GC pressure from frequent packet allocations.
+// The readLoop allocates a new []byte for every incoming packet, which causes
+// massive GC churn under high traffic. This pool reuses buffers efficiently.
+// ============================================================================
+
+const (
+	// ReadBufferSize is the size for read buffers (max UDP packet size).
+	ReadBufferSize = 65535
+	// PacketBufferSize is the size for packet data buffers.
+	// Used for copying received data to the read channel.
+	PacketBufferSize = 2048
+)
+
+// readBufferPool provides reusable large buffers for reading from connections.
+// These are 64KB buffers used in readLoop for conn.Read().
+var readBufferPool = sync.Pool{
+	New: func() interface{} {
+		buf := make([]byte, ReadBufferSize)
+		return &buf
+	},
+}
+
+// packetBufferPool provides reusable buffers for packet data.
+// These are smaller buffers (2KB) used for copying data to channels.
+var packetBufferPool = sync.Pool{
+	New: func() interface{} {
+		buf := make([]byte, PacketBufferSize)
+		return &buf
+	},
+}
+
+// getReadBuffer retrieves a large read buffer from the pool.
+func getReadBuffer() *[]byte {
+	return readBufferPool.Get().(*[]byte)
+}
+
+// putReadBuffer returns a large read buffer to the pool.
+func putReadBuffer(buf *[]byte) {
+	if buf == nil {
+		return
+	}
+	readBufferPool.Put(buf)
+}
+
+// getPacketBuffer retrieves a packet buffer from the pool.
+func getPacketBuffer() *[]byte {
+	return packetBufferPool.Get().(*[]byte)
+}
+
+// putPacketBuffer returns a packet buffer to the pool.
+// SAFETY: Caller must ensure the buffer is no longer referenced.
+func putPacketBuffer(buf *[]byte) {
+	if buf == nil {
+		return
+	}
+	// Reset to full capacity for next use
+	*buf = (*buf)[:cap(*buf)]
+	packetBufferPool.Put(buf)
+}
+
 // Global log channel for Xray logs (buffered, non-blocking)
 // Exported for access from native/lib.go
 var (
@@ -948,7 +1011,12 @@ func (c *XrayUDPConn) readLoop() {
 	logInfo("[XrayUDP] readLoop() started for %s:%d", c.address, c.port)
 	logInfo("[XrayUDP] ========================================")
 	
-	buf := make([]byte, 65535)
+	// OPTIMIZATION: Use pooled buffer for reading instead of allocating per-loop.
+	// This buffer is reused for all reads in this goroutine's lifetime.
+	bufPtr := getReadBuffer()
+	defer putReadBuffer(bufPtr)
+	buf := *bufPtr
+	
 	readCount := 0
 	errorCount := 0
 	
@@ -1107,9 +1175,22 @@ func (c *XrayUDPConn) readLoop() {
 			logDebug("[PacketInspector] RX Len: %d, Header: %s", n, headerHex)
 		}
 		
-		// Copy data to channel
-		data := make([]byte, n)
-		copy(data, buf[:n])
+		// OPTIMIZATION: Use pooled buffer for packet data instead of make([]byte, n).
+		// This significantly reduces GC pressure under high traffic.
+		// NOTE: Buffer ownership transfers to readCh consumer (Read method).
+		// Consumer must return buffer to pool after processing.
+		var data []byte
+		if n <= PacketBufferSize {
+			// Use pooled buffer for typical packet sizes
+			dataPtr := getPacketBuffer()
+			*dataPtr = (*dataPtr)[:n]
+			copy(*dataPtr, buf[:n])
+			data = *dataPtr
+		} else {
+			// Fallback to allocation for oversized packets (rare, >2KB)
+			data = make([]byte, n)
+			copy(data, buf[:n])
+		}
 		
 		select {
 		case c.readCh <- data:
@@ -1119,6 +1200,10 @@ func (c *XrayUDPConn) readLoop() {
 				logDebug("[XrayUDP] readLoop: ✅ Received %d bytes", n)
 			}
 		default:
+			// Return buffer to pool since it won't be consumed
+			if n <= PacketBufferSize {
+				putPacketBuffer(&data)
+			}
 			logWarn("[XrayUDP] readLoop: ⚠️ Read buffer full, dropping %d bytes packet (readCount: %d)", n, readCount)
 		}
 	}

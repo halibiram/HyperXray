@@ -478,6 +478,11 @@ func StopHyperTunnel() C.int {
 	tunnel.Stop()
 	tunnel = nil
 	
+	// Save DNS cache to disk on tunnel stop for persistence
+	logInfo("Saving DNS cache to disk...")
+	cacheManager := dns.GetCacheManager()
+	cacheManager.SaveToDisk("")
+	
 	logInfo("Tunnel stopped successfully")
 	return ErrorSuccess
 }
@@ -889,6 +894,34 @@ func DNSCacheCleanupExpired() C.int {
 	cacheManager := dns.GetCacheManager()
 	removed := cacheManager.CleanupExpired()
 	return C.int(removed)
+}
+
+//export DNSCacheSaveToDisk
+func DNSCacheSaveToDisk() C.int {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in DNSCacheSaveToDisk: %v", r)
+		}
+	}()
+
+	cacheManager := dns.GetCacheManager()
+	cacheManager.SaveToDisk("")
+	logInfo("DNS cache saved to disk (explicit call)")
+	return ErrorSuccess
+}
+
+//export DNSCacheShutdown
+func DNSCacheShutdown() C.int {
+	defer func() {
+		if r := recover(); r != nil {
+			logError("PANIC in DNSCacheShutdown: %v", r)
+		}
+	}()
+
+	cacheManager := dns.GetCacheManager()
+	cacheManager.Shutdown()
+	logInfo("DNS cache shutdown complete")
+	return ErrorSuccess
 }
 
 // ============================================================================

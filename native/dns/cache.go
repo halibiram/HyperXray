@@ -13,15 +13,16 @@ import (
 )
 
 const (
-	DefaultTTL        = 86400    // 24 hours in seconds
-	PopularDomainTTL  = 172800   // 48 hours for popular domains
-	DynamicDomainTTL  = 86400    // 24 hours for dynamic domains (CDN, etc.)
-	MaxEntries        = 10000
-	CacheVersion      = 1
-	MemoryLimitMB     = 10
-	MovingAvgAlpha    = 0.1      // Exponential moving average factor
-	TopDomainCount    = 10
-	SaveDebounceMs    = 200
+	DefaultTTL           = 86400    // 24 hours in seconds
+	PopularDomainTTL     = 172800   // 48 hours for popular domains
+	DynamicDomainTTL     = 86400    // 24 hours for dynamic domains (CDN, etc.)
+	MaxEntries           = 10000
+	CacheVersion         = 1
+	MemoryLimitMB        = 10
+	MovingAvgAlpha       = 0.1      // Exponential moving average factor
+	TopDomainCount       = 10
+	SaveDebounceMs       = 200
+	PeriodicSaveInterval = 5 * time.Minute // Periodic save interval
 )
 
 // Popular domains that rarely change - use longer TTL
@@ -575,10 +576,14 @@ func (m *DNSCacheManager) CleanupExpired() int {
 	return removed
 }
 
-// debouncedSaveLoop handles debounced saves to file
+// debouncedSaveLoop handles debounced saves to file with periodic backup saves
 func (m *DNSCacheManager) debouncedSaveLoop() {
-	timer := time.NewTimer(SaveDebounceMs * time.Millisecond)
-	timer.Stop()
+	debounceTimer := time.NewTimer(SaveDebounceMs * time.Millisecond)
+	debounceTimer.Stop()
+	
+	// Periodic save timer (every 5 minutes) for reliability
+	periodicTicker := time.NewTicker(PeriodicSaveInterval)
+	defer periodicTicker.Stop()
 	
 	for {
 		select {
@@ -586,8 +591,11 @@ func (m *DNSCacheManager) debouncedSaveLoop() {
 			m.saveToFile()
 			return
 		case <-m.saveChannel:
-			timer.Reset(SaveDebounceMs * time.Millisecond)
-		case <-timer.C:
+			debounceTimer.Reset(SaveDebounceMs * time.Millisecond)
+		case <-debounceTimer.C:
+			m.saveToFile()
+		case <-periodicTicker.C:
+			// Periodic save for reliability (in case debounced saves are missed)
 			m.saveToFile()
 		}
 	}
@@ -660,9 +668,129 @@ func (m *DNSCacheManager) saveToFile() {
 	os.WriteFile(m.cacheFile, data, 0644)
 }
 
-// Shutdown shuts down the cache manager
+// Shutdown shuts down the cache manager and saves cache to disk
 func (m *DNSCacheManager) Shutdown() {
-	close(m.stopChan)
+	m.cacheMutex.Lock()
+	if !m.initialized {
+		m.cacheMutex.Unlock()
+		return
+	}
+	m.cacheMutex.Unlock()
+	
+	// Signal stop to save loop (will trigger final save)
+	select {
+	case <-m.stopChan:
+		// Already closed
+	default:
+		close(m.stopChan)
+	}
+	
+	fmt.Printf("DNS Cache: Shutdown complete, cache saved to disk\n")
+}
+
+// SaveToDisk explicitly saves the cache to disk at the specified path
+// This is a public method for manual/lifecycle-triggered saves
+// Errors are logged but not returned (fail-open behavior)
+func (m *DNSCacheManager) SaveToDisk(path string) {
+	if path == "" {
+		path = m.cacheFile
+	}
+	if path == "" {
+		fmt.Printf("DNS Cache: SaveToDisk skipped - no path specified\n")
+		return
+	}
+	
+	m.saveMutex.Lock()
+	defer m.saveMutex.Unlock()
+	
+	m.cacheMutex.RLock()
+	fileData := struct {
+		Version int                    `json:"version"`
+		Entries map[string]*CacheEntry `json:"entries"`
+	}{
+		Version: CacheVersion,
+		Entries: make(map[string]*CacheEntry),
+	}
+	for k, v := range m.cache {
+		// Only save non-expired entries
+		if !v.IsExpired() {
+			fileData.Entries[k] = v
+		}
+	}
+	entryCount := len(fileData.Entries)
+	m.cacheMutex.RUnlock()
+	
+	data, err := json.MarshalIndent(fileData, "", "  ")
+	if err != nil {
+		fmt.Printf("DNS Cache: SaveToDisk failed to marshal: %v\n", err)
+		return
+	}
+	
+	// Ensure directory exists
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		fmt.Printf("DNS Cache: SaveToDisk failed to create directory: %v\n", err)
+		return
+	}
+	
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		fmt.Printf("DNS Cache: SaveToDisk failed to write file: %v\n", err)
+		return
+	}
+	
+	fmt.Printf("DNS Cache: Saved %d entries to %s\n", entryCount, path)
+}
+
+// LoadFromDisk explicitly loads the cache from disk at the specified path
+// This is a public method for manual/lifecycle-triggered loads
+// Errors are logged but not returned (fail-open behavior)
+func (m *DNSCacheManager) LoadFromDisk(path string) {
+	if path == "" {
+		path = m.cacheFile
+	}
+	if path == "" {
+		fmt.Printf("DNS Cache: LoadFromDisk skipped - no path specified\n")
+		return
+	}
+	
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Printf("DNS Cache: No existing cache file at %s (starting fresh)\n", path)
+		} else {
+			fmt.Printf("DNS Cache: LoadFromDisk failed to read file: %v\n", err)
+		}
+		return
+	}
+	
+	var fileData struct {
+		Version int                    `json:"version"`
+		Entries map[string]*CacheEntry `json:"entries"`
+	}
+	
+	if err := json.Unmarshal(data, &fileData); err != nil {
+		fmt.Printf("DNS Cache: LoadFromDisk failed to unmarshal: %v\n", err)
+		return
+	}
+	
+	if fileData.Version != CacheVersion {
+		fmt.Printf("DNS Cache: Version mismatch (file: %d, expected: %d), starting fresh\n", fileData.Version, CacheVersion)
+		return
+	}
+	
+	m.cacheMutex.Lock()
+	loadedCount := 0
+	expiredCount := 0
+	for hostname, entry := range fileData.Entries {
+		if !entry.IsExpired() {
+			m.cache[hostname] = entry
+			loadedCount++
+		} else {
+			expiredCount++
+		}
+	}
+	m.cacheMutex.Unlock()
+	
+	fmt.Printf("DNS Cache: Loaded %d entries from %s (skipped %d expired)\n", loadedCount, path, expiredCount)
 }
 
 

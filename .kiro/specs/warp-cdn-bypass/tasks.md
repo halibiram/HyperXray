@@ -1,0 +1,158 @@
+# Implementation Plan
+
+- [ ] 1. Create data models and configuration
+  - [ ] 1.1 Create CdnBypassConfig data class with serialization
+    - Create `CdnBypassConfig.kt` in `feature/feature-warp/src/main/kotlin/com/hyperxray/an/feature/warp/domain/entity/`
+    - Include fields: enabled, targetCountry, preferredEndpoints, autoFailover, cacheExpiryHours
+    - Add Kotlinx Serialization annotations
+    - _Requirements: 5.1, 5.3_
+  - [ ]* 1.2 Write property test for configuration round-trip
+    - **Property 10: Configuration serialization round-trip**
+    - **Validates: Requirements 5.1, 5.2, 5.5**
+  - [ ] 1.3 Create TargetCountry and WarpEndpoint models
+    - Create `TargetCountry.kt` with code, name, endpoints fields
+    - Extend existing `WarpEndpoint` or create CDN-specific version with latencyMs, lastTested
+    - _Requirements: 1.1, 2.1_
+  - [ ]* 1.4 Write property test for country code validation
+    - **Property 1: Country list contains valid country codes**
+    - **Validates: Requirements 1.1, 1.4**
+  - [ ] 1.5 Create CdnBypassState sealed class
+    - States: Disconnected, Connecting, Connected(endpoint, exitIp, exitCountry), Error(message)
+    - _Requirements: 3.1, 4.4_
+  - [ ] 1.6 Create CdnBypassStats data class
+    - Fields: latencyMs, uploadBytes, downloadBytes, connectedSince, currentEndpoint, exitCountry, exitIp
+    - _Requirements: 4.1, 4.2, 4.4, 4.5_
+
+- [ ] 2. Implement endpoint database and discovery
+  - [ ] 2.1 Create WarpEndpointDatabase object
+    - Define country-to-endpoints mapping for supported countries (US, DE, JP, UK, FR, etc.)
+    - Include default endpoint for fallback
+    - _Requirements: 1.4, 2.4_
+  - [ ] 2.2 Create EndpointDiscoveryService interface and implementation
+    - Implement `getEndpointsForCountry(countryCode: String)`
+    - Implement `measureLatency(endpoint: WarpEndpoint)` using ICMP or TCP connect time
+    - Implement `rankEndpointsByLatency(endpoints: List<WarpEndpoint>)`
+    - _Requirements: 2.1, 2.2_
+  - [ ]* 2.3 Write property test for endpoint discovery
+    - **Property 3: Endpoint discovery returns non-empty results for valid countries**
+    - **Validates: Requirements 2.1**
+  - [ ]* 2.4 Write property test for latency sorting
+    - **Property 4: Endpoints are sorted by latency in ascending order**
+    - **Validates: Requirements 2.2**
+
+- [ ] 3. Implement caching layer
+  - [ ] 3.1 Create EndpointCache class
+    - Store endpoints with timestamps per country
+    - Implement cache expiration check (24 hours default)
+    - Use SharedPreferences or DataStore for persistence
+    - _Requirements: 2.3, 2.5_
+  - [ ]* 3.2 Write property test for cache consistency
+    - **Property 5: Cache contains discovered endpoints**
+    - **Validates: Requirements 2.3**
+  - [ ]* 3.3 Write property test for cache expiration
+    - **Property 6: Cache expiration triggers refresh**
+    - **Validates: Requirements 2.5**
+
+- [ ] 4. Implement repository layer
+  - [ ] 4.1 Create CdnBypassRepository interface
+    - Define methods for country management, endpoint management, config, connection
+    - _Requirements: 1.2, 2.1, 3.1, 5.1_
+  - [ ] 4.2 Implement CdnBypassRepositoryImpl
+    - Inject EndpointDiscoveryService, EndpointCache, ConfigStorage
+    - Implement all repository methods
+    - _Requirements: 1.2, 2.1, 2.3, 3.1, 5.1, 5.2_
+  - [ ]* 4.3 Write property test for country selection persistence
+    - **Property 2: Country selection persistence round-trip**
+    - **Validates: Requirements 1.2**
+
+- [ ] 5. Implement configuration storage
+  - [ ] 5.1 Create CdnBypassConfigStorage class
+    - Implement saveConfig and loadConfig using JSON serialization
+    - Handle invalid JSON gracefully
+    - _Requirements: 5.1, 5.2, 5.4_
+  - [ ]* 5.2 Write property test for required fields in serialization
+    - **Property 11: Serialized configuration contains required fields**
+    - **Validates: Requirements 5.3**
+  - [ ]* 5.3 Write property test for invalid JSON handling
+    - **Property 12: Invalid JSON deserialization returns error**
+    - **Validates: Requirements 5.4**
+
+- [ ] 6. Checkpoint - Ensure all tests pass
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [ ] 7. Implement use cases
+  - [ ] 7.1 Create SelectTargetCountryUseCase
+    - Validate country code
+    - Store selection via repository
+    - Trigger endpoint discovery if needed
+    - _Requirements: 1.2, 1.3_
+  - [ ] 7.2 Create DiscoverEndpointsUseCase
+    - Check cache first
+    - Discover and rank endpoints
+    - Update cache
+    - Handle failures with fallback
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
+  - [ ] 7.3 Create ConnectCdnBypassUseCase
+    - Validate country selection
+    - Get best endpoint
+    - Establish connection via native bridge
+    - Handle failover
+    - _Requirements: 3.1, 3.4_
+  - [ ]* 7.4 Write property test for failover logic
+    - **Property 7: Failover selects next best endpoint**
+    - **Validates: Requirements 3.4**
+  - [ ] 7.5 Create GetConnectionStatsUseCase
+    - Collect stats from native bridge
+    - Format for UI display
+    - _Requirements: 4.1, 4.2, 4.4, 4.5_
+  - [ ]* 7.6 Write property test for statistics validity
+    - **Property 8: Statistics show valid values when connected**
+    - **Validates: Requirements 4.1, 4.2, 4.5**
+  - [ ]* 7.7 Write property test for exit information
+    - **Property 9: Statistics show exit information when connected**
+    - **Validates: Requirements 4.4**
+
+- [ ] 8. Extend native Go bridge
+  - [ ] 8.1 Add ConnectToEndpoint function in bridge.go
+    - Accept host, port, WireGuard keys, reserved bytes
+    - Establish WireGuard tunnel to specific endpoint
+    - _Requirements: 3.1_
+  - [ ] 8.2 Add GetExitInfo function in bridge.go
+    - Query external service for exit IP
+    - Determine country from IP
+    - _Requirements: 3.5, 4.4_
+  - [ ] 8.3 Add SwitchEndpoint function in bridge.go
+    - Switch active tunnel to new endpoint without full reconnect
+    - _Requirements: 3.4_
+  - [ ] 8.4 Extend GetConnectionStats in bridge.go
+    - Return latency measurement
+    - Return current endpoint info
+    - _Requirements: 4.1, 4.5_
+
+- [ ] 9. Implement ViewModel
+  - [ ] 9.1 Create CdnBypassViewModel
+    - Expose UI state as StateFlow
+    - Handle country selection
+    - Handle connect/disconnect actions
+    - Collect and expose statistics
+    - _Requirements: 1.1, 1.2, 3.1, 4.1, 4.2, 4.3, 4.4, 4.5_
+
+- [ ] 10. Implement UI components
+  - [ ] 10.1 Create CountrySelectionScreen composable
+    - Display available countries list
+    - Handle country selection
+    - Show current selection
+    - _Requirements: 1.1, 1.2, 1.4_
+  - [ ] 10.2 Create CdnBypassDashboard composable
+    - Show connection status
+    - Display statistics (latency, data transfer, exit info)
+    - Connect/disconnect button
+    - _Requirements: 3.1, 4.1, 4.2, 4.3, 4.4, 4.5_
+  - [ ] 10.3 Integrate CDN Bypass into WARP feature navigation
+    - Add menu item or tab for CDN Bypass
+    - Wire up navigation
+    - _Requirements: 1.1_
+
+- [ ] 11. Final Checkpoint - Ensure all tests pass
+  - Ensure all tests pass, ask the user if questions arise.
+

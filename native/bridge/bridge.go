@@ -34,11 +34,13 @@ static void safe_callAiLogHelper(const char* tag, const char* level, const char*
 */
 import "C"
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -425,16 +427,23 @@ func (t *HyperTunnel) Start() error {
 	logInfo("[Tunnel] ▶▶▶ STEP 2: Testing UDP path to WARP endpoint...")
 	logInfo("[Tunnel] ")
 	
-	// Run UDP test in goroutine with timeout to avoid blocking tunnel startup
+	// Run UDP test with context timeout to ensure goroutine cleanup
+	udpCtx, udpCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	udpTestDone := make(chan error, 1)
 	go func() {
 		udpTestErr := t.xrayInstance.TestUDPConnectivity(t.wgConfig.Endpoint)
-		udpTestDone <- udpTestErr
+		// Use select to avoid blocking if context is cancelled
+		select {
+		case udpTestDone <- udpTestErr:
+		case <-udpCtx.Done():
+			// Context cancelled, don't block on channel send
+		}
 	}()
 	
-	// Wait max 2 seconds for UDP test, then continue
+	// Wait for UDP test result or timeout
 	select {
 	case udpTestErr := <-udpTestDone:
+		udpCancel() // Release context resources
 		if udpTestErr != nil {
 			logWarn("[Tunnel] ⚠️ UDP test warning: %v", udpTestErr)
 			logWarn("[Tunnel] ⚠️ Will proceed but WireGuard may have issues")
@@ -442,7 +451,8 @@ func (t *HyperTunnel) Start() error {
 		} else {
 			logInfo("[Tunnel] ✅ UDP path verified!")
 		}
-	case <-time.After(2 * time.Second):
+	case <-udpCtx.Done():
+		udpCancel() // Release context resources
 		logDebug("[Tunnel] UDP test still in progress (continuing startup)")
 		logWarn("[Tunnel] ⚠️ UDP test timeout - proceeding without verification")
 		logWarn("[Tunnel] ⚠️ WireGuard may have issues if UDP path is not working")
@@ -637,10 +647,32 @@ func hexEncode(base64Str string) string {
 	return fmt.Sprintf("%x", bytes)
 }
 
-// maskPrivateKey masks private key in log output
+// maskPrivateKey masks sensitive keys (PrivateKey, PresharedKey) in log output
+// Handles various formatting: PrivateKey=..., PrivateKey = ..., private_key=...
 func maskPrivateKey(config string) string {
-	// Simple masking - replace private_key value
-	return config // In production, actually mask it
+	if config == "" {
+		return config
+	}
+
+	// Pattern matches:
+	// - PrivateKey = <value> (WireGuard config format)
+	// - PrivateKey=<value> (no spaces)
+	// - private_key=<hex> (WireGuard IPC format)
+	// - PresharedKey = <value> (optional WireGuard field)
+	// - preshared_key=<hex> (IPC format)
+	// Value continues until newline or end of string
+	patterns := []string{
+		`(?i)(private_?key\s*=\s*)[^\n\r]+`,
+		`(?i)(preshared_?key\s*=\s*)[^\n\r]+`,
+	}
+
+	result := config
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		result = re.ReplaceAllString(result, "${1}[MASKED]")
+	}
+
+	return result
 }
 
 // Stop stops the tunnel IMMEDIATELY (aggressive cleanup)
@@ -923,13 +955,18 @@ func parseHandshake(ipc string) int64 {
 	return lastHandshakeSec
 }
 
-// monitorHandshake monitors WireGuard handshake status
+// monitorHandshake monitors WireGuard handshake status with retry on connection issues
 func (t *HyperTunnel) monitorHandshake() {
 	logInfo("[Handshake] Starting handshake monitor...")
 
-	checkInterval := 5 * time.Second
-	timeout := 60 * time.Second
+	checkInterval := 1 * time.Second // Reduced from 5s to 1s for faster detection
+	timeout := 1 * time.Hour // Extended timeout to 1 hour
 	startTime := time.Now()
+	
+	// Track last successful handshake for connection health monitoring
+	var lastSuccessfulHandshake int64
+	var consecutiveFailures int
+	const maxConsecutiveFailures = 12 // 1 minute of failures (12 * 5s)
 
 	for {
 		select {
@@ -946,9 +983,31 @@ func (t *HyperTunnel) monitorHandshake() {
 				if err == nil {
 					handshake := parseHandshake(ipc)
 					if handshake > 0 {
-						logInfo("[Handshake] ✅ SUCCESS! Handshake completed at %d", handshake)
-						logInfo("[Handshake] ✅ VPN tunnel is now fully operational!")
-						return
+						// First successful handshake
+						if lastSuccessfulHandshake == 0 {
+							logInfo("[Handshake] ✅ SUCCESS! Handshake completed at %d", handshake)
+							logInfo("[Handshake] ✅ VPN tunnel is now fully operational!")
+						}
+						
+						// Check if handshake is stale (no new handshake for 3+ minutes)
+						handshakeAge := time.Now().Unix() - handshake
+						if handshakeAge > 180 && lastSuccessfulHandshake > 0 {
+							consecutiveFailures++
+							logWarn("[Handshake] ⚠️ Handshake is stale (%d seconds old), failures: %d/%d", 
+								handshakeAge, consecutiveFailures, maxConsecutiveFailures)
+							
+							// If too many consecutive failures, try to recover
+							if consecutiveFailures >= maxConsecutiveFailures {
+								logWarn("[Handshake] 🔄 Connection seems unhealthy, attempting recovery...")
+								t.attemptHandshakeRecovery()
+								consecutiveFailures = 0
+							}
+						} else {
+							// Handshake is fresh, reset failure counter
+							consecutiveFailures = 0
+							lastSuccessfulHandshake = handshake
+						}
+						continue
 					}
 				}
 			}
@@ -956,7 +1015,8 @@ func (t *HyperTunnel) monitorHandshake() {
 			elapsed := time.Since(startTime)
 			logDebug("[Handshake] Waiting... (%v elapsed)", elapsed.Round(time.Second))
 
-			if elapsed > timeout {
+			// Only timeout if we never got a handshake
+			if elapsed > timeout && lastSuccessfulHandshake == 0 {
 				logError("[Handshake] ❌ TIMEOUT! No handshake after %v", timeout)
 				logError("[Handshake] ❌ Possible issues:")
 				logError("[Handshake]    1. UDP packets not reaching WARP server")
@@ -965,6 +1025,23 @@ func (t *HyperTunnel) monitorHandshake() {
 				logError("[Handshake]    4. Wrong WireGuard keys")
 				return
 			}
+		}
+	}
+}
+
+// attemptHandshakeRecovery tries to recover a stale WireGuard connection
+func (t *HyperTunnel) attemptHandshakeRecovery() {
+	logInfo("[Handshake] 🔄 Attempting handshake recovery...")
+	
+	// Force WireGuard to initiate a new handshake by sending a keepalive
+	if t.wgDevice != nil {
+		// Re-apply the IPC config to trigger a new handshake attempt
+		ipcConfig := t.generateIpcConfig()
+		err := t.wgDevice.IpcSet(ipcConfig)
+		if err != nil {
+			logError("[Handshake] ❌ Recovery failed: %v", err)
+		} else {
+			logInfo("[Handshake] ✅ Recovery initiated, waiting for new handshake...")
 		}
 	}
 }

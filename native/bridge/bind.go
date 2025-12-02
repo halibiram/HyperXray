@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net"
 	"net/netip"
@@ -10,6 +11,21 @@ import (
 	"time"
 
 	"golang.zx2c4.com/wireguard/conn"
+)
+
+// WireGuard message types for handshake detection
+const (
+	MessageTypeHandshakeInitiation = 1
+	MessageTypeHandshakeResponse   = 2
+	MessageTypeCookieReply         = 3
+	MessageTypeTransportData       = 4
+)
+
+// Keepalive configuration
+const (
+	KeepaliveInterval          = 10 * time.Second
+	PostHandshakeDelay         = 500 * time.Millisecond
+	HandshakeConfirmationDelay = 50 * time.Millisecond
 )
 
 // XrayBind implements conn.Bind to route WireGuard UDP through Xray
@@ -28,6 +44,12 @@ type XrayBind struct {
 	// Health check
 	lastHealthCheck time.Time
 	healthCheckMu   sync.Mutex
+	
+	// Handshake and keepalive state for key confirmation
+	lastHandshakeTime    atomic.Int64  // Unix nano timestamp of last handshake response
+	handshakeConfirmed   atomic.Int32  // 1 if key confirmation packet sent
+	pendingConfirmation  atomic.Int32  // 1 if confirmation is pending
+	lastReceiverIndex    atomic.Uint32 // Last seen receiver index from handshake response
 	
 	// Statistics
 	txBytes   atomic.Uint64
@@ -125,6 +147,9 @@ func (b *XrayBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 	
 	// Start health check goroutine
 	go b.healthCheckLoop()
+	
+	// Start keepalive loop for key confirmation
+	go b.keepaliveLoop()
 	
 	recvFn := b.makeReceiveFunc()
 	
@@ -252,6 +277,27 @@ func (b *XrayBind) makeReceiveFunc() conn.ReceiveFunc {
 		
 		successCount++
 		
+		// ===== HANDSHAKE DETECTION FOR KEY CONFIRMATION =====
+		if len(data) >= 4 {
+			msgType := data[0]
+			if msgType == MessageTypeHandshakeResponse {
+				// Handshake response received - mark timestamp for key confirmation
+				now := time.Now().UnixNano()
+				b.lastHandshakeTime.Store(now)
+				b.handshakeConfirmed.Store(0) // Reset confirmation flag
+				b.pendingConfirmation.Store(1) // Mark confirmation as pending
+
+				// Extract receiver index from handshake response (bytes 4-7)
+				if len(data) >= 8 {
+					receiverIndex := binary.LittleEndian.Uint32(data[4:8])
+					b.lastReceiverIndex.Store(receiverIndex)
+					logInfo("[XrayBind] 🤝 Handshake Response detected (type=%d, receiverIndex=%d), scheduling key confirmation", msgType, receiverIndex)
+				} else {
+					logInfo("[XrayBind] 🤝 Handshake Response detected (type=%d), scheduling key confirmation", msgType)
+				}
+			}
+		}
+
 		// Copy to buffer
 		if len(data) > len(bufs[0]) {
 			logWarn("[XrayBind] makeReceiveFunc: Data too large (%d > %d), truncating", len(data), len(bufs[0]))
@@ -314,6 +360,22 @@ func (b *XrayBind) Send(bufs [][]byte, ep conn.Endpoint) error {
 	}
 	
 	for _, buf := range bufs {
+		if len(buf) == 0 {
+			continue // Skip empty buffers
+		}
+
+		// ===== KEY CONFIRMATION DETECTION =====
+		// Check if this is a transport data packet (key confirmation)
+		if len(buf) >= 4 && buf[0] == MessageTypeTransportData {
+			// Mark handshake as confirmed when we send first data packet after handshake
+			if b.pendingConfirmation.Load() == 1 {
+				if b.handshakeConfirmed.CompareAndSwap(0, 1) {
+					b.pendingConfirmation.Store(0)
+					logInfo("[XrayBind] ✅ Key confirmation: first transport data packet sent after handshake")
+				}
+			}
+		}
+
 		n, err := conn.Write(buf)
 		if err != nil {
 			logError("[XrayBind] Send error: %v, attempting reconnect...", err)
@@ -519,6 +581,156 @@ func (b *XrayBind) healthCheckLoop() {
 			}
 		}
 	}
+}
+
+// keepaliveLoop handles both post-handshake key confirmation and periodic keepalives
+func (b *XrayBind) keepaliveLoop() {
+	logInfo("[XrayBind] Keepalive loop started for key confirmation")
+	
+	ticker := time.NewTicker(KeepaliveInterval)
+	defer ticker.Stop()
+
+	// Check for pending key confirmation more frequently
+	confirmTicker := time.NewTicker(HandshakeConfirmationDelay)
+	defer confirmTicker.Stop()
+
+	for {
+		select {
+		case <-b.stopChan:
+			logInfo("[XrayBind] Keepalive loop exiting: stop channel signalled")
+			return
+
+		case <-confirmTicker.C:
+			// Check if we need to send key confirmation packet
+			b.checkAndSendKeyConfirmation()
+
+		case <-ticker.C:
+			// Send periodic keepalive
+			if !b.closed {
+				b.sendKeepalive()
+			}
+		}
+	}
+}
+
+// checkAndSendKeyConfirmation sends a key confirmation packet after handshake
+func (b *XrayBind) checkAndSendKeyConfirmation() {
+	lastHandshake := b.lastHandshakeTime.Load()
+	if lastHandshake == 0 {
+		return // No handshake yet
+	}
+
+	// Check if already confirmed
+	if b.handshakeConfirmed.Load() == 1 {
+		return
+	}
+
+	// Check if confirmation is pending
+	if b.pendingConfirmation.Load() != 1 {
+		return
+	}
+
+	// Check if enough time has passed since handshake (PostHandshakeDelay)
+	elapsed := time.Since(time.Unix(0, lastHandshake))
+	if elapsed < PostHandshakeDelay {
+		return // Wait a bit more
+	}
+
+	// Send key confirmation packet
+	logInfo("[XrayBind] 🔑 Sending key confirmation packet (elapsed: %v)", elapsed)
+	b.sendEmptyKeepalivePacket()
+
+	if b.handshakeConfirmed.CompareAndSwap(0, 1) {
+		b.pendingConfirmation.Store(0)
+		logInfo("[XrayBind] ✅ Key confirmation sent successfully")
+	}
+}
+
+// sendKeepalive sends a periodic keepalive packet to keep NAT mapping alive
+func (b *XrayBind) sendKeepalive() {
+	b.mu.Lock()
+	conn := b.udpConn
+	closed := b.closed
+	b.mu.Unlock()
+
+	if conn == nil || closed {
+		return
+	}
+
+	// Send empty keepalive packet
+	b.sendEmptyKeepalivePacket()
+}
+
+// sendEmptyKeepalivePacket sends an empty WireGuard keepalive packet
+// WireGuard keepalive is a transport data packet with empty payload
+func (b *XrayBind) sendEmptyKeepalivePacket() {
+	b.mu.Lock()
+	conn := b.udpConn
+	closed := b.closed
+	b.mu.Unlock()
+
+	if conn == nil || closed {
+		return
+	}
+
+	// Get the last receiver index from handshake
+	receiverIndex := b.lastReceiverIndex.Load()
+	if receiverIndex == 0 {
+		logDebug("[XrayBind] Cannot send keepalive: no receiver index available yet")
+		return
+	}
+
+	// Build a minimal WireGuard transport data packet
+	// Format: Type(1) + Reserved(3) + Receiver(4) + Counter(8) + Auth(16) = 32 bytes minimum
+	// Note: This packet won't decrypt properly without session keys, but it signals
+	// to the server that we're trying to communicate and triggers WireGuard's
+	// internal keepalive mechanism
+	packet := make([]byte, 32)
+	packet[0] = MessageTypeTransportData // Type = 4
+	packet[1] = 0                         // Reserved
+	packet[2] = 0                         // Reserved
+	packet[3] = 0                         // Reserved
+	binary.LittleEndian.PutUint32(packet[4:8], receiverIndex)
+	// Counter (bytes 8-15) and auth tag (bytes 16-31) are zeros
+	// This won't decrypt properly but signals activity
+
+	_, err := conn.Write(packet)
+	if err != nil {
+		logWarn("[XrayBind] Failed to send keepalive packet: %v", err)
+	} else {
+		logDebug("[XrayBind] 📤 Keepalive packet sent (receiverIndex=%d)", receiverIndex)
+	}
+}
+
+// GetLastHandshakeTime returns the timestamp of the last handshake response
+func (b *XrayBind) GetLastHandshakeTime() time.Time {
+	ts := b.lastHandshakeTime.Load()
+	if ts == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ts)
+}
+
+// IsHandshakeConfirmed returns whether the last handshake has been confirmed
+func (b *XrayBind) IsHandshakeConfirmed() bool {
+	return b.handshakeConfirmed.Load() == 1
+}
+
+// IsPendingConfirmation returns whether a key confirmation is pending
+func (b *XrayBind) IsPendingConfirmation() bool {
+	return b.pendingConfirmation.Load() == 1
+}
+
+// ForceKeyConfirmationNow immediately sends key confirmation without waiting
+func (b *XrayBind) ForceKeyConfirmationNow() {
+	if b.closed {
+		return
+	}
+
+	logInfo("[XrayBind] 🔑 Force key confirmation triggered")
+	b.sendEmptyKeepalivePacket()
+	b.handshakeConfirmed.Store(1)
+	b.pendingConfirmation.Store(0)
 }
 
 // xrayEndpoint implements conn.Endpoint
