@@ -1204,18 +1204,17 @@ func parseHandshake(ipc string) int64 {
 	return lastHandshakeSec
 }
 
-// monitorHandshake monitors WireGuard handshake status with retry on connection issues (legacy)
+// monitorHandshake monitors WireGuard handshake status (legacy version)
+// Note: WireGuard handles rekey internally via timers in wireguard-go-fork/device/constants.go
+// We only monitor for initial handshake success, no external recovery needed
 func (t *HyperTunnel) monitorHandshake() {
 	logInfo("[Handshake] Starting handshake monitor...")
 
-	checkInterval := 1 * time.Second // Reduced from 5s to 1s for faster detection
-	timeout := 1 * time.Hour // Extended timeout to 1 hour
+	checkInterval := 5 * time.Second
+	timeout := 1 * time.Hour
 	startTime := time.Now()
 	
-	// Track last successful handshake for connection health monitoring
-	var lastSuccessfulHandshake int64
-	var consecutiveFailures int
-	const maxConsecutiveFailures = 12 // 1 minute of failures (12 * 5s)
+	var initialHandshakeComplete bool
 
 	for {
 		select {
@@ -1232,30 +1231,12 @@ func (t *HyperTunnel) monitorHandshake() {
 				if err == nil {
 					handshake := parseHandshake(ipc)
 					if handshake > 0 {
-						// First successful handshake
-						if lastSuccessfulHandshake == 0 {
+						if !initialHandshakeComplete {
 							logInfo("[Handshake] ✅ SUCCESS! Handshake completed at %d", handshake)
 							logInfo("[Handshake] ✅ VPN tunnel is now fully operational!")
+							initialHandshakeComplete = true
 						}
-						
-						// Check if handshake is stale (no new handshake for 3+ minutes)
-						handshakeAge := time.Now().Unix() - handshake
-						if handshakeAge > 180 && lastSuccessfulHandshake > 0 {
-							consecutiveFailures++
-							logWarn("[Handshake] ⚠️ Handshake is stale (%d seconds old), failures: %d/%d", 
-								handshakeAge, consecutiveFailures, maxConsecutiveFailures)
-							
-							// If too many consecutive failures, try to recover
-							if consecutiveFailures >= maxConsecutiveFailures {
-								logWarn("[Handshake] 🔄 Connection seems unhealthy, attempting recovery...")
-								t.attemptHandshakeRecovery()
-								consecutiveFailures = 0
-							}
-						} else {
-							// Handshake is fresh, reset failure counter
-							consecutiveFailures = 0
-							lastSuccessfulHandshake = handshake
-						}
+						// WireGuard handles rekey internally, no need to monitor age
 						continue
 					}
 				}
@@ -1264,8 +1245,8 @@ func (t *HyperTunnel) monitorHandshake() {
 			elapsed := time.Since(startTime)
 			logDebug("[Handshake] Waiting... (%v elapsed)", elapsed.Round(time.Second))
 
-			// Only timeout if we never got a handshake
-			if elapsed > timeout && lastSuccessfulHandshake == 0 {
+			// Only timeout if we never got initial handshake
+			if elapsed > timeout && !initialHandshakeComplete {
 				logError("[Handshake] ❌ TIMEOUT! No handshake after %v", timeout)
 				logError("[Handshake] ❌ Possible issues:")
 				logError("[Handshake]    1. UDP packets not reaching WARP server")
@@ -1278,38 +1259,22 @@ func (t *HyperTunnel) monitorHandshake() {
 	}
 }
 
-// attemptHandshakeRecovery tries to recover a stale WireGuard connection
-func (t *HyperTunnel) attemptHandshakeRecovery() {
-	logInfo("[Handshake] 🔄 Attempting handshake recovery...")
-	
-	// Force WireGuard to initiate a new handshake by sending a keepalive
-	if t.wgDevice != nil {
-		// Re-apply the IPC config to trigger a new handshake attempt
-		ipcConfig := t.generateIpcConfig()
-		err := t.wgDevice.IpcSet(ipcConfig)
-		if err != nil {
-			logError("[Handshake] ❌ Recovery failed: %v", err)
-		} else {
-			logInfo("[Handshake] ✅ Recovery initiated, waiting for new handshake...")
-		}
-	}
-}
-
 // monitorHandshakeWithContext monitors WireGuard handshake status with context support
 // This version uses session context for coordinated shutdown
+// Note: WireGuard handles rekey internally via timers in wireguard-go-fork/device/constants.go
+// We only monitor for initial handshake success, no external recovery needed
 func (t *HyperTunnel) monitorHandshakeWithContext(ctx context.Context) {
 	defer t.cleanupWg.Done()
 	defer logInfo("[Handshake] monitorHandshakeWithContext goroutine exiting")
 	
 	logInfo("[Handshake] Starting handshake monitor (with context)...")
+	logInfo("[Handshake] WireGuard handles rekey internally (RekeyAfterTime=2h)")
 
-	checkInterval := 1 * time.Second
+	checkInterval := 5 * time.Second
 	timeout := 1 * time.Hour
 	startTime := time.Now()
 	
-	var lastSuccessfulHandshake int64
-	var consecutiveFailures int
-	const maxConsecutiveFailures = 12
+	var initialHandshakeComplete bool
 
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
@@ -1332,26 +1297,12 @@ func (t *HyperTunnel) monitorHandshakeWithContext(ctx context.Context) {
 				if err == nil {
 					handshake := parseHandshake(ipc)
 					if handshake > 0 {
-						if lastSuccessfulHandshake == 0 {
+						if !initialHandshakeComplete {
 							logInfo("[Handshake] ✅ SUCCESS! Handshake completed at %d", handshake)
 							logInfo("[Handshake] ✅ VPN tunnel is now fully operational!")
+							initialHandshakeComplete = true
 						}
-						
-						handshakeAge := time.Now().Unix() - handshake
-						if handshakeAge > 180 && lastSuccessfulHandshake > 0 {
-							consecutiveFailures++
-							logWarn("[Handshake] ⚠️ Handshake is stale (%d seconds old), failures: %d/%d", 
-								handshakeAge, consecutiveFailures, maxConsecutiveFailures)
-							
-							if consecutiveFailures >= maxConsecutiveFailures {
-								logWarn("[Handshake] 🔄 Connection seems unhealthy, attempting recovery...")
-								t.attemptHandshakeRecovery()
-								consecutiveFailures = 0
-							}
-						} else {
-							consecutiveFailures = 0
-							lastSuccessfulHandshake = handshake
-						}
+						// WireGuard handles rekey internally, no need to monitor age
 						continue
 					}
 				}
@@ -1360,7 +1311,8 @@ func (t *HyperTunnel) monitorHandshakeWithContext(ctx context.Context) {
 			elapsed := time.Since(startTime)
 			logDebug("[Handshake] Waiting... (%v elapsed)", elapsed.Round(time.Second))
 
-			if elapsed > timeout && lastSuccessfulHandshake == 0 {
+			// Only timeout if we never got initial handshake
+			if elapsed > timeout && !initialHandshakeComplete {
 				logError("[Handshake] ❌ TIMEOUT! No handshake after %v", timeout)
 				return
 			}

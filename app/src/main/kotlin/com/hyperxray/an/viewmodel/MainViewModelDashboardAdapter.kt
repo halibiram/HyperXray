@@ -3,12 +3,9 @@ package com.hyperxray.an.viewmodel
 import com.hyperxray.an.feature.dashboard.DashboardViewModel
 import com.hyperxray.an.feature.dashboard.CoreStatsState as FeatureCoreStatsState
 import com.hyperxray.an.feature.dashboard.AggregatedTelemetry as FeatureAggregatedTelemetry
-import com.hyperxray.an.feature.dashboard.DnsCacheStats as FeatureDnsCacheStats
 import com.hyperxray.an.feature.dashboard.AndroidMemoryStats as FeatureAndroidMemoryStats
 import com.hyperxray.an.telemetry.AggregatedTelemetry
 import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
-import com.hyperxray.an.viewmodel.MainViewUiEvent
-import android.util.Log
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -17,8 +14,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
-
-private const val TAG = "MainViewModelDashboardAdapter"
 
 /**
  * Extension function to convert app module CoreStatsState to feature module CoreStatsState
@@ -89,7 +84,6 @@ fun com.hyperxray.an.core.monitor.AndroidMemoryStats.toFeatureState(): FeatureAn
 
 /**
  * MainViewModel implementation of DashboardViewModel
- * DNS cache removed - using Google DNS (8.8.8.8) directly
  */
 class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : DashboardViewModel {
     
@@ -111,25 +105,6 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
                 initialValue = mainViewModel.telemetryState.value?.toFeatureState()
             )
     
-    // DNS cache removed - return empty stats
-    private val _dnsCacheStats = MutableStateFlow<FeatureDnsCacheStats?>(
-        FeatureDnsCacheStats(
-            entryCount = 0,
-            memoryUsageMB = 0L,
-            memoryLimitMB = 0L,
-            memoryUsagePercent = 0,
-            hits = 0L,
-            misses = 0L,
-            hitRate = 0,
-            avgDomainHitRate = 0,
-            avgHitLatencyMs = 0.0,
-            avgMissLatencyMs = 0.0,
-            avgTtlSeconds = 0L,
-            activeEntries = emptyList()
-        )
-    )
-    override val dnsCacheStats: StateFlow<FeatureDnsCacheStats?> = _dnsCacheStats.asStateFlow()
-    
     override val isServiceEnabled: StateFlow<Boolean> = mainViewModel.isServiceEnabled
     
     override val controlMenuClickable: StateFlow<Boolean> = mainViewModel.controlMenuClickable
@@ -149,18 +124,6 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
     override fun updateTelemetryStats() {
         mainViewModel.viewModelScope.launch {
             mainViewModel.updateTelemetryStats()
-        }
-    }
-    
-    override fun updateDnsCacheStats() {
-        // No-op: DNS cache removed, using Google DNS directly
-        Log.d(TAG, "updateDnsCacheStats: DNS cache removed, using Google DNS directly")
-    }
-    
-    override fun clearDnsCache() {
-        // No-op: DNS cache removed
-        mainViewModel.viewModelScope.launch {
-            mainViewModel.emitUiEvent(MainViewUiEvent.ShowSnackbar("Using Google DNS directly (no cache)"))
         }
     }
     

@@ -229,9 +229,6 @@ class MainActivity : ComponentActivity() {
                     dashboardAdapter.updateCoreStats()
                     Log.d(TAG, "Dashboard adapter updateCoreStats() completed, calling updateTelemetryStats()...")
                     dashboardAdapter.updateTelemetryStats()
-                    Log.d(TAG, "Dashboard adapter updateTelemetryStats() completed, calling updateDnsCacheStats()...")
-                    dashboardAdapter.updateDnsCacheStats()
-                    
                     // CRITICAL FIX: Force read dashboard adapter StateFlow values to trigger subscription restart
                     // This ensures transformed StateFlow's using SharingStarted.Lazily restart after process death
                     try {

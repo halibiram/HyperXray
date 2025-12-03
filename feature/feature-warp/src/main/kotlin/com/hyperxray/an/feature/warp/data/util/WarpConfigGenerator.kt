@@ -303,12 +303,9 @@ object WarpConfigGenerator {
                     put("allowInsecure", JsonPrimitive(true))
                 }
                 putJsonObject("quicSettings") {
-                    // FIX: Changed from "none" to "aes-128-gcm"
-                    // QUIC security "none" may be rejected by servers expecting encryption
-                    // aes-128-gcm provides proper QUIC payload encryption
-                    put("security", JsonPrimitive("aes-128-gcm"))
-                    // FIX: Add key for QUIC encryption (derived from account)
-                    put("key", JsonPrimitive(deriveQuicKey(account)))
+                    // QUIC is already encrypted by TLS 1.3
+                    // No additional encryption needed - "none" is correct
+                    put("security", JsonPrimitive("none"))
                     put("header", buildJsonObject { put("type", JsonPrimitive("none")) })
                 }
             }
@@ -337,20 +334,8 @@ object WarpConfigGenerator {
         }
     }
     
-    /**
-     * Derive QUIC encryption key from account credentials
-     * 
-     * Creates a deterministic key for QUIC payload encryption.
-     * Uses the first 16 characters of the private key (base64).
-     * 
-     * @param account WARP account
-     * @return Key string for QUIC encryption
-     */
-    private fun deriveQuicKey(account: WarpAccount): String {
-        // Use a portion of the private key as QUIC encryption key
-        // This ensures deterministic key derivation
-        return account.privateKey.take(16)
-    }
+    // NOTE: deriveQuicKey function removed - QUIC is already encrypted by TLS 1.3
+    // No additional encryption key is needed
     
     /**
      * Get available MASQUE endpoints for WARP

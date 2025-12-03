@@ -717,7 +717,6 @@ fun DashboardScreen(
 ) {
     val coreStats by viewModel.coreStatsState.collectAsState()
     val telemetryState by viewModel.telemetryState.collectAsState()
-    val dnsCacheStats by viewModel.dnsCacheStats.collectAsState()
     val isServiceEnabled by viewModel.isServiceEnabled.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -739,7 +738,6 @@ fun DashboardScreen(
         if (connectionState is ConnectionState.Connected) {
             isRecentlyConnected.value = true
             viewModel.updateTelemetryStats()
-            viewModel.updateDnsCacheStats()
             delay(10000L)
             isRecentlyConnected.value = false
         } else {
@@ -751,11 +749,9 @@ fun DashboardScreen(
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             viewModel.updateCoreStats()
             viewModel.updateTelemetryStats()
-            viewModel.updateDnsCacheStats()
             
             while (true) {
                 viewModel.updateTelemetryStats()
-                viewModel.updateDnsCacheStats()
                 delay(1000L)
             }
         }

@@ -24,14 +24,115 @@ object HyperVpnHelper {
     private const val USE_NEW_LIFECYCLE = false
     
     /**
+     * Callback interface for VPN conflict resolution
+     */
+    interface ConflictResolutionCallback {
+        fun onNoConflict()
+        fun onConflictResolved(appName: String)
+        fun onNeedsUserIntervention(app: ConflictingVpnDetector.ConflictingVpnApp)
+        fun onUnknownConflict()
+        fun onTunActiveUnknownApp(tunInfo: ConflictingVpnDetector.TunInterfaceInfo)
+    }
+    
+    /**
+     * Check and handle conflicting VPN apps before starting.
+     * Also checks if TUN interface is active.
+     * 
+     * @param context Android context
+     * @param autoForceStop If true, automatically attempt to force stop conflicting apps
+     * @param callback Callback for conflict resolution results
+     * @return true if VPN can be started (no conflict or resolved), false if user intervention needed
+     */
+    fun checkAndHandleVpnConflicts(
+        context: Context,
+        autoForceStop: Boolean = true,
+        callback: ConflictResolutionCallback? = null
+    ): Boolean {
+        AiLogHelper.d(TAG, "🔍 Checking for conflicting VPN apps and TUN interfaces...")
+        
+        val result = ConflictingVpnDetector.checkAndHandleConflicts(context)
+        
+        return when (result) {
+            is ConflictingVpnDetector.ConflictCheckResult.NoConflict -> {
+                callback?.onNoConflict()
+                true
+            }
+            is ConflictingVpnDetector.ConflictCheckResult.ConflictResolved -> {
+                AiLogHelper.i(TAG, "✅ Conflicting VPN '${result.app.appName}' stopped automatically")
+                callback?.onConflictResolved(result.app.appName)
+                true
+            }
+            is ConflictingVpnDetector.ConflictCheckResult.NeedsUserIntervention -> {
+                AiLogHelper.w(TAG, "⚠️ User needs to manually stop: ${result.app.appName}")
+                callback?.onNeedsUserIntervention(result.app)
+                false
+            }
+            is ConflictingVpnDetector.ConflictCheckResult.UnknownConflict -> {
+                AiLogHelper.w(TAG, "⚠️ Unknown VPN conflict detected")
+                callback?.onUnknownConflict()
+                false
+            }
+            is ConflictingVpnDetector.ConflictCheckResult.TunActiveUnknownApp -> {
+                AiLogHelper.w(TAG, "⚠️ TUN interface active (${result.tunInfo.name}) but app unknown")
+                callback?.onTunActiveUnknownApp(result.tunInfo)
+                false
+            }
+        }
+    }
+    
+    /**
+     * Check if TUN interface is currently active.
+     * 
+     * @return TunInterfaceInfo if active, null otherwise
+     */
+    fun getTunInterfaceInfo(): ConflictingVpnDetector.TunInterfaceInfo? {
+        return ConflictingVpnDetector.getTunInterfaceInfo()
+    }
+    
+    /**
+     * Check if TUN interface is active.
+     * 
+     * @return true if TUN is active
+     */
+    fun isTunActive(): Boolean {
+        return ConflictingVpnDetector.isTunInterfaceActive()
+    }
+    
+    /**
+     * Open settings for a conflicting VPN app so user can force stop it.
+     */
+    fun openConflictingAppSettings(context: Context, packageName: String): Boolean {
+        return ConflictingVpnDetector.openAppSettings(context, packageName)
+    }
+    
+    /**
      * Start VPN with WARP configuration.
      * Uses the new declarative lifecycle system for improved reliability.
+     * Automatically checks and handles conflicting VPN apps.
+     * 
+     * @param context Android context
+     * @param autoHandleConflicts If true, automatically handle conflicting VPN apps
+     * @param conflictCallback Optional callback for conflict resolution events
      */
-    fun startVpnWithWarp(context: Context) {
+    @JvmOverloads
+    fun startVpnWithWarp(
+        context: Context,
+        autoHandleConflicts: Boolean = true,
+        conflictCallback: ConflictResolutionCallback? = null
+    ) {
         try {
             AiLogHelper.i(TAG, "🚀 Starting VPN with next-gen lifecycle...")
+            
+            // Step 1: Check and handle conflicting VPN apps
+            if (autoHandleConflicts) {
+                val canProceed = checkAndHandleVpnConflicts(context, true, conflictCallback)
+                if (!canProceed) {
+                    AiLogHelper.w(TAG, "⚠️ Cannot start VPN - conflicting app needs manual intervention")
+                    return
+                }
+            }
 
-            // Check VPN permission first
+            // Step 2: Check VPN permission
             val prepareIntent = android.net.VpnService.prepare(context)
             AiLogHelper.d(TAG, "🔍 VpnService.prepare() returned: ${if (prepareIntent != null) "Intent (permission needed)" else "null (permission granted)"}")
 

@@ -1279,10 +1279,11 @@ class MainViewModel(
                 val accountContent = accountFile.readText()
                 val accountJson = JSONObject(accountContent)
                 
-                val publicKey = accountJson.optString("publicKey", null).takeIf { it.isNotBlank() }
-                val endpoint = accountJson.optString("endpoint", null).takeIf { it.isNotBlank() }
-                val accountType = accountJson.optString("accountType", null).takeIf { it.isNotBlank() }
-                val license = accountJson.optString("license", null).takeIf { it.isNotBlank() }
+                // FIX: optString with null default can return null, use empty string default then check
+                val publicKey = accountJson.optString("publicKey", "").takeIf { it.isNotBlank() }
+                val endpoint = accountJson.optString("endpoint", "").takeIf { it.isNotBlank() }
+                val accountType = accountJson.optString("accountType", "").takeIf { it.isNotBlank() }
+                val license = accountJson.optString("license", "").takeIf { it.isNotBlank() }
                 val warpEnabled = accountJson.optBoolean("warpEnabled", false)
                 
                 _warpAccountInfo.value = com.hyperxray.an.feature.dashboard.WarpAccountInfo(

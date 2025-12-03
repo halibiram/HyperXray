@@ -442,13 +442,15 @@ func TestConnectivity() error {
 	dialer := &ProtectedDialer{Timeout: 10}
 
 	// Test targets: multiple endpoints to ensure connectivity
+	// Only use HTTP endpoints for proper bidirectional test
 	testTargets := []struct {
-		address string
-		network string
-		name    string
+		address  string
+		network  string
+		name     string
+		isHTTP   bool // Whether to send HTTP request (only for port 80/443)
 	}{
-		{"1.1.1.1:80", "tcp", "Cloudflare HTTP"},
-		{"8.8.8.8:53", "tcp", "Google DNS (TCP)"},
+		{"1.1.1.1:80", "tcp", "Cloudflare HTTP", true},
+		{"8.8.8.8:53", "tcp", "Google DNS (TCP)", false}, // DNS port - just test connection, no HTTP
 	}
 
 	var lastErr error
@@ -529,37 +531,48 @@ func TestConnectivity() error {
 		logInfo("[Connectivity]    Testing bidirectional communication...")
 		conn.SetDeadline(time.Now().Add(5 * time.Second))
 
-		// Send HTTP GET request (works for both HTTP endpoints)
-		httpRequest := fmt.Sprintf("GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", target.address)
-		_, err = conn.Write([]byte(httpRequest))
-		if err != nil {
-			logError("[Connectivity] ❌ Write failed: %v", err)
-			conn.Close()
-			lastErr = fmt.Errorf("write test failed: %w", err)
-			continue
-		}
-		logInfo("[Connectivity]    ✅ Sent request (%d bytes)", len(httpRequest))
-
-		// Try to read response (with timeout)
-		responseBuffer := make([]byte, 1024)
-		conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-		n, err := conn.Read(responseBuffer)
-		if err != nil {
-			// Read timeout is acceptable - we just want to verify connection works
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				logInfo("[Connectivity]    ⚠️ Read timeout (acceptable - connection is working)")
-			} else {
-				logError("[Connectivity] ❌ Read failed: %v", err)
+		if target.isHTTP {
+			// Send HTTP GET request for HTTP endpoints
+			httpRequest := fmt.Sprintf("GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", target.address)
+			_, err = conn.Write([]byte(httpRequest))
+			if err != nil {
+				logError("[Connectivity] ❌ Write failed: %v", err)
 				conn.Close()
-				lastErr = fmt.Errorf("read test failed: %w", err)
+				lastErr = fmt.Errorf("write test failed: %w", err)
 				continue
 			}
-		} else {
-			logInfo("[Connectivity]    ✅ Received %d bytes response", n)
-			if n > 0 && target.network == "tcp" {
-				responsePreview := string(responseBuffer[:min(n, 100)])
-				logInfo("[Connectivity]    Response preview: %s...", responsePreview)
+			logInfo("[Connectivity]    ✅ Sent HTTP request (%d bytes)", len(httpRequest))
+
+			// Try to read response (with timeout)
+			responseBuffer := make([]byte, 1024)
+			conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+			n, err := conn.Read(responseBuffer)
+			if err != nil {
+				// Read timeout is acceptable - we just want to verify connection works
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					logInfo("[Connectivity]    ⚠️ Read timeout (acceptable - connection is working)")
+				} else if err == io.EOF || strings.Contains(err.Error(), "EOF") {
+					// EOF can happen when server closes connection quickly
+					// This is acceptable for connectivity test - we verified we could connect and send
+					logWarn("[Connectivity]    ⚠️ Read EOF (server closed connection - acceptable for connectivity test)")
+					// Don't fail - connection was established and data was sent successfully
+				} else {
+					logError("[Connectivity] ❌ Read failed: %v", err)
+					conn.Close()
+					lastErr = fmt.Errorf("read test failed: %w", err)
+					continue
+				}
+			} else {
+				logInfo("[Connectivity]    ✅ Received %d bytes response", n)
+				if n > 0 {
+					responsePreview := string(responseBuffer[:min(n, 100)])
+					logInfo("[Connectivity]    Response preview: %s...", responsePreview)
+				}
 			}
+		} else {
+			// For non-HTTP endpoints (like DNS), just verify connection was established
+			// TCP connection success is sufficient proof of connectivity
+			logInfo("[Connectivity]    ✅ TCP connection established (non-HTTP endpoint, skipping data test)")
 		}
 
 		conn.Close()

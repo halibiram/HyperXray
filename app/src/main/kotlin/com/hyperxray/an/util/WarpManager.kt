@@ -138,7 +138,7 @@ class WarpManager private constructor() {
         val peerPublicKey: String = WARP_PUBLIC_KEY,
         val endpoint: String = "$WARP_ENDPOINT:$WARP_PORT",
         val allowedIPs: String = "0.0.0.0/0, ::/0",
-        val persistentKeepalive: Int = 25
+        val persistentKeepalive: Int = 300 // 5 minutes
     ) {
         fun toConfigString(): String = """
             [Interface]
@@ -397,7 +397,7 @@ class WarpManager private constructor() {
                 peerPublicKey = configJson.optString("peerPublicKey", WARP_PUBLIC_KEY),
                 endpoint = configJson.optString("endpoint", "$WARP_ENDPOINT:$WARP_PORT"),
                 allowedIPs = configJson.optString("allowedIPs", "0.0.0.0/0, ::/0"),
-                persistentKeepalive = configJson.optInt("persistentKeepalive", 25)
+                persistentKeepalive = configJson.optInt("persistentKeepalive", 300)
             )
             
             if (config.isValid()) config else null
@@ -439,7 +439,7 @@ class WarpManager private constructor() {
                 peerPublicKey = WARP_PUBLIC_KEY,
                 endpoint = "$WARP_ENDPOINT:$WARP_PORT",
                 allowedIPs = "0.0.0.0/0, ::/0",
-                persistentKeepalive = 25
+                persistentKeepalive = 300 // 5 minutes
             )
             
             if (!config.isValid()) {

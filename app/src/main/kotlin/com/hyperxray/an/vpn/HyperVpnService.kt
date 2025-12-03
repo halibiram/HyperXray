@@ -2401,7 +2401,7 @@ class HyperVpnService : VpnService() {
             put("peerPublicKey", "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=")
             put("endpoint", "162.159.192.1:2408")
             put("allowedIPs", "0.0.0.0/0, ::/0")
-            put("persistentKeepalive", 25)
+            put("persistentKeepalive", 300) // 5 minutes
         }.toString()
     }
     

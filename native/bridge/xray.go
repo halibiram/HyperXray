@@ -30,12 +30,11 @@ import (
 
 const (
 	// ReadBufferSize is the size for read buffers (max UDP packet size).
-	// Doubled from 65535 to 131070 for improved throughput.
-	ReadBufferSize = 131070
+	// 65535 is sufficient for WireGuard (MTU ~1420) and standard UDP.
+	ReadBufferSize = 65535
 	// PacketBufferSize is the size for packet data buffers.
-	// Used for copying received data to the read channel.
-	// Doubled from 2048 to 4096 for larger packet handling.
-	PacketBufferSize = 4096
+	// 2048 is sufficient for typical WireGuard packets.
+	PacketBufferSize = 2048
 )
 
 // readBufferPool provides reusable large buffers for reading from connections.
@@ -1071,7 +1070,9 @@ func (c *XrayUDPConn) readLoop() {
 		}
 		
 		// Read with timeout to prevent blocking forever
-		readDeadline := time.Now().Add(30 * time.Second)
+		// 10 seconds is optimal: short enough to catch WireGuard keepalives (25s)
+		// but long enough to avoid excessive timeout handling
+		readDeadline := time.Now().Add(10 * time.Second)
 		if err := conn.SetReadDeadline(readDeadline); err != nil {
 			logWarn("[XrayUDP] readLoop: Failed to set read deadline: %v", err)
 		}
@@ -1557,9 +1558,10 @@ type MasqueQUICConnection interface {
 //   - endpoint: The MASQUE proxy endpoint (e.g., "masque.example.com:443")
 //
 // Returns:
-//   - MasqueQUICConnection: A QUIC-like connection that can be used for MASQUE
+//   - interface{}: A QUIC-like connection that implements masque.QUICConnection
+//     (returned as interface{} to avoid circular import with masque package)
 //   - error: Any error that occurred during connection
-func (x *XrayWrapper) DialQUIC(endpoint string) (MasqueQUICConnection, error) {
+func (x *XrayWrapper) DialQUIC(endpoint string) (interface{}, error) {
 	logInfo("[XrayQUIC] ========================================")
 	logInfo("[XrayQUIC] DialQUIC called")
 	logInfo("[XrayQUIC] Endpoint: %s", endpoint)

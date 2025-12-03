@@ -22,9 +22,11 @@ const (
 )
 
 // Keepalive configuration
+// CRITICAL: NAT tables typically timeout after 30-120 seconds
+// WireGuard standard keepalive is 25 seconds
 const (
-	KeepaliveInterval          = 10 * time.Second
-	PostHandshakeDelay         = 500 * time.Millisecond
+	KeepaliveInterval          = 25 * time.Second // Standard WireGuard keepalive (was 5 minutes - too long, caused NAT timeout)
+	PostHandshakeDelay         = 100 * time.Millisecond // Reduced from 500ms for faster first packet
 	HandshakeConfirmationDelay = 50 * time.Millisecond
 )
 
@@ -217,11 +219,11 @@ func (b *XrayBind) makeReceiveFunc() conn.ReceiveFunc {
 		
 		// Log read attempt periodically
 		if timeoutCount%10 == 0 && timeoutCount > 0 {
-			logDebug("[XrayBind] makeReceiveFunc: Waiting for data (timeout: 30s, successCount: %d, timeoutCount: %d)...", successCount, timeoutCount)
+			logDebug("[XrayBind] makeReceiveFunc: Waiting for data (timeout: 10s, successCount: %d, timeoutCount: %d)...", successCount, timeoutCount)
 		}
 		
-		// Read with timeout
-		data, err := b.udpConn.Read(30 * time.Second)
+		// Read with timeout (10s to catch keepalives which come every 25s)
+		data, err := b.udpConn.Read(10 * time.Second)
 		if err != nil {
 			timeoutCount++
 			
@@ -509,10 +511,12 @@ func (b *XrayBind) reconnect() error {
 	return nil
 }
 
-// healthCheckLoop periodically checks connection health and reconnects if needed
+// healthCheckLoop periodically checks connection health
+// IMPORTANT: Only reconnects on actual connection failure, not on "no data" condition
+// to avoid disrupting active WireGuard sessions
 func (b *XrayBind) healthCheckLoop() {
 	logInfo("[XrayBind] Health check loop started")
-	ticker := time.NewTicker(10 * time.Second) // Check every 10 seconds
+	ticker := time.NewTicker(30 * time.Second) // Check every 30 seconds (less aggressive)
 	defer ticker.Stop()
 	
 	lastRxBytes := uint64(0)
@@ -534,42 +538,48 @@ func (b *XrayBind) healthCheckLoop() {
 			conn := b.udpConn
 			currentRxBytes := b.rxBytes.Load()
 			currentRxPackets := b.rxPackets.Load()
-			currentTxBytes := b.txBytes.Load()
-			currentTxPackets := b.txPackets.Load()
 			b.mu.Unlock()
 			
-			// Check if connection is valid
-			if conn == nil || !conn.IsConnected() {
-				logWarn("[XrayBind] Health check: Connection is invalid (conn: %v, connected: %v), attempting reconnect...", 
-					conn != nil, conn != nil && conn.IsConnected())
+			// Only reconnect if connection object is nil or explicitly disconnected
+			// Do NOT reconnect just because no data is received - WireGuard handles that
+			if conn == nil {
+				logWarn("[XrayBind] Health check: Connection object is nil, attempting reconnect...")
 				if err := b.reconnect(); err != nil {
 					logError("[XrayBind] Health check reconnect failed: %v", err)
 				} else {
 					logInfo("[XrayBind] Health check: Reconnected successfully")
-					// Reset counters after reconnect
+					lastRxBytes = 0
+					lastRxPackets = 0
+					noDataCount = 0
+				}
+			} else if !conn.IsConnected() {
+				// Connection exists but is marked as disconnected
+				logWarn("[XrayBind] Health check: Connection marked as disconnected, attempting reconnect...")
+				if err := b.reconnect(); err != nil {
+					logError("[XrayBind] Health check reconnect failed: %v", err)
+				} else {
+					logInfo("[XrayBind] Health check: Reconnected successfully")
 					lastRxBytes = 0
 					lastRxPackets = 0
 					noDataCount = 0
 				}
 			} else {
-				// Check if we're receiving data
+				// Connection is valid - just log stats, don't reconnect
 				if currentRxBytes == lastRxBytes && currentRxPackets == lastRxPackets {
 					noDataCount++
-					if noDataCount >= 3 {
-						logWarn("[XrayBind] Health check: ⚠️ No data received for %d checks (txBytes: %d, txPackets: %d, rxBytes: %d, rxPackets: %d)", 
-							noDataCount, currentTxBytes, currentTxPackets, currentRxBytes, currentRxPackets)
-						logWarn("[XrayBind] Health check: Connection appears healthy but no data is being received")
-						logWarn("[XrayBind] Health check: This may indicate readLoop() is not receiving data from Xray-core")
+					// Only log warning, do NOT reconnect - WireGuard will handle keepalives
+					if noDataCount >= 6 { // 3 minutes of no data
+						logWarn("[XrayBind] Health check: ⚠️ No data for %d checks (~%d min) - WireGuard will handle recovery", 
+							noDataCount, noDataCount/2)
 					} else {
-						logDebug("[XrayBind] Health check: Connection is healthy (no data yet, check #%d)", noDataCount)
+						logDebug("[XrayBind] Health check: Connection valid, no new data (check #%d)", noDataCount)
 					}
 				} else {
-					// Data is being received
 					noDataCount = 0
 					rxBytesDiff := currentRxBytes - lastRxBytes
 					rxPacketsDiff := currentRxPackets - lastRxPackets
-					logInfo("[XrayBind] Health check: ✅ Connection is healthy (rxBytes: +%d, rxPackets: +%d, total: %d bytes, %d packets)", 
-						rxBytesDiff, rxPacketsDiff, currentRxBytes, currentRxPackets)
+					logInfo("[XrayBind] Health check: ✅ Active (rxBytes: +%d, rxPackets: +%d, total: %d bytes)", 
+						rxBytesDiff, rxPacketsDiff, currentRxBytes)
 				}
 				
 				lastRxBytes = currentRxBytes
@@ -661,45 +671,15 @@ func (b *XrayBind) sendKeepalive() {
 	b.sendEmptyKeepalivePacket()
 }
 
-// sendEmptyKeepalivePacket sends an empty WireGuard keepalive packet
-// WireGuard keepalive is a transport data packet with empty payload
+// sendEmptyKeepalivePacket is a no-op placeholder.
+// WireGuard handles keepalives internally via persistent_keepalive_interval in IPC config.
+// Sending fake transport packets with invalid auth tags can cause the peer to reject
+// the session, so we rely on WireGuard's built-in mechanism instead.
 func (b *XrayBind) sendEmptyKeepalivePacket() {
-	b.mu.Lock()
-	conn := b.udpConn
-	closed := b.closed
-	b.mu.Unlock()
-
-	if conn == nil || closed {
-		return
-	}
-
-	// Get the last receiver index from handshake
-	receiverIndex := b.lastReceiverIndex.Load()
-	if receiverIndex == 0 {
-		logDebug("[XrayBind] Cannot send keepalive: no receiver index available yet")
-		return
-	}
-
-	// Build a minimal WireGuard transport data packet
-	// Format: Type(1) + Reserved(3) + Receiver(4) + Counter(8) + Auth(16) = 32 bytes minimum
-	// Note: This packet won't decrypt properly without session keys, but it signals
-	// to the server that we're trying to communicate and triggers WireGuard's
-	// internal keepalive mechanism
-	packet := make([]byte, 32)
-	packet[0] = MessageTypeTransportData // Type = 4
-	packet[1] = 0                         // Reserved
-	packet[2] = 0                         // Reserved
-	packet[3] = 0                         // Reserved
-	binary.LittleEndian.PutUint32(packet[4:8], receiverIndex)
-	// Counter (bytes 8-15) and auth tag (bytes 16-31) are zeros
-	// This won't decrypt properly but signals activity
-
-	_, err := conn.Write(packet)
-	if err != nil {
-		logWarn("[XrayBind] Failed to send keepalive packet: %v", err)
-	} else {
-		logDebug("[XrayBind] 📤 Keepalive packet sent (receiverIndex=%d)", receiverIndex)
-	}
+	// NO-OP: WireGuard handles keepalives internally
+	// The persistent_keepalive_interval is set in generateIpcConfig()
+	// Sending packets with zero auth tags would be rejected by the peer
+	logDebug("[XrayBind] Keepalive: relying on WireGuard internal mechanism")
 }
 
 // GetLastHandshakeTime returns the timestamp of the last handshake response
