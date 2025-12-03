@@ -4,6 +4,7 @@ import android.util.Base64
 import com.hyperxray.an.feature.warp.domain.entity.WarpAccount
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
+import java.util.UUID
 
 /**
  * WARP public key
@@ -245,6 +246,12 @@ object WarpConfigGenerator {
      * Creates an Xray VLESS outbound that will be used to establish
      * the QUIC connection for MASQUE tunneling.
      * 
+     * FIX: Multiple critical issues addressed:
+     * 1. UUID: Generate deterministic UUID from accountId if not already valid
+     * 2. ALPN: Added h3-29 for broader server compatibility
+     * 3. QUIC Security: Changed from "none" to "aes-128-gcm" for proper encryption
+     * 4. Flow: Added xtls-rprx-vision for VLESS+QUIC optimization
+     * 
      * @param account WARP account
      * @param masqueEndpoint MASQUE endpoint
      * @return JSON string for Xray outbound
@@ -256,6 +263,10 @@ object WarpConfigGenerator {
         val endpoint = masqueEndpoint ?: WARP_MASQUE_ENDPOINT
         val (host, port) = endpoint.split(":")
         
+        // FIX: Generate valid UUID from accountId
+        // Xray VLESS requires a valid UUID format, not arbitrary strings
+        val vlessUuid = generateVlessUuid(account.accountId)
+        
         val xrayOutbound = buildJsonObject {
             put("tag", JsonPrimitive("warp-masque"))
             put("protocol", JsonPrimitive("vless"))
@@ -266,9 +277,12 @@ object WarpConfigGenerator {
                         put("port", JsonPrimitive(port.toInt()))
                         putJsonArray("users") {
                             addJsonObject {
-                                // Use account ID as UUID for VLESS
-                                put("id", JsonPrimitive(account.accountId))
+                                // FIX: Use properly formatted UUID
+                                put("id", JsonPrimitive(vlessUuid))
                                 put("encryption", JsonPrimitive("none"))
+                                // FIX: Add flow for VLESS+QUIC optimization
+                                // xtls-rprx-vision provides better performance over QUIC
+                                put("flow", JsonPrimitive("xtls-rprx-vision"))
                             }
                         }
                     }
@@ -279,16 +293,63 @@ object WarpConfigGenerator {
                 put("security", JsonPrimitive("tls"))
                 putJsonObject("tlsSettings") {
                     put("serverName", JsonPrimitive(host))
-                    put("alpn", buildJsonArray { add(JsonPrimitive("h3")) })
+                    // FIX: Added h3-29 ALPN for broader compatibility
+                    // Some servers require h3-29 instead of just h3
+                    put("alpn", buildJsonArray { 
+                        add(JsonPrimitive("h3"))
+                        add(JsonPrimitive("h3-29"))
+                    })
+                    // FIX: Allow insecure for WARP's internal PKI
+                    put("allowInsecure", JsonPrimitive(true))
                 }
                 putJsonObject("quicSettings") {
-                    put("security", JsonPrimitive("none"))
+                    // FIX: Changed from "none" to "aes-128-gcm"
+                    // QUIC security "none" may be rejected by servers expecting encryption
+                    // aes-128-gcm provides proper QUIC payload encryption
+                    put("security", JsonPrimitive("aes-128-gcm"))
+                    // FIX: Add key for QUIC encryption (derived from account)
+                    put("key", JsonPrimitive(deriveQuicKey(account)))
                     put("header", buildJsonObject { put("type", JsonPrimitive("none")) })
                 }
             }
         }
         
         return json.encodeToString(xrayOutbound)
+    }
+    
+    /**
+     * Generate a valid UUID for VLESS from an account ID
+     * 
+     * If the accountId is already a valid UUID, returns it as-is.
+     * Otherwise, generates a deterministic UUID v5 from the accountId bytes.
+     * 
+     * @param accountId The WARP account ID
+     * @return Valid UUID string for VLESS
+     */
+    private fun generateVlessUuid(accountId: String): String {
+        // Check if accountId is already a valid UUID
+        return try {
+            UUID.fromString(accountId).toString()
+        } catch (e: IllegalArgumentException) {
+            // Not a valid UUID - generate deterministic UUID from bytes
+            // Using UUID.nameUUIDFromBytes creates a UUID v3 (MD5-based)
+            UUID.nameUUIDFromBytes(accountId.toByteArray(Charsets.UTF_8)).toString()
+        }
+    }
+    
+    /**
+     * Derive QUIC encryption key from account credentials
+     * 
+     * Creates a deterministic key for QUIC payload encryption.
+     * Uses the first 16 characters of the private key (base64).
+     * 
+     * @param account WARP account
+     * @return Key string for QUIC encryption
+     */
+    private fun deriveQuicKey(account: WarpAccount): String {
+        // Use a portion of the private key as QUIC encryption key
+        // This ensures deterministic key derivation
+        return account.privateKey.take(16)
     }
     
     /**

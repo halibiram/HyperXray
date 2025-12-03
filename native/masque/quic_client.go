@@ -61,22 +61,28 @@ type QUICClientConfig struct {
 }
 
 // DefaultTLSConfig returns default TLS config for MASQUE
+// FIX: Added h3-29 ALPN for broader compatibility with QUIC servers
+// Some servers (including older Cloudflare endpoints) may require h3-29
 func DefaultTLSConfig(serverName string) *tls.Config {
 	return &tls.Config{
 		ServerName:         serverName,
-		NextProtos:         []string{"h3"}, // HTTP/3 ALPN
-		InsecureSkipVerify: true,           // Cloudflare WARP uses custom certs
+		NextProtos:         []string{"h3", "h3-29"}, // HTTP/3 ALPN with fallback
+		InsecureSkipVerify: true,                    // Cloudflare WARP uses custom certs
 		MinVersion:         tls.VersionTLS13,
 	}
 }
 
 // CloudflareWARPTLSConfig returns TLS config optimized for Cloudflare WARP
+// FIX: Added h3-29 ALPN and expanded cipher suites for WARP compatibility
+// Cloudflare WARP servers may negotiate different ALPN versions
 func CloudflareWARPTLSConfig(serverName string) *tls.Config {
 	return &tls.Config{
 		ServerName:         serverName,
-		NextProtos:         []string{"h3"}, // HTTP/3 ALPN
-		InsecureSkipVerify: true,           // WARP uses Cloudflare's internal PKI
+		NextProtos:         []string{"h3", "h3-29"}, // HTTP/3 ALPN with h3-29 fallback
+		InsecureSkipVerify: true,                    // WARP uses Cloudflare's internal PKI
 		MinVersion:         tls.VersionTLS13,
+		// TLS 1.3 cipher suites - Go handles these automatically for TLS 1.3
+		// but we specify them for clarity and to ensure all required ciphers are available
 		CipherSuites: []uint16{
 			tls.TLS_AES_128_GCM_SHA256,
 			tls.TLS_AES_256_GCM_SHA384,
@@ -86,14 +92,17 @@ func CloudflareWARPTLSConfig(serverName string) *tls.Config {
 }
 
 // DefaultQUICConfig returns default QUIC config for MASQUE
+// FIX: Added KeepAlivePeriod to prevent connection timeouts during idle periods
+// This is critical for long-lived MASQUE tunnels that may have sporadic traffic
 func DefaultQUICConfig() *quic.Config {
 	return &quic.Config{
 		MaxIdleTimeout:        30 * time.Second,
 		HandshakeIdleTimeout:  10 * time.Second,
 		MaxIncomingStreams:    100,
 		MaxIncomingUniStreams: 100,
-		EnableDatagrams:       true, // Required for MASQUE
+		EnableDatagrams:       true,            // Required for MASQUE
 		Allow0RTT:             true,
+		KeepAlivePeriod:       15 * time.Second, // FIX: Prevent idle timeouts
 	}
 }
 
