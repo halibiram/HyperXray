@@ -851,59 +851,113 @@ class HyperVpnService : VpnService() {
                 builder.setSession("HyperXray VPN")
                 // Use default blocking mode (setBlocking(false) can cause VPN connection issues on some Android versions)
                 builder.addAddress("10.0.0.2", 30)
-                builder.addRoute("0.0.0.0", 0)
                 
-                // CRITICAL: Add IPv6 address and route to capture ALL traffic
-                // Without IPv6 route, apps like Instagram/WhatsApp may bypass VPN
-                // causing EPERM errors when they try to send DNS queries outside VPN
-                try {
-                    builder.addAddress("fd00::2", 126)  // IPv6 address for TUN
-                    builder.addRoute("::", 0)           // Route ALL IPv6 traffic through VPN
-                    Log.d(TAG, "✅ IPv6 routing enabled (fd00::2/126, ::/0)")
-                } catch (e: Exception) {
-                    Log.w(TAG, "⚠️ IPv6 routing not supported: ${e.message}")
+                // ===== DNS BYPASS CONFIGURATION =====
+                // Check if DNS bypass is enabled in preferences
+                val bypassSystemDns = prefs?.bypassSystemDns ?: false
+                val bypassLocalDnsOnly = prefs?.bypassLocalDnsOnly ?: true // Only bypass local/router DNS by default
+                
+                var routeCount = 0
+                if (bypassSystemDns) {
+                    // Get system DNS servers and calculate routes that exclude them
+                    AiLogHelper.i(TAG, "🔧 DNS Bypass enabled - calculating split-tunnel routes")
+                    
+                    val (ipv4Routes, ipv6Routes) = DnsBypassHelper.getRecommendedRoutes(
+                        context = this@HyperVpnService,
+                        bypassLocalDns = bypassLocalDnsOnly,
+                        bypassPublicDns = !bypassLocalDnsOnly
+                    )
+                    
+                    // Add IPv4 routes (excluding DNS server IPs)
+                    ipv4Routes.forEach { route ->
+                        try {
+                            builder.addRoute(route.address, route.prefixLength)
+                            routeCount++
+                        } catch (e: Exception) {
+                            Log.w(TAG, "⚠️ Failed to add route ${route.address}/${route.prefixLength}: ${e.message}")
+                        }
+                    }
+                    
+                    // Add IPv6 routes (excluding DNS server IPs)
+                    try {
+                        builder.addAddress("fd00::2", 126)  // IPv6 address for TUN
+                        ipv6Routes.forEach { route ->
+                            builder.addRoute(route.address, route.prefixLength)
+                            routeCount++
+                        }
+                        Log.d(TAG, "✅ IPv6 routing enabled with DNS bypass")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "⚠️ IPv6 routing not supported: ${e.message}")
+                    }
+                    
+                    AiLogHelper.i(TAG, "✅ DNS Bypass: Added $routeCount split-tunnel routes")
+                    
+                    // DO NOT add DNS servers to VPN when bypassing - let system handle DNS
+                    Log.d(TAG, "✅ DNS servers NOT added to VPN (using system DNS bypass)")
+                    
+                } else {
+                    // Standard routing: route ALL traffic through VPN
+                    builder.addRoute("0.0.0.0", 0)
+                    routeCount = 1
+                    
+                    // CRITICAL: Add IPv6 address and route to capture ALL traffic
+                    // Without IPv6 route, apps like Instagram/WhatsApp may bypass VPN
+                    // causing EPERM errors when they try to send DNS queries outside VPN
+                    try {
+                        builder.addAddress("fd00::2", 126)  // IPv6 address for TUN
+                        builder.addRoute("::", 0)           // Route ALL IPv6 traffic through VPN
+                        routeCount++
+                        Log.d(TAG, "✅ IPv6 routing enabled (fd00::2/126, ::/0)")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "⚠️ IPv6 routing not supported: ${e.message}")
+                    }
+                    
+                    // CRITICAL: Add DNS servers - without DNS, builder.establish() may hang
+                    // Use fallback DNS servers if prefs DNS is not available
+                    val dnsServers = mutableListOf<String>()
+                    prefs?.dnsIpv4?.takeIf { it.isNotEmpty() }?.let { dnsServers.add(it) }
+                    // Always add fallback DNS servers to prevent hanging
+                    if (dnsServers.isEmpty()) {
+                        dnsServers.add("8.8.8.8") // Google DNS
+                        dnsServers.add("1.1.1.1") // Cloudflare DNS
+                        Log.d(TAG, "⚠️ No custom DNS configured, using fallback DNS servers")
+                    }
+                    dnsServers.forEach { dns ->
+                        try {
+                            builder.addDnsServer(dns)
+                            Log.d(TAG, "✅ DNS server added: $dns")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "❌ Failed to add DNS server $dns: ${e.message}", e)
+                        }
+                    }
+                    
+                    // Add IPv6 DNS servers to handle IPv6 DNS queries
+                    try {
+                        builder.addDnsServer("2001:4860:4860::8888") // Google IPv6 DNS
+                        builder.addDnsServer("2606:4700:4700::1111") // Cloudflare IPv6 DNS
+                        Log.d(TAG, "✅ IPv6 DNS servers added")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "⚠️ IPv6 DNS servers not supported: ${e.message}")
+                    }
                 }
                 
                 // MTU for WireGuard over Xray
                 // 1280 is IPv6 minimum MTU, safer for problematic networks
                 builder.setMtu(1280)
                 
-                // CRITICAL: Add DNS servers - without DNS, builder.establish() may hang
-                // Use fallback DNS servers if prefs DNS is not available
-                val dnsServers = mutableListOf<String>()
-                prefs?.dnsIpv4?.takeIf { it.isNotEmpty() }?.let { dnsServers.add(it) }
-                // Always add fallback DNS servers to prevent hanging
-                if (dnsServers.isEmpty()) {
-                    dnsServers.add("8.8.8.8") // Google DNS
-                    dnsServers.add("1.1.1.1") // Cloudflare DNS
-                    Log.d(TAG, "⚠️ No custom DNS configured, using fallback DNS servers")
-                }
-                dnsServers.forEach { dns ->
-                    try {
-                        builder.addDnsServer(dns)
-                        Log.d(TAG, "✅ DNS server added: $dns")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "❌ Failed to add DNS server $dns: ${e.message}", e)
-                    }
-                }
-                
-                // Add IPv6 DNS servers to handle IPv6 DNS queries
-                try {
-                    builder.addDnsServer("2001:4860:4860::8888") // Google IPv6 DNS
-                    builder.addDnsServer("2606:4700:4700::1111") // Cloudflare IPv6 DNS
-                    Log.d(TAG, "✅ IPv6 DNS servers added")
-                } catch (e: Exception) {
-                    Log.w(TAG, "⚠️ IPv6 DNS servers not supported: ${e.message}")
+                // Optional: Allow apps to explicitly bypass VPN if needed
+                // This enables apps using ConnectivityManager.bindProcessToNetwork() to bypass
+                if (prefs?.allowAppBypass == true) {
+                    DnsBypassHelper.configureAllowBypass(builder)
                 }
                 
                 Log.d(TAG, "VPN Builder configured:")
                 Log.d(TAG, "  - Session: HyperXray VPN")
                 Log.d(TAG, "  - Blocking: true (default blocking mode)")
                 Log.d(TAG, "  - Address: 10.0.0.2/30, fd00::2/126")
-                Log.d(TAG, "  - Route: 0.0.0.0/0, ::/0")
-                Log.d(TAG, "  - MTU: 1420")
-                Log.d(TAG, "  - DNS servers: ${dnsServers.joinToString(", ")} + IPv6 DNS")
-                AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: VPN Builder configured (blocking mode, DNS: ${dnsServers.size} servers)")
+                Log.d(TAG, "  - Routes: $routeCount (DNS bypass: $bypassSystemDns)")
+                Log.d(TAG, "  - MTU: 1280")
+                AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: VPN Builder configured (DNS bypass: $bypassSystemDns, routes: $routeCount)")
                 
                 // Establish VPN interface with timeout protection
                 Log.i(TAG, "Calling builder.establish() with 10s timeout protection...")

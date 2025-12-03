@@ -1589,10 +1589,10 @@ func (x *XrayWrapper) DialQUIC(endpoint string) (MasqueQUICConnection, error) {
 
 	logInfo("[XrayQUIC] Parsed endpoint: host=%s, port=%d", host, port)
 
-	// Create destination - use TCP for now as Xray routes it through outbound
-	// The actual QUIC connection will be handled by the MASQUE proxy
-	dest := xnet.TCPDestination(xnet.ParseAddress(host), xnet.Port(port))
-	logInfo("[XrayQUIC] Destination created: %v", dest)
+	// Create UDP destination for QUIC (QUIC runs over UDP)
+	// Xray will route this through the configured outbound with QUIC transport
+	dest := xnet.UDPDestination(xnet.ParseAddress(host), xnet.Port(port))
+	logInfo("[XrayQUIC] Destination created (UDP for QUIC): %v", dest)
 
 	// Create context with cancellation
 	ctx, cancel := context.WithCancel(x.ctx)
@@ -1799,4 +1799,18 @@ func (qc *QUICConnection) GetEndpoint() string {
 // IsConnected checks if the connection is still valid
 func (qc *QUICConnection) IsConnected() bool {
 	return !qc.closed.Load() && qc.conn != nil
+}
+
+// ProtectSocket implements masque.ProtectedDialer interface
+// This allows MASQUE QUIC client to protect its UDP socket from VPN routing
+func (x *XrayWrapper) ProtectSocket(fd int) error {
+	logInfo("[XrayWrapper] ProtectSocket called for fd=%d", fd)
+	
+	if !ProtectSocket(fd) {
+		logError("[XrayWrapper] ❌ Failed to protect socket fd=%d", fd)
+		return fmt.Errorf("failed to protect socket fd=%d", fd)
+	}
+	
+	logInfo("[XrayWrapper] ✅ Socket fd=%d protected successfully", fd)
+	return nil
 }

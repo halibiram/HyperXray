@@ -16,7 +16,10 @@ data class SwitchStates(
     val bypassLanEnabled: Boolean,
     val disableVpn: Boolean,
     val themeMode: ThemeMode,
-    val autoStart: Boolean
+    val autoStart: Boolean,
+    val bypassSystemDns: Boolean = false,
+    val bypassLocalDnsOnly: Boolean = true,
+    val allowAppBypass: Boolean = false
 )
 
 data class InfoStates(

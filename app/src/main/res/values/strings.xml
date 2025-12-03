@@ -22,6 +22,12 @@
     <string name="configuration">Configuration</string>
     <string name="bypass_lan_title">Bypass LAN</string>
     <string name="bypass_lan_summary">When enabled, LAN traffic will not go through the proxy.</string>
+    <string name="bypass_system_dns_title">Bypass System DNS</string>
+    <string name="bypass_system_dns_summary">DNS queries bypass VPN and use the underlying network directly.</string>
+    <string name="bypass_local_dns_only_title">Local DNS Only</string>
+    <string name="bypass_local_dns_only_summary">Only bypass local/router DNS. Public DNS (8.8.8.8) still goes through VPN.</string>
+    <string name="allow_app_bypass_title">Allow App Bypass</string>
+    <string name="allow_app_bypass_summary">Allow apps to explicitly bypass VPN using system APIs.</string>
     <string name="bypass_domains_title">Bypass Domains</string>
     <string name="bypass_domains_summary">Domains that will bypass VPN and use your original IP address. One domain per line.</string>
     <string name="bypass_ips_title">Bypass IPs</string>

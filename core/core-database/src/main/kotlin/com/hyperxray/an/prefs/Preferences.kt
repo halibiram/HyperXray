@@ -662,6 +662,11 @@ class Preferences(context: Context) {
         const val MASQUE_ENDPOINT: String = "MasqueEndpoint"
         const val MASQUE_MODE: String = "MasqueMode"
         
+        // DNS Bypass configuration keys
+        const val BYPASS_SYSTEM_DNS: String = "BypassSystemDns"
+        const val BYPASS_LOCAL_DNS_ONLY: String = "BypassLocalDnsOnly"
+        const val ALLOW_APP_BYPASS: String = "AllowAppBypass"
+        
         private const val TAG = "Preferences"
     }
     
@@ -725,6 +730,41 @@ class Preferences(context: Context) {
         get() = getPrefData(MASQUE_MODE).first ?: "connect-udp"
         set(mode) {
             setValueInProvider(MASQUE_MODE, mode)
+        }
+    
+    // ===== DNS Bypass Preferences =====
+    
+    /**
+     * Enable DNS bypass - system DNS queries will bypass the VPN tunnel.
+     * When enabled, split-tunnel routes are calculated to exclude DNS server IPs.
+     * Default: false (all traffic including DNS goes through VPN)
+     */
+    var bypassSystemDns: Boolean
+        get() = getBooleanPref(BYPASS_SYSTEM_DNS, false)
+        set(enable) {
+            setValueInProvider(BYPASS_SYSTEM_DNS, enable)
+        }
+    
+    /**
+     * When DNS bypass is enabled, only bypass local/private DNS servers (router DNS).
+     * If false, all system DNS servers (including public like 8.8.8.8) will be bypassed.
+     * Default: true (only bypass local DNS, public DNS still goes through VPN)
+     */
+    var bypassLocalDnsOnly: Boolean
+        get() = getBooleanPref(BYPASS_LOCAL_DNS_ONLY, true)
+        set(enable) {
+            setValueInProvider(BYPASS_LOCAL_DNS_ONLY, enable)
+        }
+    
+    /**
+     * Allow apps to explicitly bypass VPN using ConnectivityManager.bindProcessToNetwork().
+     * This enables per-app bypass for apps that request it.
+     * Default: false
+     */
+    var allowAppBypass: Boolean
+        get() = getBooleanPref(ALLOW_APP_BYPASS, false)
+        set(enable) {
+            setValueInProvider(ALLOW_APP_BYPASS, enable)
         }
 }
 

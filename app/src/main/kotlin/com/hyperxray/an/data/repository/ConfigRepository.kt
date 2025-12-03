@@ -27,8 +27,6 @@ import okhttp3.Response
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
-import java.net.InetSocketAddress
-import java.net.Proxy
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -231,17 +229,21 @@ class ConfigRepository(
     /**
      * Download a rule file (geoip.dat or geosite.dat) from URL.
      * 
+     * When VPN is active, uses VPN bypass to download directly through the physical network
+     * (WiFi/Cellular) instead of going through the VPN tunnel. This ensures downloads work
+     * even when VPN connection is unstable or certain URLs are blocked through VPN.
+     * 
      * @param url URL to download from
      * @param fileName Name of the file ("geoip.dat" or "geosite.dat")
-     * @param isServiceEnabled Whether VPN service is enabled (for proxy usage)
-     * @param socksPort SOCKS5 proxy port (if service is enabled)
+     * @param isServiceEnabled Whether VPN service is enabled (for VPN bypass)
+     * @param socksPort SOCKS5 proxy port (unused, kept for API compatibility)
      * @return Result indicating success or failure with message
      */
     suspend fun downloadRuleFile(
         url: String,
         fileName: String,
         isServiceEnabled: Boolean,
-        socksPort: Int
+        @Suppress("UNUSED_PARAMETER") socksPort: Int
     ): Result<Unit> {
         val currentJob = if (fileName == "geoip.dat") geoipDownloadJob else geositeDownloadJob
         if (currentJob?.isActive == true) {
@@ -261,12 +263,15 @@ class ConfigRepository(
         var downloadError: Exception? = null
         
         val job = downloadScope.launch {
-            val proxy = if (isServiceEnabled) {
-                Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
+            // When VPN is active, use VPN bypass client to download through physical network
+            // This prevents issues where VPN tunnel blocks or slows down downloads
+            val client = if (isServiceEnabled) {
+                Log.i(TAG, "VPN active, using VPN bypass client for $fileName download")
+                NetworkModule.getHttpClientFactory().createVpnBypass()
             } else {
-                null
+                Log.i(TAG, "VPN not active, using regular client for $fileName download")
+                NetworkModule.getHttpClientFactory().create()
             }
-            val client = NetworkModule.getHttpClientFactory().create(proxy)
 
             try {
                 progressFlow.value = application.getString(com.hyperxray.an.R.string.connecting)

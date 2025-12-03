@@ -265,6 +265,39 @@ func NewMasqueBind(xrayWrapper XrayWrapper, configJSON string) (*MasqueBind, err
 	return bind, nil
 }
 
+// cloudflareWARPIPsForBind contains known Cloudflare WARP endpoint IPs
+// These are used when DNS resolution fails (common when VPN is active)
+var cloudflareWARPIPsForBind = []string{
+	"162.159.192.1",
+	"162.159.193.1",
+	"162.159.195.1",
+	"162.159.204.1",
+}
+
+// resolveCloudflareWARPForBind returns a known Cloudflare WARP IP for the given hostname
+func resolveCloudflareWARPForBind(hostname string) net.IP {
+	// Check if this is a Cloudflare WARP hostname
+	cloudflareHosts := []string{
+		"engage.cloudflareclient.com",
+		"cloudflare-dns.com",
+	}
+	
+	for _, h := range cloudflareHosts {
+		if hostname == h {
+			return net.ParseIP(cloudflareWARPIPsForBind[0])
+		}
+	}
+	
+	// Check for cloudflare substring
+	for i := 0; i <= len(hostname)-10; i++ {
+		if hostname[i:i+10] == "cloudflare" {
+			return net.ParseIP(cloudflareWARPIPsForBind[0])
+		}
+	}
+	
+	return nil
+}
+
 // parseEndpoint parses an endpoint string to netip.AddrPort
 func parseEndpoint(endpoint string) (netip.AddrPort, error) {
 	addrPort, err := netip.ParseAddrPort(endpoint)
@@ -275,12 +308,31 @@ func parseEndpoint(endpoint string) (netip.AddrPort, error) {
 			return netip.AddrPort{}, fmt.Errorf("%w: %v", ErrInvalidEndpoint, splitErr)
 		}
 
-		ips, lookupErr := net.LookupIP(host)
-		if lookupErr != nil || len(ips) == 0 {
-			return netip.AddrPort{}, fmt.Errorf("%w: cannot resolve %s", ErrInvalidEndpoint, host)
+		// First, check if this is a known Cloudflare WARP hostname
+		// Use hardcoded IPs to avoid DNS resolution issues when VPN is active
+		var resolvedIP net.IP
+		if warpIP := resolveCloudflareWARPForBind(host); warpIP != nil {
+			resolvedIP = warpIP
+			logMasque("🔌 Using hardcoded Cloudflare WARP IP for %s: %s", host, resolvedIP.String())
+		} else {
+			// Try DNS resolution for non-Cloudflare hosts
+			ips, lookupErr := net.LookupIP(host)
+			if lookupErr != nil || len(ips) == 0 {
+				// DNS failed - try Cloudflare WARP fallback
+				logMasque("⚠️ DNS resolution failed for %s: %v", host, lookupErr)
+				if warpIP := resolveCloudflareWARPForBind(host); warpIP != nil {
+					resolvedIP = warpIP
+					logMasque("🔌 Using Cloudflare WARP fallback IP: %s", resolvedIP.String())
+				} else {
+					return netip.AddrPort{}, fmt.Errorf("%w: cannot resolve %s", ErrInvalidEndpoint, host)
+				}
+			} else {
+				resolvedIP = ips[0]
+				logMasque("🔌 Resolved %s -> %s", host, resolvedIP.String())
+			}
 		}
 
-		addr, ok := netip.AddrFromSlice(ips[0])
+		addr, ok := netip.AddrFromSlice(resolvedIP)
 		if !ok {
 			return netip.AddrPort{}, fmt.Errorf("%w: invalid IP address", ErrInvalidEndpoint)
 		}
@@ -455,43 +507,49 @@ func (b *MasqueBind) ParseEndpoint(s string) (conn.Endpoint, error) {
 
 func (b *MasqueBind) connect() error {
 	atomic.StoreInt32(&b.state, int32(StateConnecting))
-	logMasque("Connecting to MASQUE proxy: %s (mode: %s)", b.config.ProxyEndpoint, b.config.Mode)
+	logMasque("🔌 Connecting to MASQUE proxy: %s (mode: %s)", b.config.ProxyEndpoint, b.config.Mode)
 
-	// Type assert xrayWrapper to XrayDialer interface
-	dialer, ok := b.xrayWrapper.(XrayDialer)
-	if !ok {
-		atomic.StoreInt32(&b.state, int32(StateDisconnected))
-		logMasque("❌ xrayWrapper does not implement XrayDialer interface")
-		return fmt.Errorf("%w: xrayWrapper does not implement XrayDialer", ErrConnectionFailed)
+	// Try to get socket protector from xrayWrapper (for VPN loop prevention)
+	var protector ProtectedDialer
+	if p, ok := b.xrayWrapper.(ProtectedDialer); ok {
+		protector = p
+		logMasque("✅ Socket protector available")
+	} else {
+		logMasque("⚠️ Socket protector not available - VPN loop may occur")
 	}
 
-	// Establish QUIC connection through Xray
-	conn, err := dialer.DialQUIC(b.config.ProxyEndpoint)
+	// Create QUIC client configuration
+	quicConfig := &QUICClientConfig{
+		Endpoint:  b.config.ProxyEndpoint,
+		Mode:      b.config.GetMode(),
+		Protector: protector,
+	}
+
+	// Create real QUIC connection using quic-go
+	logMasque("🔌 Creating QUIC connection...")
+	quicClient, err := NewQUICClient(quicConfig)
 	if err != nil {
 		atomic.StoreInt32(&b.state, int32(StateDisconnected))
-		logMasque("❌ Failed to establish QUIC connection: %v", err)
+		logMasque("❌ Failed to create QUIC client: %v", err)
 		return fmt.Errorf("%w: %v", ErrConnectionFailed, err)
 	}
 
-	// Type assert to QUICConnection interface
-	quicConn, ok := conn.(QUICConnection)
-	if !ok {
+	// Establish HTTP/3 Extended CONNECT tunnel
+	logMasque("🤝 Establishing HTTP/3 CONNECT tunnel...")
+	if err := quicClient.EstablishConnect(); err != nil {
+		quicClient.Close()
 		atomic.StoreInt32(&b.state, int32(StateDisconnected))
-		logMasque("❌ DialQUIC returned invalid connection type")
-		return fmt.Errorf("%w: invalid connection type", ErrConnectionFailed)
+		logMasque("❌ Failed to establish CONNECT tunnel: %v", err)
+		return fmt.Errorf("%w: CONNECT failed: %v", ErrConnectionFailed, err)
 	}
 
 	b.connMu.Lock()
-	b.quicConn = quicConn
+	b.quicConn = quicClient
 	b.connMu.Unlock()
-
-	// TODO: Send HTTP/3 CONNECT request for CONNECT-IP or CONNECT-UDP
-	// This will be implemented when full HTTP/3 support is added
-	// For now, the raw QUIC connection is established
 
 	atomic.StoreInt32(&b.state, int32(StateConnected))
 	b.startTime = time.Now()
-	logMasque("Connected to %s (mode: %s)", b.config.ProxyEndpoint, b.config.Mode)
+	logMasque("✅ Connected to %s (mode: %s)", b.config.ProxyEndpoint, b.config.Mode)
 
 	return nil
 }

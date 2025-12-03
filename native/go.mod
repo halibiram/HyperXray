@@ -14,6 +14,9 @@ require (
 
 	// WireGuard Go implementation
 	golang.zx2c4.com/wireguard v0.0.0-20250521234502-f333402bd9cb
+
+	// QUIC implementation for MASQUE over Xray
+	github.com/quic-go/quic-go v0.55.0
 )
 
 require (

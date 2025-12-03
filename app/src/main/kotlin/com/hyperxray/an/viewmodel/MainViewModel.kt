@@ -746,6 +746,18 @@ class MainViewModel(
         settingsRepository.setBypassLanEnabled(enabled)
     }
 
+    fun setBypassSystemDns(enabled: Boolean) {
+        settingsRepository.setBypassSystemDns(enabled)
+    }
+
+    fun setBypassLocalDnsOnly(enabled: Boolean) {
+        settingsRepository.setBypassLocalDnsOnly(enabled)
+    }
+
+    fun setAllowAppBypass(enabled: Boolean) {
+        settingsRepository.setAllowAppBypass(enabled)
+    }
+
     fun setDisableVpnEnabled(enabled: Boolean) {
         settingsRepository.setDisableVpnEnabled(enabled)
     }

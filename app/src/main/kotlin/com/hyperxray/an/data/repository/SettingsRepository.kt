@@ -51,7 +51,10 @@ class SettingsRepository(
                 bypassLanEnabled = prefs.bypassLan,
                 disableVpn = prefs.disableVpn,
                 themeMode = prefs.theme,
-                autoStart = prefs.autoStart
+                autoStart = prefs.autoStart,
+                bypassSystemDns = prefs.bypassSystemDns,
+                bypassLocalDnsOnly = prefs.bypassLocalDnsOnly,
+                allowAppBypass = prefs.allowAppBypass
             ),
             info = InfoStates(
                 appVersion = BuildConfig.VERSION_NAME,
@@ -218,6 +221,39 @@ class SettingsRepository(
         prefs.bypassLan = enabled
         _settingsState.update {
             it.copy(switches = it.switches.copy(bypassLanEnabled = enabled))
+        }
+    }
+
+    /**
+     * Set bypass system DNS enabled.
+     * When enabled, DNS queries bypass VPN and use the underlying network.
+     */
+    fun setBypassSystemDns(enabled: Boolean) {
+        prefs.bypassSystemDns = enabled
+        _settingsState.update {
+            it.copy(switches = it.switches.copy(bypassSystemDns = enabled))
+        }
+    }
+
+    /**
+     * Set bypass local DNS only.
+     * When true, only local/router DNS is bypassed. Public DNS still goes through VPN.
+     */
+    fun setBypassLocalDnsOnly(enabled: Boolean) {
+        prefs.bypassLocalDnsOnly = enabled
+        _settingsState.update {
+            it.copy(switches = it.switches.copy(bypassLocalDnsOnly = enabled))
+        }
+    }
+
+    /**
+     * Set allow app bypass.
+     * When enabled, apps can explicitly bypass VPN using system APIs.
+     */
+    fun setAllowAppBypass(enabled: Boolean) {
+        prefs.allowAppBypass = enabled
+        _settingsState.update {
+            it.copy(switches = it.switches.copy(allowAppBypass = enabled))
         }
     }
 

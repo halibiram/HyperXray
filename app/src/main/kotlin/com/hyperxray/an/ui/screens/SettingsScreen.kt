@@ -498,6 +498,48 @@ fun SettingsScreen(
                     enabled = !vpnDisabled,
                     icon = Icons.Default.Wifi
                 )
+
+                FuturisticDivider()
+
+                // DNS Bypass Settings
+                FuturisticSwitchItem(
+                    title = stringResource(R.string.bypass_system_dns_title),
+                    subtitle = stringResource(R.string.bypass_system_dns_summary),
+                    checked = settingsState.switches.bypassSystemDns,
+                    onCheckedChange = { mainViewModel.setBypassSystemDns(it) },
+                    enabled = !vpnDisabled,
+                    icon = Icons.Default.Dns,
+                    accentColor = FuturisticSettingsColors.NeonGreen
+                )
+
+                AnimatedVisibility(
+                    visible = settingsState.switches.bypassSystemDns,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Column {
+                        FuturisticDivider()
+                        FuturisticSwitchItem(
+                            title = stringResource(R.string.bypass_local_dns_only_title),
+                            subtitle = stringResource(R.string.bypass_local_dns_only_summary),
+                            checked = settingsState.switches.bypassLocalDnsOnly,
+                            onCheckedChange = { mainViewModel.setBypassLocalDnsOnly(it) },
+                            enabled = !vpnDisabled,
+                            icon = Icons.Default.Router
+                        )
+                    }
+                }
+
+                FuturisticDivider()
+
+                FuturisticSwitchItem(
+                    title = stringResource(R.string.allow_app_bypass_title),
+                    subtitle = stringResource(R.string.allow_app_bypass_summary),
+                    checked = settingsState.switches.allowAppBypass,
+                    onCheckedChange = { mainViewModel.setAllowAppBypass(it) },
+                    enabled = !vpnDisabled,
+                    icon = Icons.Default.AppShortcut
+                )
             }
 
             Spacer(modifier = Modifier.height(20.dp))
