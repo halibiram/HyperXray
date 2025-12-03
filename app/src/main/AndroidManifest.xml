@@ -68,6 +68,7 @@
             </intent-filter>
         </service>
 
+        <!-- Legacy VPN Service (kept for backward compatibility) -->
         <service
             android:name="com.hyperxray.an.vpn.HyperVpnService"
             android:exported="true"
@@ -86,6 +87,24 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="WireGuard over Xray VPN service" />
+        </service>
+
+        <!-- 🚀 Next-Gen VPN Service Adapter (2030 Architecture) -->
+        <service
+            android:name="com.hyperxray.an.vpn.lifecycle.HyperVpnServiceAdapter"
+            android:exported="true"
+            android:foregroundServiceType="specialUse"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+                <action android:name="com.hyperxray.an.HYPER_VPN_START" />
+                <action android:name="com.hyperxray.an.HYPER_VPN_STOP" />
+                <action android:name="com.hyperxray.an.CONNECT" />
+                <action android:name="com.hyperxray.an.DISCONNECT" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Next-Gen WireGuard over Xray VPN service with declarative lifecycle" />
         </service>
 
         <!--

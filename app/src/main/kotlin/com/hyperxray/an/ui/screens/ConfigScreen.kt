@@ -6,6 +6,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -22,13 +23,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,6 +43,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,13 +64,23 @@ import androidx.compose.foundation.border
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hyperxray.an.R
+import com.hyperxray.an.feature.warp.presentation.ui.WarpScreen
+import com.hyperxray.an.feature.warp.presentation.viewmodel.WarpViewModel
 import com.hyperxray.an.viewmodel.MainViewModel
+import kotlinx.coroutines.launch
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import java.io.File
 
 private const val TAG = "ConfigScreen"
+
+private enum class ConfigTab(val title: String, val icon: String, val filePrefix: String) {
+    XRAY("Xray", "⚡", "xray_"),
+    WIREGUARD("WireGuard", "🔒", "wireguard_"),
+    MASQUE("MASQUE", "🌐", "masque_")
+}
 
 @Composable
 fun ConfigScreen(
@@ -74,14 +90,86 @@ fun ConfigScreen(
     mainViewModel: MainViewModel,
     listState: LazyListState
 ) {
+    val pagerState = rememberPagerState(pageCount = { ConfigTab.entries.size })
+    val scope = rememberCoroutineScope()
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Tab Row
+        TabRow(
+            selectedTabIndex = pagerState.currentPage,
+            containerColor = Color(0xFF0A0A0A),
+            contentColor = Color.White,
+            indicator = { tabPositions ->
+                TabRowDefaults.SecondaryIndicator(
+                    modifier = Modifier.tabIndicatorOffset(tabPositions[pagerState.currentPage]),
+                    color = Color(0xFF00E5FF)
+                )
+            }
+        ) {
+            ConfigTab.entries.forEachIndexed { index, tab ->
+                Tab(
+                    selected = pagerState.currentPage == index,
+                    onClick = { scope.launch { pagerState.animateScrollToPage(index) } },
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(tab.icon, fontSize = 16.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                tab.title,
+                                fontWeight = if (pagerState.currentPage == index) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    },
+                    selectedContentColor = Color(0xFF00E5FF),
+                    unselectedContentColor = Color(0xFF808080)
+                )
+            }
+        }
+
+        // Pager Content
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize()
+        ) { page ->
+            val tab = ConfigTab.entries[page]
+            ConfigListContent(
+                configTab = tab,
+                onReloadConfig = onReloadConfig,
+                onEditConfigClick = onEditConfigClick,
+                onDeleteConfigClick = onDeleteConfigClick,
+                mainViewModel = mainViewModel,
+                listState = listState
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConfigListContent(
+    configTab: ConfigTab,
+    onReloadConfig: () -> Unit,
+    onEditConfigClick: (File) -> Unit,
+    onDeleteConfigClick: (File, () -> Unit) -> Unit,
+    mainViewModel: MainViewModel,
+    listState: LazyListState
+) {
     val showDeleteDialog = remember { mutableStateOf<File?>(null) }
-
     val isServiceEnabled by mainViewModel.isServiceEnabled.collectAsState()
-
-    val files by mainViewModel.configFiles.collectAsState()
+    val allFiles by mainViewModel.configFiles.collectAsState()
     val selectedFile by mainViewModel.selectedConfigFile.collectAsState()
-
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Filter files based on tab type
+    val files = remember(allFiles, configTab) {
+        allFiles.filter { file ->
+            val name = file.name.lowercase()
+            when (configTab) {
+                ConfigTab.XRAY -> !name.startsWith("wireguard_") && !name.startsWith("masque_")
+                ConfigTab.WIREGUARD -> name.startsWith("wireguard_")
+                ConfigTab.MASQUE -> name.startsWith("masque_")
+            }
+        }
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -90,14 +178,10 @@ fun ConfigScreen(
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(Unit) {
-        mainViewModel.refreshConfigFileList()
-    }
+    LaunchedEffect(Unit) { mainViewModel.refreshConfigFileList() }
 
     val hapticFeedback = LocalHapticFeedback.current
     val reorderableLazyListState = rememberReorderableLazyListState(listState) { from, to ->
@@ -105,30 +189,43 @@ fun ConfigScreen(
         hapticFeedback.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-    ) {
+    // Tab-specific colors
+    val accentColor = when (configTab) {
+        ConfigTab.XRAY -> Color(0xFF00E5FF)      // Cyan
+        ConfigTab.WIREGUARD -> Color(0xFF4CAF50) // Green
+        ConfigTab.MASQUE -> Color(0xFF9C27B0)    // Purple
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
         if (files.isEmpty()) {
             Box(
-                modifier = Modifier
-                    .fillMaxSize(),
+                modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    stringResource(R.string.no_config_files),
-                    modifier = Modifier.fillMaxWidth(),
-                    style = MaterialTheme.typography.bodyLarge,
-                    textAlign = TextAlign.Center,
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(configTab.icon, fontSize = 48.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        "No ${configTab.title} configs",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Create a new ${configTab.title} config file\nwith prefix: ${configTab.filePrefix}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color(0xFF808080),
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
         } else {
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxHeight(),
+                modifier = Modifier.fillMaxHeight(),
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
                 state = listState,
-                verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 itemsIndexed(files, key = { _, file -> file }) { index, file ->
                     ReorderableItem(reorderableLazyListState, key = file) {
@@ -137,13 +234,12 @@ fun ConfigScreen(
                             file = file,
                             isSelected = isSelected,
                             index = index,
+                            accentColor = accentColor,
+                            configTab = configTab,
                             onConfigClick = {
                                 mainViewModel.updateSelectedConfigFile(file)
                                 if (isServiceEnabled) {
-                                    Log.d(
-                                        TAG,
-                                        "Config selected while service is running, requesting reload."
-                                    )
+                                    Log.d(TAG, "Config selected while service is running, requesting reload.")
                                     onReloadConfig()
                                 }
                             },
@@ -169,9 +265,7 @@ fun ConfigScreen(
                         mainViewModel.refreshConfigFileList()
                         mainViewModel.updateSelectedConfigFile(null)
                     }
-                }) {
-                    Text(stringResource(R.string.confirm))
-                }
+                }) { Text(stringResource(R.string.confirm)) }
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteDialog.value = null }) {
@@ -187,6 +281,8 @@ private fun ModernConfigCard(
     file: File,
     isSelected: Boolean,
     index: Int,
+    accentColor: Color = Color(0xFF00E5FF),
+    configTab: ConfigTab = ConfigTab.XRAY,
     onConfigClick: () -> Unit,
     onEditClick: () -> Unit,
     onDeleteClick: () -> Unit,
@@ -254,9 +350,9 @@ private fun ModernConfigCard(
                 brush = Brush.linearGradient(
                     colors = if (isSelected) {
                         listOf(
-                            Color(0xFF00E5FF), // Neon Cyan
-                            Color(0xFF2979FF), // Electric Blue
-                            Color(0xFF651FFF)  // Deep Purple
+                            accentColor,
+                            accentColor.copy(alpha = 0.7f),
+                            accentColor.copy(alpha = 0.5f)
                         )
                     } else {
                         listOf(
@@ -353,15 +449,11 @@ private fun ModernConfigCard(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = if (isSelected) "Active configuration" else "Tap to select",
+                        text = if (isSelected) "Active ${configTab.title} config" else "Tap to select",
                         style = MaterialTheme.typography.bodySmall.copy(
                             letterSpacing = 0.2.sp
                         ),
-                        color = if (isSelected) {
-                            Color(0xFF00E5FF) // Neon Cyan
-                        } else {
-                            Color(0xFFB0B0B0)
-                        }
+                        color = if (isSelected) accentColor else Color(0xFFB0B0B0)
                     )
                 }
                 

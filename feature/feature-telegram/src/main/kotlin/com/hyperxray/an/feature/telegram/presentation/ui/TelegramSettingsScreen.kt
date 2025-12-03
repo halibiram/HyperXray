@@ -81,12 +81,10 @@ fun TelegramSettingsScreen(
                 notifyVpnStatus = uiState.config?.notifyVpnStatus ?: true,
                 notifyErrors = uiState.config?.notifyErrors ?: true,
                 notifyPerformance = uiState.config?.notifyPerformance ?: false,
-                notifyDnsCache = uiState.config?.notifyDnsCache ?: false,
                 notifyManual = uiState.config?.notifyManual ?: true,
                 onNotifyVpnStatusChange = viewModel::updateNotifyVpnStatus,
                 onNotifyErrorsChange = viewModel::updateNotifyErrors,
                 onNotifyPerformanceChange = viewModel::updateNotifyPerformance,
-                onNotifyDnsCacheChange = viewModel::updateNotifyDnsCache,
                 onNotifyManualChange = viewModel::updateNotifyManual
             )
         }

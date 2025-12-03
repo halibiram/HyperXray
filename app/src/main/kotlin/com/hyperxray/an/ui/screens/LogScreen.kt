@@ -5,6 +5,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -61,7 +62,8 @@ fun LogScreen(
     // UI States
     val isInitialLoad = remember { mutableStateOf(true) }
     var selectedLogEntry by remember { mutableStateOf<String?>(null) }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val detailSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val optionsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     val scope = rememberCoroutineScope()
     
     // Filter states
@@ -77,12 +79,11 @@ fun LogScreen(
     var isStatsExpanded by remember { mutableStateOf(false) }
     var isAutoScrollEnabled by remember { mutableStateOf(true) }
     var isLive by remember { mutableStateOf(true) }
+    var showOptionsSheet by remember { mutableStateOf(false) }
     
     // OPTIMIZATION 1: Create stable log entries with unique IDs
-    // Use a monotonic counter to generate stable IDs that don't change when list updates
     val stableEntries = remember(filteredEntries) {
         filteredEntries.mapIndexed { index, content ->
-            // Use content hash + reversed index for stable ID (newest first = highest ID)
             StableLogEntry(
                 id = (filteredEntries.size - index).toLong() * 31 + content.hashCode().toLong(),
                 content = content
@@ -133,7 +134,7 @@ fun LogScreen(
         }
     }
 
-    // Scroll behavior - track if user is scrolling for animation optimization
+    // Scroll behavior
     val isUserScrolledAway = remember { mutableStateOf(false) }
     val isScrolling by remember { derivedStateOf { listState.isScrollInProgress } }
     
@@ -157,28 +158,38 @@ fun LogScreen(
         }
     }
 
-    // Main Container with optimized animated background
+    // Active filters count for badge
+    val activeFiltersCount = remember(selectedLogLevel, selectedConnectionType, showSniffingOnly, showAiOnly) {
+        var count = 0
+        if (selectedLogLevel != null) count++
+        if (selectedConnectionType != null) count++
+        if (showSniffingOnly) count++
+        if (showAiOnly) count++
+        count
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF030308))
     ) {
-        // OPTIMIZATION 3: Isolate animated background in separate composable with graphicsLayer
-        // This prevents the animation from invalidating the entire tree
         AnimatedBackground(isScrolling = isScrolling)
+        
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
         ) {
-            // Futuristic Header
-            FuturisticHeader(
+            // Futuristic Header v2.1
+            FuturisticHeaderV2(
                 isLive = isLive,
                 logsPerSecond = logsPerSecond,
-                totalLogs = stats.totalCount
+                totalLogs = stats.totalCount,
+                activeFiltersCount = activeFiltersCount,
+                onOptionsClick = { showOptionsSheet = true }
             )
             
-            // Stats Panel
+            // Compact Stats Panel
             LogStatsPanel(
                 stats = stats.copy(logsPerSecond = logsPerSecond),
                 isExpanded = isStatsExpanded,
@@ -187,36 +198,37 @@ fun LogScreen(
             
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Toolbar
-            LogToolbar(
+            // Simplified Toolbar v2.1
+            LogToolbarV2(
                 searchQuery = searchQuery,
                 onSearchQueryChange = { logViewModel.onSearchQueryChange(it) },
                 isSearchExpanded = isSearchExpanded,
                 onSearchExpandedChange = { isSearchExpanded = it },
-                viewMode = viewMode,
-                onViewModeChange = { viewMode = it },
-                sortOrder = sortOrder,
-                onSortOrderChange = { sortOrder = it },
                 isAutoScrollEnabled = isAutoScrollEnabled,
                 onAutoScrollChange = { isAutoScrollEnabled = it },
                 onClearLogs = { logViewModel.clearLogs() },
-                onExportLogs = { format ->
-                    Toast.makeText(context, "Exporting as ${format.name}...", Toast.LENGTH_SHORT).show()
-                },
                 logFile = logViewModel.getLogFile()
             )
 
-            // Filters
-            LogFilters(
-                selectedLogLevel = selectedLogLevel,
-                selectedConnectionType = selectedConnectionType,
-                showSniffingOnly = showSniffingOnly,
-                showAiOnly = showAiOnly,
-                onLogLevelSelected = { selectedLogLevel = it },
-                onConnectionTypeSelected = { selectedConnectionType = it },
-                onShowSniffingOnlyChanged = { showSniffingOnly = it },
-                onShowAiOnlyChanged = { showAiOnly = it }
-            )
+            // Active Filters Chips (quick access)
+            if (activeFiltersCount > 0) {
+                ActiveFiltersBar(
+                    selectedLogLevel = selectedLogLevel,
+                    selectedConnectionType = selectedConnectionType,
+                    showSniffingOnly = showSniffingOnly,
+                    showAiOnly = showAiOnly,
+                    onClearLogLevel = { selectedLogLevel = null },
+                    onClearConnectionType = { selectedConnectionType = null },
+                    onClearSniffing = { showSniffingOnly = false },
+                    onClearAi = { showAiOnly = false },
+                    onClearAll = {
+                        selectedLogLevel = null
+                        selectedConnectionType = null
+                        showSniffingOnly = false
+                        showAiOnly = false
+                    }
+                )
+            }
             
             Spacer(modifier = Modifier.height(4.dp))
 
@@ -237,7 +249,6 @@ fun LogScreen(
                         contentPadding = PaddingValues(bottom = 80.dp, top = 4.dp),
                         reverseLayout = true
                     ) {
-                        // OPTIMIZATION 4: Use stable keys and contentType for efficient recycling
                         items(
                             items = stableEntries,
                             key = { entry -> entry.id },
@@ -247,7 +258,7 @@ fun LogScreen(
                                 logEntry = stableEntry.content,
                                 onClick = {
                                     selectedLogEntry = stableEntry.content
-                                    scope.launch { sheetState.show() }
+                                    scope.launch { detailSheetState.show() }
                                 }
                             )
                         }
@@ -286,13 +297,13 @@ fun LogScreen(
         }
     }
 
-    // Detail Sheet
+    // Log Detail Sheet
     selectedLogEntry?.let { logEntry ->
         ModalBottomSheet(
             onDismissRequest = {
-                scope.launch { sheetState.hide() }.invokeOnCompletion { selectedLogEntry = null }
+                scope.launch { detailSheetState.hide() }.invokeOnCompletion { selectedLogEntry = null }
             },
-            sheetState = sheetState,
+            sheetState = detailSheetState,
             containerColor = Color(0xFF080810),
             contentColor = Color(0xFFE0E0E0),
             dragHandle = {
@@ -309,14 +320,56 @@ fun LogScreen(
             LogDetailSheet(logEntry = logEntry)
         }
     }
+
+    // Options Modal Sheet v2.1
+    if (showOptionsSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showOptionsSheet = false },
+            sheetState = optionsSheetState,
+            containerColor = Color(0xFF080810),
+            contentColor = Color(0xFFE0E0E0),
+            dragHandle = {
+                Box(
+                    modifier = Modifier
+                        .padding(vertical = 12.dp)
+                        .width(40.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(LogColorPalette.NeonPurple.copy(alpha = 0.5f))
+                )
+            }
+        ) {
+            LogOptionsSheet(
+                selectedLogLevel = selectedLogLevel,
+                selectedConnectionType = selectedConnectionType,
+                showSniffingOnly = showSniffingOnly,
+                showAiOnly = showAiOnly,
+                viewMode = viewMode,
+                sortOrder = sortOrder,
+                onLogLevelSelected = { selectedLogLevel = it },
+                onConnectionTypeSelected = { selectedConnectionType = it },
+                onShowSniffingOnlyChanged = { showSniffingOnly = it },
+                onShowAiOnlyChanged = { showAiOnly = it },
+                onViewModeChange = { viewMode = it },
+                onSortOrderChange = { sortOrder = it },
+                onExportLogs = { format ->
+                    Toast.makeText(context, "Exporting as ${format.name}...", Toast.LENGTH_SHORT).show()
+                },
+                logFile = logViewModel.getLogFile(),
+                onDismiss = { showOptionsSheet = false }
+            )
+        }
+    }
 }
 
 
 @Composable
-private fun FuturisticHeader(
+private fun FuturisticHeaderV2(
     isLive: Boolean,
     logsPerSecond: Float,
-    totalLogs: Int
+    totalLogs: Int,
+    activeFiltersCount: Int,
+    onOptionsClick: () -> Unit
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "header")
     val borderAlpha by infiniteTransition.animateFloat(
@@ -328,23 +381,12 @@ private fun FuturisticHeader(
         ),
         label = "borderAlpha"
     )
-    
-    val scanLineOffset by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 100f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(3000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "scanLine"
-    )
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
-        // Main header container
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -379,7 +421,6 @@ private fun FuturisticHeader(
                 // Left side - Title
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        // Cyber icon
                         Box(
                             modifier = Modifier
                                 .size(32.dp)
@@ -412,7 +453,7 @@ private fun FuturisticHeader(
                                 fontSize = 16.sp
                             )
                             Text(
-                                text = "HYPERXRAY CORE v2.0",
+                                text = "HYPERXRAY CORE v2.1",
                                 color = Color.Gray,
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 9.sp,
@@ -422,21 +463,70 @@ private fun FuturisticHeader(
                     }
                 }
                 
-                // Right side - Live indicator & count
-                Column(horizontalAlignment = Alignment.End) {
-                    LiveIndicator(
-                        isLive = isLive,
-                        logsPerSecond = logsPerSecond
-                    )
+                // Right side - Options button & Live indicator
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        LiveIndicator(
+                            isLive = isLive,
+                            logsPerSecond = logsPerSecond
+                        )
+                        
+                        Spacer(modifier = Modifier.height(4.dp))
+                        
+                        Text(
+                            text = "$totalLogs ENTRIES",
+                            color = Color.Gray,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                    }
                     
-                    Spacer(modifier = Modifier.height(4.dp))
-                    
-                    Text(
-                        text = "$totalLogs ENTRIES",
-                        color = Color.Gray,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 10.sp
-                    )
+                    // Options Button with badge
+                    Box {
+                        IconButton(
+                            onClick = onOptionsClick,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(LogColorPalette.NeonPurple.copy(alpha = 0.1f))
+                                .border(
+                                    1.dp,
+                                    LogColorPalette.NeonPurple.copy(alpha = 0.3f),
+                                    RoundedCornerShape(10.dp)
+                                )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = "Options",
+                                tint = LogColorPalette.NeonPurple,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        
+                        // Filter count badge
+                        if (activeFiltersCount > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = 4.dp, y = (-4).dp)
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .background(LogColorPalette.NeonMagenta),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = activeFiltersCount.toString(),
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -455,16 +545,6 @@ private fun EmptyLogsView() {
         ),
         label = "pulse"
     )
-    
-    val rotationAngle by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(8000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "rotation"
-    )
 
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -474,7 +554,6 @@ private fun EmptyLogsView() {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Animated icon
             Box(
                 modifier = Modifier
                     .size(80.dp)
@@ -518,7 +597,6 @@ private fun EmptyLogsView() {
                 fontSize = 11.sp
             )
             
-            // Animated dots
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 repeat(3) { index ->
                     val dotAlpha by infiniteTransition.animateFloat(
@@ -542,14 +620,8 @@ private fun EmptyLogsView() {
     }
 }
 
-/**
- * OPTIMIZATION 3: Isolated animated background composable.
- * Uses graphicsLayer to isolate invalidations from the rest of the UI tree.
- * Animation is paused during scrolling to reduce GPU load.
- */
 @Composable
 private fun AnimatedBackground(isScrolling: Boolean) {
-    // Only animate when not scrolling to save GPU cycles
     val targetAlpha = if (isScrolling) 0f else 1f
     val animatedAlpha by animateFloatAsState(
         targetValue = targetAlpha,
@@ -557,7 +629,6 @@ private fun AnimatedBackground(isScrolling: Boolean) {
         label = "bgAlpha"
     )
     
-    // Skip animation entirely when scrolling
     if (animatedAlpha > 0.01f) {
         val infiniteTransition = rememberInfiniteTransition(label = "bg")
         val gradientOffset by infiniteTransition.animateFloat(
@@ -573,10 +644,8 @@ private fun AnimatedBackground(isScrolling: Boolean) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                // graphicsLayer isolates this composable's invalidations
                 .graphicsLayer { alpha = animatedAlpha }
                 .drawBehind {
-                    // Subtle animated gradient orbs
                     drawCircle(
                         brush = Brush.radialGradient(
                             colors = listOf(
@@ -598,6 +667,111 @@ private fun AnimatedBackground(isScrolling: Boolean) {
                         )
                     )
                 }
+        )
+    }
+}
+
+@Composable
+private fun ActiveFiltersBar(
+    selectedLogLevel: LogLevel?,
+    selectedConnectionType: ConnectionType?,
+    showSniffingOnly: Boolean,
+    showAiOnly: Boolean,
+    onClearLogLevel: () -> Unit,
+    onClearConnectionType: () -> Unit,
+    onClearSniffing: () -> Unit,
+    onClearAi: () -> Unit,
+    onClearAll: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "ACTIVE:",
+            color = Color.Gray,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 9.sp,
+            letterSpacing = 1.sp
+        )
+        
+        selectedLogLevel?.let {
+            FilterChipRemovable(
+                text = it.name,
+                color = LogColorPalette.getLogLevelColor(it),
+                onRemove = onClearLogLevel
+            )
+        }
+        
+        selectedConnectionType?.let {
+            FilterChipRemovable(
+                text = it.name,
+                color = LogColorPalette.getConnectionTypeColor(it),
+                onRemove = onClearConnectionType
+            )
+        }
+        
+        if (showSniffingOnly) {
+            FilterChipRemovable(
+                text = "SNIFF",
+                color = LogColorPalette.NeonOrange,
+                onRemove = onClearSniffing
+            )
+        }
+        
+        if (showAiOnly) {
+            FilterChipRemovable(
+                text = "AI",
+                color = LogColorPalette.NeonPurple,
+                onRemove = onClearAi
+            )
+        }
+        
+        Spacer(modifier = Modifier.weight(1f))
+        
+        Text(
+            text = "CLEAR ALL",
+            color = LogColorPalette.NeonRed.copy(alpha = 0.7f),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 9.sp,
+            letterSpacing = 0.5.sp,
+            modifier = Modifier.clickable { onClearAll() }
+        )
+    }
+}
+
+@Composable
+private fun FilterChipRemovable(
+    text: String,
+    color: Color,
+    onRemove: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(color.copy(alpha = 0.15f))
+            .border(1.dp, color.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = text,
+            color = color,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 9.sp
+        )
+        Icon(
+            imageVector = Icons.Default.Close,
+            contentDescription = "Remove",
+            tint = color.copy(alpha = 0.7f),
+            modifier = Modifier
+                .size(12.dp)
+                .clickable { onRemove() }
         )
     }
 }

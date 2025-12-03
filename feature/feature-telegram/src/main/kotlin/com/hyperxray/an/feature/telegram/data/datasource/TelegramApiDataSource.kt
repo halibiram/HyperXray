@@ -60,10 +60,10 @@ class TelegramApiDataSource(
         // Use HTTP client with SOCKS5 proxy if available, otherwise use default client
         val baseClient = if (socks5Proxy != null) {
             Log.i(TAG, "✅ Using SOCKS5 proxy for Telegram API: ${socks5Proxy.address()}")
-            HttpClientFactory.createHttpClient(socks5Proxy)
+            HttpClientFactory.create(socks5Proxy)
         } else {
             Log.d(TAG, "Using default HTTP client (no SOCKS5 proxy)")
-            HttpClientFactory.createHttpClient()
+            HttpClientFactory.create()
         }
         
         return baseClient.newBuilder()

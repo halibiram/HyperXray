@@ -10,7 +10,6 @@ data class TelegramConfig(
     val notifyVpnStatus: Boolean = true,
     val notifyErrors: Boolean = true,
     val notifyPerformance: Boolean = false,
-    val notifyDnsCache: Boolean = false,
     val notifyManual: Boolean = true
 ) {
     val isValid: Boolean

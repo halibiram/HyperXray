@@ -44,7 +44,7 @@ class WarpManager private constructor() {
     }
     
     companion object {
-        private const val API_VERSION = "v0a2483"
+        private const val API_VERSION = "v0a2596"
         private const val BASE_URL = "https://api.cloudflareclient.com/$API_VERSION"
         private const val WARP_ENDPOINT = "engage.cloudflareclient.com"
         private const val WARP_PORT = 2408
@@ -225,21 +225,59 @@ class WarpManager private constructor() {
     }
     
     /**
-     * Save WARP account data to warp-account.json file
+     * Save WARP account data to warp-account.json (account info only, not overwritten if exists)
+     * Also saves WireGuard config to config/warp/ and MASQUE config to config/masque/
      * @param config WireGuard configuration
      * @param identity WARP identity from API response
      * @param filesDir Application files directory
      */
     private suspend fun saveWarpAccountToFile(config: WireGuardConfig, identity: WarpIdentity, filesDir: File? = null) {
         try {
-            // If filesDir is not provided, we can't save
             if (filesDir == null) {
-                AiLogHelper.w("WarpManager", "Files directory not provided, cannot save WARP account")
+                AiLogHelper.w("WarpManager", "Files directory not provided, cannot save WARP data")
                 return
             }
             
+            // Save account info only if warp-account.json doesn't exist (preserve existing account)
             val accountFile = File(filesDir, "warp-account.json")
-            val accountJson = JSONObject().apply {
+            if (!accountFile.exists()) {
+                val accountJson = JSONObject().apply {
+                    put("identityId", identity.id)
+                    put("token", identity.token)
+                    put("warpEnabled", identity.warp_enabled)
+                    put("accountId", identity.account.id)
+                    identity.account.license?.let { put("license", it) }
+                    identity.account.account_type?.let { put("accountType", it) }
+                    // Store private key in account for backup purposes
+                    put("privateKey", config.privateKey)
+                }
+                accountFile.writeText(accountJson.toString(2))
+                AiLogHelper.d("WarpManager", "✅ WARP account saved to: ${accountFile.absolutePath}")
+            } else {
+                AiLogHelper.d("WarpManager", "⚠️ WARP account exists, preserving existing account")
+            }
+            
+            // Always save WireGuard and MASQUE config files
+            saveWireGuardConfig(config, filesDir)
+            saveMasqueConfig(config, filesDir)
+            
+        } catch (e: Exception) {
+            AiLogHelper.e("WarpManager", "Error saving WARP data: ${e.message}", e)
+            throw e
+        }
+    }
+    
+    /**
+     * Save WireGuard config to config/warp/wireguard.json
+     * This is the config file that WireGuard will use
+     */
+    private fun saveWireGuardConfig(config: WireGuardConfig, filesDir: File) {
+        try {
+            val warpDir = File(filesDir, "config/warp")
+            warpDir.mkdirs()
+            
+            val wgConfigFile = File(warpDir, "wireguard.json")
+            val wgConfigJson = JSONObject().apply {
                 put("privateKey", config.privateKey)
                 put("publicKey", config.publicKey)
                 put("address", config.address)
@@ -250,85 +288,174 @@ class WarpManager private constructor() {
                 put("endpoint", config.endpoint)
                 put("allowedIPs", config.allowedIPs)
                 put("persistentKeepalive", config.persistentKeepalive)
-                // Save additional WARP identity info
-                put("identityId", identity.id)
-                put("token", identity.token)
-                put("warpEnabled", identity.warp_enabled)
-                identity.account.license?.let { put("license", it) }
-                identity.account.account_type?.let { put("accountType", it) }
             }
-            
-            accountFile.writeText(accountJson.toString())
-            AiLogHelper.d("WarpManager", "✅ WARP account saved to: ${accountFile.absolutePath}")
+            wgConfigFile.writeText(wgConfigJson.toString(2))
+            AiLogHelper.d("WarpManager", "✅ WireGuard config saved to: ${wgConfigFile.absolutePath}")
         } catch (e: Exception) {
-            AiLogHelper.e("WarpManager", "Error saving WARP account file: ${e.message}", e)
-            throw e
+            AiLogHelper.e("WarpManager", "Error saving WireGuard config: ${e.message}", e)
         }
     }
     
     /**
-     * Load WARP account data from warp-account.json file
+     * Save MASQUE config to config/masque/masque.json
+     * MASQUE uses HTTP/3 QUIC on port 443 for Cloudflare WARP
+     */
+    private fun saveMasqueConfig(config: WireGuardConfig, filesDir: File) {
+        try {
+            val masqueDir = File(filesDir, "config/masque")
+            masqueDir.mkdirs()
+            
+            val masqueConfigFile = File(masqueDir, "masque.json")
+            val warpHost = config.endpoint.substringBefore(":")
+            val masqueConfigJson = JSONObject().apply {
+                put("proxyEndpoint", "$warpHost:443")
+                put("mode", "connect-udp")
+                put("maxReconnects", 5)
+                put("reconnectDelay", 1000)
+                put("queueSize", 131072)
+                put("mtu", 1420)
+                put("wireguard", JSONObject().apply {
+                    put("privateKey", config.privateKey)
+                    put("publicKey", config.publicKey)
+                    put("address", config.address)
+                    put("addressV6", config.addressV6 ?: "")
+                    put("peerPublicKey", config.peerPublicKey)
+                })
+            }
+            masqueConfigFile.writeText(masqueConfigJson.toString(2))
+            AiLogHelper.d("WarpManager", "✅ MASQUE config saved to: ${masqueConfigFile.absolutePath}")
+        } catch (e: Exception) {
+            AiLogHelper.e("WarpManager", "Error saving MASQUE config: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Load WireGuard config from config files
+     * Priority: 1) config/warp/wireguard.json, 2) create from warp-account.json
      * @param filesDir Application files directory
-     * @return WireGuardConfig if account file exists and is valid, null otherwise
+     * @return WireGuardConfig if config exists and is valid, null otherwise
      */
     suspend fun loadWarpAccountFromFile(filesDir: File): WireGuardConfig? = withContext(Dispatchers.IO) {
         try {
+            val warpConfigFile = File(filesDir, "config/warp/wireguard.json")
             val accountFile = File(filesDir, "warp-account.json")
-            if (!accountFile.exists() || !accountFile.canRead()) {
-                AiLogHelper.d("WarpManager", "WARP account file not found: ${accountFile.absolutePath}")
-                return@withContext null
+            
+            // Try loading from config/warp/wireguard.json first
+            if (warpConfigFile.exists() && warpConfigFile.canRead()) {
+                AiLogHelper.d("WarpManager", "📁 Loading WireGuard config from: ${warpConfigFile.absolutePath}")
+                val config = parseWireGuardConfig(warpConfigFile)
+                if (config != null) {
+                    return@withContext config
+                }
+                AiLogHelper.w("WarpManager", "⚠️ WireGuard config invalid, trying warp-account.json")
             }
             
-            val accountContent = accountFile.readText()
-            val accountJson = JSONObject(accountContent)
+            // If wireguard.json doesn't exist or is invalid, create from warp-account.json
+            if (accountFile.exists() && accountFile.canRead()) {
+                AiLogHelper.d("WarpManager", "📁 Creating WireGuard config from warp-account.json")
+                val config = createWireGuardConfigFromAccount(accountFile, filesDir)
+                if (config != null) {
+                    return@withContext config
+                }
+            }
             
-            // Extract private key
-            val privateKey = accountJson.optString("privateKey", "")
+            AiLogHelper.d("WarpManager", "No WARP config found")
+            null
+        } catch (e: Exception) {
+            AiLogHelper.e("WarpManager", "Error loading WARP config: ${e.message}", e)
+            null
+        }
+    }
+    
+    /**
+     * Parse WireGuard config from JSON file
+     */
+    private fun parseWireGuardConfig(configFile: File): WireGuardConfig? {
+        return try {
+            val configJson = JSONObject(configFile.readText())
+            
+            val privateKey = configJson.optString("privateKey", "")
             if (privateKey.isBlank() || !WarpUtils.isValidPrivateKey(privateKey)) {
-                AiLogHelper.w("WarpManager", "WARP account file has invalid or missing privateKey")
-                return@withContext null
+                AiLogHelper.w("WarpManager", "Invalid privateKey in config")
+                return null
             }
             
-            // Derive public key from private key
             val publicKey = try {
                 WarpUtils.derivePublicKey(privateKey)
             } catch (e: Exception) {
                 AiLogHelper.e("WarpManager", "Failed to derive public key: ${e.message}")
-                return@withContext null
+                return null
             }
-            
-            // Extract other config values
-            val address = accountJson.optString("address", "172.16.0.2/32")
-            val addressV6 = accountJson.optString("addressV6", "").takeIf { it.isNotBlank() }
-            val endpoint = accountJson.optString("endpoint", "$WARP_ENDPOINT:$WARP_PORT")
-            val peerPublicKey = accountJson.optString("peerPublicKey", WARP_PUBLIC_KEY)
-            val allowedIPs = accountJson.optString("allowedIPs", "0.0.0.0/0, ::/0")
-            val persistentKeepalive = accountJson.optInt("persistentKeepalive", 25)
-            val dns = accountJson.optString("dns", "1.1.1.1")
-            val mtu = accountJson.optInt("mtu", WARP_MTU)
             
             val config = WireGuardConfig(
                 privateKey = privateKey,
                 publicKey = publicKey,
-                address = address,
-                addressV6 = addressV6,
-                dns = dns,
-                mtu = mtu,
-                peerPublicKey = peerPublicKey,
-                endpoint = endpoint,
-                allowedIPs = allowedIPs,
-                persistentKeepalive = persistentKeepalive
+                address = configJson.optString("address", "172.16.0.2/32"),
+                addressV6 = configJson.optString("addressV6", "").takeIf { it.isNotBlank() },
+                dns = configJson.optString("dns", "1.1.1.1"),
+                mtu = configJson.optInt("mtu", WARP_MTU),
+                peerPublicKey = configJson.optString("peerPublicKey", WARP_PUBLIC_KEY),
+                endpoint = configJson.optString("endpoint", "$WARP_ENDPOINT:$WARP_PORT"),
+                allowedIPs = configJson.optString("allowedIPs", "0.0.0.0/0, ::/0"),
+                persistentKeepalive = configJson.optInt("persistentKeepalive", 25)
+            )
+            
+            if (config.isValid()) config else null
+        } catch (e: Exception) {
+            AiLogHelper.e("WarpManager", "Error parsing WireGuard config: ${e.message}")
+            null
+        }
+    }
+    
+    /**
+     * Create WireGuard config from warp-account.json and save to config/warp/
+     */
+    private fun createWireGuardConfigFromAccount(accountFile: File, filesDir: File): WireGuardConfig? {
+        return try {
+            val accountJson = JSONObject(accountFile.readText())
+            
+            // Get privateKey from account
+            val privateKey = accountJson.optString("privateKey", "")
+            if (privateKey.isBlank() || !WarpUtils.isValidPrivateKey(privateKey)) {
+                AiLogHelper.w("WarpManager", "warp-account.json has no valid privateKey")
+                return null
+            }
+            
+            val publicKey = try {
+                WarpUtils.derivePublicKey(privateKey)
+            } catch (e: Exception) {
+                AiLogHelper.e("WarpManager", "Failed to derive public key: ${e.message}")
+                return null
+            }
+            
+            // Create WireGuard config with WARP defaults
+            val config = WireGuardConfig(
+                privateKey = privateKey,
+                publicKey = publicKey,
+                address = "172.16.0.2/32",
+                addressV6 = null,
+                dns = "1.1.1.1",
+                mtu = WARP_MTU,
+                peerPublicKey = WARP_PUBLIC_KEY,
+                endpoint = "$WARP_ENDPOINT:$WARP_PORT",
+                allowedIPs = "0.0.0.0/0, ::/0",
+                persistentKeepalive = 25
             )
             
             if (!config.isValid()) {
-                AiLogHelper.w("WarpManager", "WARP account config validation failed")
-                return@withContext null
+                AiLogHelper.w("WarpManager", "Generated config is invalid")
+                return null
             }
             
-            AiLogHelper.d("WarpManager", "✅ Loaded WARP account from file: ${accountFile.absolutePath}")
+            // Save WireGuard config to config/warp/wireguard.json
+            saveWireGuardConfig(config, filesDir)
+            // Also save MASQUE config
+            saveMasqueConfig(config, filesDir)
+            
+            AiLogHelper.d("WarpManager", "✅ Created WireGuard config from warp-account.json")
             config
         } catch (e: Exception) {
-            AiLogHelper.e("WarpManager", "Error loading WARP account file: ${e.message}", e)
+            AiLogHelper.e("WarpManager", "Error creating config from account: ${e.message}")
             null
         }
     }
@@ -372,7 +499,7 @@ class WarpManager private constructor() {
                 .post(requestBody)
                 .header("Content-Type", "application/json")
                 .header("User-Agent", "okhttp/4.12.0")
-                .header("CF-Client-Version", "a-6.28-2483")
+                .header("CF-Client-Version", "a-6.30-2596")
                 .build()
             
             val response = client.newCall(request).execute()

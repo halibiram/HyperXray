@@ -3,14 +3,14 @@ package com.hyperxray.an.service.managers
 import android.content.Context
 import android.util.Log
 import com.hyperxray.an.core.inference.OnnxRuntimeManager
-import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.notification.TelegramNotificationManager
-import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.service.state.ServiceSessionState
 
 /**
  * Manages initialization and cleanup of service dependencies.
  * Centralizes dependency management to keep TProxyService.onCreate() clean.
+ * 
+ * Note: DNS cache removed - using Google DNS (8.8.8.8) directly
  */
 class ServiceDependencyManager {
     private val TAG = "ServiceDependencyManager"
@@ -19,8 +19,6 @@ class ServiceDependencyManager {
     
     var telegramNotificationManager: TelegramNotificationManager? = null
         private set
-    
-    private var dnsCacheInitialized = false
     
     /**
      * Initialize all service dependencies.
@@ -36,9 +34,6 @@ class ServiceDependencyManager {
         // Initialize Telegram Notification Manager
         initializeTelegramNotificationManager(context, session)
         
-        // Initialize DNS Cache Manager
-        initializeDnsCacheManager(context, session)
-        
         Log.d(TAG, "Service dependencies setup completed")
     }
     
@@ -53,9 +48,6 @@ class ServiceDependencyManager {
         
         // Telegram notification manager doesn't need explicit cleanup
         telegramNotificationManager = null
-        
-        // DNS Cache Manager doesn't need explicit cleanup (object singleton)
-        dnsCacheInitialized = false
         
         Log.d(TAG, "Service dependencies cleanup completed")
     }
@@ -88,33 +80,4 @@ class ServiceDependencyManager {
             Log.e(TAG, "Failed to initialize Telegram notification manager", e)
         }
     }
-    
-    /**
-     * Initialize DNS Cache Manager.
-     */
-    private fun initializeDnsCacheManager(context: Context, session: ServiceSessionState) {
-        if (session.dnsCacheInitialized) {
-            Log.d(TAG, "DnsCacheManager already initialized")
-            return
-        }
-        
-        try {
-            DnsCacheManager.initialize(context)
-            session.dnsCacheInitialized = true
-            dnsCacheInitialized = true
-            Log.d(TAG, "DnsCacheManager initialized")
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to initialize DnsCacheManager: ${e.message}", e)
-        }
-    }
 }
-
-
-
-
-
-
-
-
-
-

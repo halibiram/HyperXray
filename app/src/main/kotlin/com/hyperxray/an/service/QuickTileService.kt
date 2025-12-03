@@ -10,26 +10,33 @@ import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.util.Log
+import com.hyperxray.an.vpn.HyperVpnHelper
 import com.hyperxray.an.vpn.HyperVpnService
+import com.hyperxray.an.vpn.lifecycle.HyperVpnServiceAdapter
 
 /**
- * Quick Settings tile service for quick VPN connection toggle.
- * Listens to HyperVpnService broadcasts to update tile state.
+ * 🚀 Quick Settings tile service for VPN toggle (2030 Architecture)
+ * 
+ * Supports both legacy HyperVpnService and new HyperVpnServiceAdapter.
+ * Uses HyperVpnHelper for automatic service selection.
  */
 class QuickTileService : TileService() {
 
     private val broadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            when (intent.action) {
-                HyperVpnService.ACTION_START -> updateTileState(true)
-                HyperVpnService.ACTION_STOP -> updateTileState(false)
+            val stateStr = intent.getStringExtra("state")
+            when {
+                stateStr == "connected" -> updateTileState(true)
+                stateStr == "disconnected" -> updateTileState(false)
+                intent.action == HyperVpnService.ACTION_START -> updateTileState(true)
+                intent.action == HyperVpnService.ACTION_STOP -> updateTileState(false)
             }
         }
     }
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "QuickTileService created.")
+        Log.d(TAG, "QuickTileService created (next-gen lifecycle support)")
     }
 
     override fun onStartListening() {
@@ -37,20 +44,24 @@ class QuickTileService : TileService() {
         Log.d(TAG, "QuickTileService started listening.")
 
         IntentFilter().apply {
+            // Legacy actions
             addAction(HyperVpnService.ACTION_START)
             addAction(HyperVpnService.ACTION_STOP)
+            // New lifecycle state broadcasts
+            addAction("com.hyperxray.an.HYPER_VPN_STATE_CHANGED")
         }.also { filter ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 registerReceiver(broadcastReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
             } else {
-                @Suppress("UnspecifiedRegisterReceiverFlag") registerReceiver(
-                    broadcastReceiver,
-                    filter
-                )
+                @Suppress("UnspecifiedRegisterReceiverFlag") 
+                registerReceiver(broadcastReceiver, filter)
             }
         }
 
-        updateTileState(isVpnServiceRunning(this, HyperVpnService::class.java))
+        // Check both services
+        val isRunning = isVpnServiceRunning(this, HyperVpnService::class.java) ||
+                        isVpnServiceRunning(this, HyperVpnServiceAdapter::class.java)
+        updateTileState(isRunning)
     }
 
     override fun onStopListening() {
@@ -73,9 +84,10 @@ class QuickTileService : TileService() {
                     Log.e(TAG, "QuickTileService VPN not ready.")
                     return
                 }
-                startVpnService(HyperVpnService.ACTION_START)
+                // Use HyperVpnHelper for automatic service selection
+                HyperVpnHelper.startVpnWithWarp(this@QuickTileService)
             } else {
-                startVpnService(HyperVpnService.ACTION_DISCONNECT)
+                HyperVpnHelper.stopVpn(this@QuickTileService)
             }
         }
     }
@@ -86,7 +98,7 @@ class QuickTileService : TileService() {
     }
 
     private fun updateTileState(isActive: Boolean) {
-        qsTile.apply {
+        qsTile?.apply {
             state = if (isActive) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
             updateTile()
         }
@@ -97,18 +109,6 @@ class QuickTileService : TileService() {
         val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         return activityManager.getRunningServices(Int.MAX_VALUE).any { service ->
             serviceClass.name == service.service.className
-        }
-    }
-
-    private fun startVpnService(action: String) {
-        Intent(this, HyperVpnService::class.java).apply {
-            this.action = action
-        }.also { intent ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
         }
     }
 

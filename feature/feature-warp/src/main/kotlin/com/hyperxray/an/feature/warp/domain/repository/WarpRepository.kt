@@ -14,6 +14,11 @@ interface WarpRepository {
     suspend fun registerAccount(licenseKey: String? = null): Result<WarpAccount>
     
     /**
+     * Import account from JSON string or config
+     */
+    suspend fun importAccount(accountJson: String): Result<WarpAccount>
+    
+    /**
      * Update account license key
      */
     suspend fun updateLicense(accountId: String, licenseKey: String): Result<WarpAccount>
@@ -49,6 +54,11 @@ interface WarpRepository {
     suspend fun loadAccount(): Result<WarpAccount>
     
     /**
+     * Delete account from local storage
+     */
+    suspend fun deleteAccount(): Result<Unit>
+    
+    /**
      * Generate WireGuard configuration
      */
     suspend fun generateWireGuardConfig(account: WarpAccount, endpoint: String? = null): Result<String>
@@ -62,6 +72,16 @@ interface WarpRepository {
      * Generate sing-box outbound configuration
      */
     suspend fun generateSingBoxConfig(account: WarpAccount, endpoint: String? = null): Result<String>
+    
+    /**
+     * Generate MASQUE configuration for native layer
+     */
+    suspend fun generateMasqueConfig(account: WarpAccount, endpoint: String? = null): Result<String>
+    
+    /**
+     * Generate full tunnel configuration for MASQUE mode
+     */
+    suspend fun generateMasqueTunnelConfig(account: WarpAccount, endpoint: String? = null): Result<String>
 }
 
 

@@ -1,19 +1,28 @@
 package com.hyperxray.an.core.network.vpn
 
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.ServiceConnection
 import android.os.Build
+import android.os.IBinder
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 /**
- * Manages HyperVpnService state and statistics.
- * Observes service broadcasts and provides state flows for UI.
+ * 🚀 Manages VPN state and statistics (2030 Architecture)
+ * 
+ * Supports both legacy HyperVpnService and new HyperVpnServiceAdapter.
+ * Provides unified state flows for UI regardless of which service is active.
  */
 class HyperVpnStateManager(private val context: Context) {
     
@@ -24,12 +33,23 @@ class HyperVpnStateManager(private val context: Context) {
         const val ACTION_STATS_UPDATE = "com.hyperxray.an.HYPER_VPN_STATS_UPDATE"
         const val ACTION_ERROR = "com.hyperxray.an.HYPER_VPN_ERROR"
         
+        // New lifecycle events
+        const val ACTION_LIFECYCLE_STATE = "com.hyperxray.an.VPN_LIFECYCLE_STATE"
+        const val ACTION_LIFECYCLE_TELEMETRY = "com.hyperxray.an.VPN_LIFECYCLE_TELEMETRY"
+        
         const val EXTRA_STATE = "state"
         const val EXTRA_STATS = "stats"
         const val EXTRA_ERROR = "error"
         const val EXTRA_ERROR_CODE = "error_code"
         const val EXTRA_ERROR_DETAILS = "error_details"
+        
+        // New lifecycle extras
+        const val EXTRA_LIFECYCLE_STATE_TYPE = "lifecycle_state_type"
+        const val EXTRA_LIFECYCLE_PROGRESS = "lifecycle_progress"
+        const val EXTRA_LIFECYCLE_PHASE = "lifecycle_phase"
     }
+    
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     
     /**
      * HyperVpn connection state
@@ -229,13 +249,17 @@ class HyperVpnStateManager(private val context: Context) {
     }
     
     /**
-     * Start observing service broadcasts
+     * Start observing service broadcasts (supports both legacy and new lifecycle)
      */
     fun startObserving() {
         val filter = IntentFilter().apply {
+            // Legacy actions
             addAction(ACTION_STATE_CHANGED)
             addAction(ACTION_STATS_UPDATE)
             addAction(ACTION_ERROR)
+            // New lifecycle actions
+            addAction(ACTION_LIFECYCLE_STATE)
+            addAction(ACTION_LIFECYCLE_TELEMETRY)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             context.registerReceiver(broadcastReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -243,7 +267,7 @@ class HyperVpnStateManager(private val context: Context) {
             @Suppress("UnspecifiedRegisterReceiverFlag")
             context.registerReceiver(broadcastReceiver, filter)
         }
-        Log.d(TAG, "Started observing HyperVpnService broadcasts")
+        Log.d(TAG, "🚀 Started observing VPN broadcasts (legacy + next-gen lifecycle)")
     }
     
     /**
@@ -252,9 +276,8 @@ class HyperVpnStateManager(private val context: Context) {
     fun stopObserving() {
         try {
             context.unregisterReceiver(broadcastReceiver)
-            Log.d(TAG, "Stopped observing HyperVpnService broadcasts")
+            Log.d(TAG, "Stopped observing VPN broadcasts")
         } catch (e: IllegalArgumentException) {
-            // Receiver not registered - this is fine
             Log.d(TAG, "Receiver was not registered")
         } catch (e: Exception) {
             Log.e(TAG, "Error unregistering receiver: ${e.message}", e)
@@ -276,5 +299,51 @@ class HyperVpnStateManager(private val context: Context) {
             _state.value = VpnState.Disconnected
         }
         _error.value = null
+    }
+    
+    /**
+     * Update state from new lifecycle system
+     */
+    fun updateFromLifecycleState(stateType: String, progress: Float, phase: String?, message: String?) {
+        scope.launch {
+            _state.value = when (stateType) {
+                "Idle" -> VpnState.Disconnected
+                "Preparing" -> VpnState.Connecting(progress, message ?: "Preparing: $phase")
+                "Connecting" -> VpnState.Connecting(progress, message ?: "Connecting: $phase")
+                "Connected" -> VpnState.Connected(
+                    serverName = message ?: "",
+                    serverLocation = phase ?: "",
+                    connectedAt = System.currentTimeMillis()
+                )
+                "Reconnecting" -> VpnState.Connecting(progress, message ?: "Reconnecting...")
+                "Disconnecting" -> VpnState.Disconnecting(progress, message ?: "Disconnecting: $phase")
+                "Error" -> VpnState.Error(message ?: "Unknown error", -1, phase)
+                "Suspended" -> VpnState.Connecting(0f, "Suspended: $message")
+                else -> VpnState.Disconnected
+            }
+            Log.d(TAG, "🚀 Lifecycle state updated: $stateType -> ${_state.value}")
+        }
+    }
+    
+    /**
+     * Update stats from new lifecycle system
+     */
+    fun updateFromLifecycleStats(
+        txBytes: Long,
+        rxBytes: Long,
+        latencyMs: Long,
+        packetLossPercent: Float,
+        uptimeSeconds: Long
+    ) {
+        scope.launch {
+            _stats.value = _stats.value.copy(
+                txBytes = txBytes,
+                rxBytes = rxBytes,
+                latency = latencyMs,
+                packetLoss = packetLossPercent.toDouble(),
+                uptime = uptimeSeconds,
+                connected = true
+            )
+        }
     }
 }

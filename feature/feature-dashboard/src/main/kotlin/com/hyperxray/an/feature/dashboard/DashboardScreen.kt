@@ -710,7 +710,10 @@ private fun NeonInsightBox(
 @Composable
 fun DashboardScreen(
     viewModel: DashboardViewModel,
-    resources: DashboardResources
+    resources: DashboardResources,
+    showWarpAccountDialog: Boolean = false,
+    onDismissWarpAccountDialog: () -> Unit = {},
+    onCreateWarpAccount: () -> Unit = {}
 ) {
     val coreStats by viewModel.coreStatsState.collectAsState()
     val telemetryState by viewModel.telemetryState.collectAsState()
@@ -720,6 +723,17 @@ fun DashboardScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val isRecentlyConnected = remember { mutableStateOf(false) }
+    
+    // WARP Account Required Dialog
+    if (showWarpAccountDialog) {
+        WarpAccountRequiredDialog(
+            onDismiss = onDismissWarpAccountDialog,
+            onCreateAccount = {
+                onDismissWarpAccountDialog()
+                onCreateWarpAccount()
+            }
+        )
+    }
 
     LaunchedEffect(connectionState) {
         if (connectionState is ConnectionState.Connected) {
@@ -844,8 +858,7 @@ fun DashboardScreen(
                 .fillMaxSize()
                 .padding(horizontal = horizontalPadding),
             contentPadding = PaddingValues(top = 16.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(cardSpacing),
-            userScrollEnabled = isServiceEnabled
+            verticalArrangement = Arrangement.spacedBy(cardSpacing)
         ) {
             // Futuristic Header
             item(key = "header") {
@@ -1164,4 +1177,117 @@ fun DashboardScreen(
             }
         }
     }
+}
+
+/**
+ * Dialog shown when user tries to connect without a WARP account
+ */
+@Composable
+private fun WarpAccountRequiredDialog(
+    onDismiss: () -> Unit,
+    onCreateAccount: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF0A0A15),
+        shape = RoundedCornerShape(28.dp),
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // WARP Logo
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(NeonColors.Orange, Color(0xFFFF8C42))
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "W",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = Color.White
+                    )
+                }
+                Text(
+                    text = "WARP Account Required",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    color = Color.White
+                )
+            }
+        },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Text(
+                    text = "HyperVPN requires a Cloudflare WARP account to establish a secure tunnel.",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    color = Color(0xFFB0B0C0)
+                )
+                
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(NeonColors.Cyan.copy(alpha = 0.1f))
+                        .border(1.dp, NeonColors.Cyan.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        text = "⚡ A free WARP account will be created automatically using Cloudflare's API.",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = NeonColors.Cyan
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onCreateAccount,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = NeonColors.Green.copy(alpha = 0.2f)
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .border(1.dp, NeonColors.Green.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+            ) {
+                Text(
+                    text = "CREATE & CONNECT",
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp
+                    ),
+                    color = NeonColors.Green
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(
+                    text = "CANCEL",
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    color = Color(0xFF808090)
+                )
+            }
+        }
+    )
 }

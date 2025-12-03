@@ -74,8 +74,6 @@ object ConfigEnhancer {
             jsonObject.put("dns", dnsObject)
         }
 
-        // DNS cache configuration will be set later (disabled to use SystemDnsCacheServer)
-
         // Enable DNS query logging
         // Note: DNS logs appear in debug log level, which is already set above
         // But we can add queryStrategy for better logging
@@ -83,49 +81,22 @@ object ConfigEnhancer {
             dnsObject.put("queryStrategy", "UseIPv4")
         }
 
-        // Configure DNS servers - prioritize local DNS cache server (port 5353, no root required)
-        // Xray-core DNS server format: can be string "8.8.8.8" or object {"address": "127.0.0.1", "port": 5353}
-        // We'll use object format for custom port
-        // CRITICAL: Disable Xray-core's own DNS cache to force queries to SystemDnsCacheServer
-        // This ensures all DNS queries go through our cache server
+        // Enable Xray-core DNS cache for better performance
         val cacheObject = dnsObject.optJSONObject("cache") ?: JSONObject()
-        cacheObject.put("enabled", false) // Disable Xray-core DNS cache to use SystemDnsCacheServer
+        cacheObject.put("enabled", true)
         dnsObject.put("cache", cacheObject)
-        Log.d(TAG, "⚠️ Xray-core DNS cache disabled to use SystemDnsCacheServer")
+        Log.d(TAG, "✅ Xray-core DNS cache enabled")
         
         if (!dnsObject.has("servers")) {
             val serversArray = org.json.JSONArray()
             
-            // Use ONLY local DNS cache server (port 5353, no root required)
-            // SystemDnsCacheServer will handle cache and forward to upstream DNS if needed
-            // Xray-core supports DNS server with custom port using object format
-            val localDnsServer = org.json.JSONObject()
-            localDnsServer.put("address", "127.0.0.1")
-            localDnsServer.put("port", 5353)
-            serversArray.put(localDnsServer)
+            // Use reliable public DNS servers
+            // DNS resolution is handled by native Go library
+            serversArray.put("8.8.8.8")
+            serversArray.put("1.1.1.1")
             
-            // Don't add fallback DNS servers - SystemDnsCacheServer will handle upstream forwarding
-            // This ensures ALL DNS queries go through SystemDnsCacheServer for caching
             dnsObject.put("servers", serversArray)
-            Log.d(TAG, "✅ DNS servers configured: ONLY localhost:5353 (DNS cache server - handles upstream forwarding)")
-        } else {
-            // If servers already exist, prepend local DNS cache server as first priority
-            val existingServers = dnsObject.optJSONArray("servers")
-            if (existingServers != null) {
-                val newServersArray = org.json.JSONArray()
-                
-                // Use ONLY local DNS cache server (port 5353)
-                // SystemDnsCacheServer will handle cache and forward to upstream DNS if needed
-                val localDnsServer = org.json.JSONObject()
-                localDnsServer.put("address", "127.0.0.1")
-                localDnsServer.put("port", 5353)
-                newServersArray.put(localDnsServer)
-                
-                // Don't add existing servers - SystemDnsCacheServer will handle upstream forwarding
-                // This ensures ALL DNS queries go through SystemDnsCacheServer for caching
-                dnsObject.put("servers", newServersArray)
-                Log.d(TAG, "✅ DNS servers updated: ONLY localhost:5353 (DNS cache server - handles upstream forwarding)")
-            }
+            Log.d(TAG, "✅ DNS servers configured: 8.8.8.8, 1.1.1.1")
         }
 
         jsonObject.put("dns", dnsObject)
@@ -728,10 +699,10 @@ object ConfigEnhancer {
                 val outboundTag = rule.optString("outboundTag", "")
                 
                 if (port == 53 && (outboundTag == "dns-out" || outboundTag == "dns")) {
-                    // Skip this rule - it prevents SystemDnsCacheServer from being used
+                    // Skip this rule - let Xray-core handle DNS internally
                     removedPort53Rule = true
                     removedCount++
-                    Log.d(TAG, "⚠️ Removed port 53 routing rule (outboundTag: $outboundTag) to allow SystemDnsCacheServer usage")
+                    Log.d(TAG, "⚠️ Removed port 53 routing rule (outboundTag: $outboundTag)")
                     continue
                 }
                 
@@ -745,7 +716,7 @@ object ConfigEnhancer {
         if (removedPort53Rule) {
             routingObject.put("rules", newRulesArray)
             jsonObject.put("routing", routingObject)
-            Log.i(TAG, "✅ Port 53 routing rule(s) removed ($removedCount rule(s)) - Xray-core will now use SystemDnsCacheServer for DNS resolution")
+            Log.i(TAG, "✅ Port 53 routing rule(s) removed ($removedCount rule(s))")
         } else {
             Log.d(TAG, "No port 53 routing rule found to remove")
         }

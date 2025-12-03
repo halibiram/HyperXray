@@ -22,12 +22,10 @@ fun NotificationPreferencesCard(
     notifyVpnStatus: Boolean,
     notifyErrors: Boolean,
     notifyPerformance: Boolean,
-    notifyDnsCache: Boolean,
     notifyManual: Boolean,
     onNotifyVpnStatusChange: (Boolean) -> Unit,
     onNotifyErrorsChange: (Boolean) -> Unit,
     onNotifyPerformanceChange: (Boolean) -> Unit,
-    onNotifyDnsCacheChange: (Boolean) -> Unit,
     onNotifyManualChange: (Boolean) -> Unit
 ) {
     Card(
@@ -62,13 +60,6 @@ fun NotificationPreferencesCard(
                 description = "Notify about performance statistics",
                 checked = notifyPerformance,
                 onCheckedChange = onNotifyPerformanceChange
-            )
-
-            NotificationPreferenceItem(
-                title = "DNS Cache Info",
-                description = "Notify about DNS cache statistics",
-                checked = notifyDnsCache,
-                onCheckedChange = onNotifyDnsCacheChange
             )
 
             NotificationPreferenceItem(

@@ -18,10 +18,10 @@ import java.security.Security
 
 private const val TAG = "WarpApiManager"
 private const val WARP_API_BASE_URL = "https://api.cloudflareclient.com"
-// Try multiple API versions - Cloudflare updates these frequently
-// Based on wgcf: https://github.com/ViRb3/wgcf/blob/master/cloudflare/api.go
-private val WARP_API_VERSIONS = listOf("v0a1922", "v0a2408", "v0a1927", "v0a1926", "v0a1925")
-private const val WARP_API_VERSION = "v0a1922" // Default version (from wgcf)
+// Try multiple API versions - Cloudflare updates these frequently (updated December 2024)
+// Latest versions from official 1.1.1.1 Android app
+private val WARP_API_VERSIONS = listOf("v0a2596", "v0a2584", "v0a2483", "v0a2484", "v0i2409")
+private const val WARP_API_VERSION = "v0a2596" // Default version (latest)
 private const val WARP_REGISTRATION_ENDPOINT = "$WARP_API_BASE_URL/$WARP_API_VERSION/reg"
 
 /**
@@ -216,17 +216,20 @@ object WarpApiManager {
                 val endpoint = "$WARP_API_BASE_URL/$apiVersion/reg"
                 Log.d(TAG, "🔄 Trying API version: $apiVersion")
                 
-                // CF-Client-Version should match API version
+                // CF-Client-Version should match API version (updated December 2024)
                 val clientVersion = when (apiVersion) {
-                    "v0a1922" -> "a-6.3-1922"
-                    "v0a2408" -> "a-6.11-2408"
-                    else -> "a-6.3-1922" // Default to wgcf version
+                    "v0a2596" -> "a-6.30-2596"
+                    "v0a2584" -> "a-6.29-2584"
+                    "v0a2483" -> "a-6.28-2483"
+                    "v0a2484" -> "a-6.28-2484"
+                    "v0i2409" -> "i-6.29-2409"
+                    else -> "a-6.30-2596" // Default to latest
                 }
                 
                 val request = Request.Builder()
                     .url(endpoint)
                     .post(jsonBody.toRequestBody("application/json".toMediaType()))
-                    .header("User-Agent", "okhttp/3.12.1")
+                    .header("User-Agent", "okhttp/4.12.0")
                     .header("Content-Type", "application/json")
                     .header("CF-Client-Version", clientVersion)
                     .build()
@@ -558,17 +561,20 @@ object WarpApiManager {
                 val endpoint = "$WARP_API_BASE_URL/$apiVersion/reg"
                 Log.d(TAG, "🔄 Trying API version: $apiVersion")
                 
-                // CF-Client-Version should match API version
+                // CF-Client-Version should match API version (updated December 2024)
                 val clientVersion = when (apiVersion) {
-                    "v0a1922" -> "a-6.3-1922"
-                    "v0a2408" -> "a-6.11-2408"
-                    else -> "a-6.3-1922" // Default to wgcf version
+                    "v0a2596" -> "a-6.30-2596"
+                    "v0a2584" -> "a-6.29-2584"
+                    "v0a2483" -> "a-6.28-2483"
+                    "v0a2484" -> "a-6.28-2484"
+                    "v0i2409" -> "i-6.29-2409"
+                    else -> "a-6.30-2596" // Default to latest
                 }
                 
                 val request = Request.Builder()
                     .url(endpoint)
                     .post(jsonBody.toRequestBody("application/json".toMediaType()))
-                    .header("User-Agent", "okhttp/3.12.1")
+                    .header("User-Agent", "okhttp/4.12.0")
                     .header("Content-Type", "application/json")
                     .header("CF-Client-Version", clientVersion)
                     .build()
@@ -716,20 +722,20 @@ object WarpApiManager {
                 Log.d(TAG, "📤 License update request: PUT $updateUrl (API version: $apiVersion)")
                 Log.d(TAG, "   Authorization: Bearer ${token.take(20)}...")
                 
-                // CF-Client-Version should match API version
+                // CF-Client-Version should match API version (updated December 2024)
                 val clientVersion = when (apiVersion) {
-                    "v0a1922" -> "a-6.3-1922"
-                    "v0a2408" -> "a-6.11-2408"
-                    "v0a1927" -> "a-6.11-1927"
-                    "v0a1926" -> "a-6.11-1926"
-                    "v0a1925" -> "a-6.11-1925"
-                    else -> "a-6.11-2408" // Default
+                    "v0a2596" -> "a-6.30-2596"
+                    "v0a2584" -> "a-6.29-2584"
+                    "v0a2483" -> "a-6.28-2483"
+                    "v0a2484" -> "a-6.28-2484"
+                    "v0i2409" -> "i-6.29-2409"
+                    else -> "a-6.30-2596" // Default to latest
                 }
                 
                 val request = Request.Builder()
                     .url(updateUrl)
                     .put(requestBody.toRequestBody("application/json".toMediaType()))
-                    .header("User-Agent", "okhttp/3.12.1")
+                    .header("User-Agent", "okhttp/4.12.0")
                     .header("Content-Type", "application/json")
                     .header("Authorization", "Bearer $token")
                     .header("CF-Client-Version", clientVersion)

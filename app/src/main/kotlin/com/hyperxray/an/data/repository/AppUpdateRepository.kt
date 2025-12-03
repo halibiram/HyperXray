@@ -53,7 +53,7 @@ class AppUpdateRepository(
                 } else {
                     null
                 }
-                val client = NetworkModule.getHttpClientFactory().createHttpClient(proxy)
+                val client = NetworkModule.getHttpClientFactory().create(proxy)
 
                 val request = Request.Builder()
                     .url(application.getString(R.string.source_url) + "/releases/latest")

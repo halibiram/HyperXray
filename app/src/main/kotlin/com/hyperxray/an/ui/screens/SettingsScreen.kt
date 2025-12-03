@@ -370,6 +370,39 @@ fun SettingsScreen(
                 icon = Icons.Default.VpnKey,
                 accentColor = FuturisticSettingsColors.NeonMagenta
             ) {
+                // Tunnel Mode Selector (MASQUE over Xray feature)
+                var tunnelModeExpanded by remember { mutableStateOf(false) }
+                FuturisticDropdownItem(
+                    title = "Tunnel Mode",
+                    subtitle = "Select tunneling protocol",
+                    selectedValue = settingsState.tunnelMode.displayName,
+                    expanded = tunnelModeExpanded,
+                    onExpandedChange = { tunnelModeExpanded = it },
+                    icon = Icons.Default.SwapHoriz
+                ) {
+                    com.hyperxray.an.common.TunnelMode.entries.forEach { mode ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(mode.displayName, color = Color.White)
+                                    Text(
+                                        mode.description,
+                                        color = Color.White.copy(alpha = 0.6f),
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            },
+                            onClick = {
+                                mainViewModel.setTunnelMode(mode)
+                                tunnelModeExpanded = false
+                            },
+                            modifier = Modifier.background(Color(0xFF1A1A2E))
+                        )
+                    }
+                }
+
+                FuturisticDivider()
+
                 FuturisticNavigationItem(
                     title = stringResource(R.string.apps_title),
                     subtitle = stringResource(R.string.apps_summary),

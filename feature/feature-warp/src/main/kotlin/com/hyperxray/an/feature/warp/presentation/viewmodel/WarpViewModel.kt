@@ -7,6 +7,7 @@ import com.hyperxray.an.feature.warp.domain.entity.WarpConfigType
 import com.hyperxray.an.feature.warp.domain.entity.WarpDevice
 import com.hyperxray.an.feature.warp.domain.usecase.GenerateWarpConfigUseCase
 import com.hyperxray.an.feature.warp.domain.usecase.GetWarpDevicesUseCase
+import com.hyperxray.an.feature.warp.domain.usecase.ImportWarpAccountUseCase
 import com.hyperxray.an.feature.warp.domain.usecase.LoadWarpAccountUseCase
 import com.hyperxray.an.feature.warp.domain.usecase.RegisterWarpAccountUseCase
 import com.hyperxray.an.feature.warp.domain.usecase.RemoveWarpDeviceUseCase
@@ -33,6 +34,7 @@ data class WarpUiState(
  */
 class WarpViewModel(
     private val registerAccountUseCase: RegisterWarpAccountUseCase,
+    private val importAccountUseCase: ImportWarpAccountUseCase,
     private val updateLicenseUseCase: UpdateWarpLicenseUseCase,
     private val getDevicesUseCase: GetWarpDevicesUseCase,
     private val removeDeviceUseCase: RemoveWarpDeviceUseCase,
@@ -195,6 +197,32 @@ class WarpViewModel(
                         _uiState.value = _uiState.value.copy(
                             isLoading = false,
                             error = error.message ?: "Failed to generate config"
+                        )
+                    }
+                )
+        }
+    }
+    
+    /**
+     * Import account from JSON, WireGuard config, or license key
+     */
+    fun importAccount(accountData: String) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
+            
+            importAccountUseCase(accountData)
+                .fold(
+                    onSuccess = { account ->
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            account = account,
+                            error = null
+                        )
+                    },
+                    onFailure = { error ->
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            error = error.message ?: "Failed to import account"
                         )
                     }
                 )

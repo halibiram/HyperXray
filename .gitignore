@@ -62,6 +62,12 @@ hyperxray_*.log
 vpn_error_logs.txt
 convert_log.py
 **/dns_cache.json
+logcat_long_session.txt
+connection_issues.txt
+recent_issues.txt
+conn_errors.txt
+hyperxray_filtered.txt
+hyperxray_specific.txt
 
 # Warp test and config files
 test_warp_key.py

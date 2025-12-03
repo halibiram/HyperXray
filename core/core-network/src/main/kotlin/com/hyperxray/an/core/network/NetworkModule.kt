@@ -11,10 +11,9 @@ private const val TAG = "NetworkModule"
  * 
  * This module provides network-related functionality including:
  * - gRPC client communication
- * - HTTP client operations with Cronet + Conscrypt acceleration
+ * - HTTP client operations with OkHttp + Conscrypt TLS acceleration
  * - Network utilities and helpers
  * - TLS/SSL feature encoding
- * - Automatic capability detection and backend selection
  */
 object NetworkModule {
     /**
@@ -37,9 +36,9 @@ object NetworkModule {
         }
         
         try {
-            // Initialize HTTP client factory with Cronet + Conscrypt
+            // Initialize HTTP client factory with OkHttp + Conscrypt
             Log.i(TAG, "🚀 Initializing NetworkModule (HttpClientFactory + DNS Cache + HTTP Cache + Retry)")
-            HttpClientFactory.initialize(context.applicationContext)
+            HttpClientFactory.init(context.applicationContext)
             
             isInitialized = true
             Log.i(TAG, "✅ NetworkModule initialized successfully")

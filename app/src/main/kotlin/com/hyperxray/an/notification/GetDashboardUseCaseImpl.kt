@@ -1,12 +1,9 @@
 package com.hyperxray.an.notification
 
 import android.content.Context
-import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.feature.telegram.domain.usecase.GetDashboardUseCase
 import com.hyperxray.an.feature.telegram.domain.usecase.GetVpnStatusUseCase
 import com.hyperxray.an.feature.telegram.domain.usecase.GetPerformanceStatsUseCase
-import com.hyperxray.an.feature.telegram.domain.usecase.GetDnsCacheStatsUseCase
-import com.hyperxray.an.feature.telegram.domain.usecase.GetAiOptimizerStatusUseCase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -18,19 +15,15 @@ class GetDashboardUseCaseImpl(
 ) : GetDashboardUseCase {
     private val getVpnStatusUseCase: GetVpnStatusUseCase = GetVpnStatusUseCaseImpl(context)
     private val getPerformanceStatsUseCase: GetPerformanceStatsUseCase = GetPerformanceStatsUseCaseImpl(context)
-    private val getDnsCacheStatsUseCase = GetDnsCacheStatsUseCase(context)
-    private val getAiOptimizerStatusUseCase: GetAiOptimizerStatusUseCase = GetAiOptimizerStatusUseCaseImpl(context)
     
     override suspend fun invoke(): Result<String> = withContext(Dispatchers.IO) {
         try {
             // Fetch all metrics in parallel for better performance
             val vpnStatus = getVpnStatusUseCase().getOrNull() ?: "VPN Status: Unknown"
             val performanceStats = getPerformanceStatsUseCase().getOrNull() ?: "Performance Stats: Unknown"
-            val dnsStats = getDnsCacheStatsUseCase().getOrNull() ?: "DNS Stats: Unknown"
-            val aiStatus = getAiOptimizerStatusUseCase().getOrNull() ?: "AI Status: Unknown"
             
             // Extract key metrics for compact dashboard view
-            val dashboard = buildDashboardMessage(vpnStatus, performanceStats, dnsStats, aiStatus)
+            val dashboard = buildDashboardMessage(vpnStatus, performanceStats)
             Result.success(dashboard)
         } catch (e: Exception) {
             Result.failure(e)
@@ -39,9 +32,7 @@ class GetDashboardUseCaseImpl(
     
     private fun buildDashboardMessage(
         vpnStatus: String,
-        performanceStats: String,
-        dnsStats: String,
-        aiStatus: String
+        performanceStats: String
     ): String {
         return buildString {
             appendLine("<b>📱 HYPERXRAY DASHBOARD</b>")
@@ -60,32 +51,11 @@ class GetDashboardUseCaseImpl(
             extractKeyMetrics(performanceStats) { metric, value ->
                 appendLine("$metric $value")
             }
-            appendLine()
-            
-            // DNS Cache Stats (key metrics only)
-            appendLine("<b>🌐 DNS Cache:</b>")
-            // Extract key metrics from DNS stats
-            extractKeyMetrics(dnsStats) { metric, value ->
-                appendLine("$metric $value")
-            }
-            appendLine()
-            
-            // AI Status (compact)
-            appendLine("<b>🤖 AI Optimizer:</b>")
-            val aiOperational = aiStatus.contains("✅ FULLY OPERATIONAL", ignoreCase = true) ||
-                                aiStatus.contains("✅ Active", ignoreCase = true)
-            appendLine(if (aiOperational) "✅ <b>ACTIVE</b>" else "⚠️ <b>INACTIVE</b>")
-            
-            // Extract cycle count if available
-            val cycleCountMatch = Regex("Total Cycles:\\s*<b>(\\d+)</b>").find(aiStatus)
-            cycleCountMatch?.let {
-                appendLine("Cycles: <b>${it.groupValues[1]}</b>")
-            }
             
             appendLine()
             appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
             appendLine("💡 Use /help for more commands")
-            appendLine("📊 Use /stats, /dns, /ai_status for details")
+            appendLine("📊 Use /stats for details")
         }
     }
     

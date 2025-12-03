@@ -122,9 +122,9 @@ def collect_logcat(tag_filters: List[str] = None, lines: int = 500000) -> Option
 
     result = run_adb_command(command)
     if result:
-        # Package ile ilgili logları filtrele (DNS cache loglarını da dahil et)
+        # Package ile ilgili logları filtrele (Google DNS loglarını da dahil et)
         filtered_lines = []
-        dns_tags = ["SystemDnsCacheServer", "DnsCacheManager", "DNS", "dns", "DnsUpstreamClient", "DnsSocketPool"]
+        dns_tags = ["GoogleDNS", "BootstrapDNS", "DNS", "dns", "DnsUpstreamClient", "DnsSocketPool"]
         relevant_tags = [PACKAGE_NAME, "HyperXray", "TProxyService", "XrayRuntime", "TProxy", "Xray"]
         
         for line in result.split("\n"):
@@ -403,9 +403,9 @@ def analyze_dns_logs(app_log_file: Path, logcat_file: Path) -> Dict[str, Any]:
     dns_server_starts = 0
     dns_server_stops = 0
 
-    # DNS ile ilgili tag'ler (genişletilmiş)
-    dns_tags = ["SystemDnsCacheServer", "DnsCacheManager", "DnsUpstreamClient", 
-                "DnsSocketPool", "DNS", "dns", "DnsCache"]
+    # DNS ile ilgili tag'ler (Google DNS kullanılıyor)
+    dns_tags = ["GoogleDNS", "BootstrapDNS", "DnsUpstreamClient", 
+                "DnsSocketPool", "DNS", "dns"]
 
     # App log'dan DNS loglarını filtrele
     if app_log_file and app_log_file.exists():

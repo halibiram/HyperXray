@@ -11,9 +11,6 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.hyperxray.an.BuildConfig
 import com.hyperxray.an.common.AiLogHelper
-import com.hyperxray.an.common.Socks5ReadinessChecker
-import com.hyperxray.an.core.network.dns.DnsCacheManager
-import com.hyperxray.an.core.network.dns.SystemDnsCacheServer
 import com.hyperxray.an.notification.TelegramNotificationManager
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.service.state.ServiceSessionState
@@ -44,7 +41,7 @@ class TunInterfaceManager(private val vpnService: VpnService) {
      * This method encapsulates all VPN interface setup logic previously in TProxyService.establishVpnInterface().
      * 
      * @param prefs Preferences for VPN configuration
-     * @param sessionState Session state containing systemDnsCacheServer, dnsCacheInitialized, etc.
+     * @param sessionState Session state containing dnsCacheInitialized, etc.
      * @param context Context for cache directory and other operations
      * @param serviceScope CoroutineScope for async operations
      * @param onError Callback for error notifications (Intent broadcast, Telegram, etc.)
@@ -73,46 +70,8 @@ class TunInterfaceManager(private val vpnService: VpnService) {
             }
         }
         
-        // Initialize DnsCacheManager first (before starting DNS cache server)
-        val dnsInitStartTime = System.currentTimeMillis()
-        if (!sessionState.dnsCacheInitialized) {
-            try {
-                AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Initializing DnsCacheManager...")
-                DnsCacheManager.initialize(context)
-                sessionState.dnsCacheInitialized = true
-                val dnsInitDuration = System.currentTimeMillis() - dnsInitStartTime
-                Log.d(TAG, "DnsCacheManager initialized")
-                AiLogHelper.i(TAG, "✅ TUN ESTABLISH: DnsCacheManager initialized (duration: ${dnsInitDuration}ms)")
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to initialize DnsCacheManager: ${e.message}", e)
-                AiLogHelper.w(TAG, "⚠️ TUN ESTABLISH: Failed to initialize DnsCacheManager: ${e.message}")
-            }
-        } else {
-            AiLogHelper.d(TAG, "✅ TUN ESTABLISH: DnsCacheManager already initialized")
-        }
-        
-        // Start system DNS cache server before building VPN (needed for DNS configuration)
-        val dnsServerStartTime = System.currentTimeMillis()
-        try {
-            if (sessionState.systemDnsCacheServer == null) {
-                AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Creating SystemDnsCacheServer instance...")
-                sessionState.systemDnsCacheServer = SystemDnsCacheServer.getInstance(context)
-            }
-            // Try port 53 first (for VpnService DNS), fallback to 5353 if not available
-            AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Starting DNS cache server (trying port 53 first, fallback to 5353)...")
-            val dnsStarted = sessionState.systemDnsCacheServer?.start(53) ?: false
-            if (!dnsStarted) {
-                Log.w(TAG, "⚠️ DNS server failed to start on port 53, will use custom DNS in VPN config")
-                AiLogHelper.w(TAG, "⚠️ TUN ESTABLISH: DNS server failed to start on port 53, VPN will use custom DNS")
-            }
-            val dnsServerDuration = System.currentTimeMillis() - dnsServerStartTime
-            val listeningPort = sessionState.systemDnsCacheServer?.getListeningPort()
-            Log.d(TAG, "DNS cache server started successfully")
-            AiLogHelper.i(TAG, "✅ TUN ESTABLISH: DNS cache server started on port $listeningPort (duration: ${dnsServerDuration}ms)")
-        } catch (e: Exception) {
-            Log.w(TAG, "Error starting DNS cache server: ${e.message}", e)
-            AiLogHelper.w(TAG, "⚠️ TUN ESTABLISH: Error starting DNS cache server: ${e.message}")
-        }
+        // DNS cache removed - using Google DNS (8.8.8.8) directly
+        AiLogHelper.d(TAG, "✅ TUN ESTABLISH: Using Google DNS directly (no cache)")
         
         // VPN permission should already be granted at Activity/ViewModel level
         // This check is just for logging - let builder.establish() handle actual permission errors
@@ -134,7 +93,7 @@ class TunInterfaceManager(private val vpnService: VpnService) {
         val buildStartTime = System.currentTimeMillis()
         Log.d(TAG, "Building VPN interface configuration...")
         AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Building VPN interface configuration (MTU=${prefs.tunnelMtu}, IPv4=${prefs.ipv4}, IPv6=${prefs.ipv6})...")
-        val builder = buildVpnInterface(prefs, sessionState.systemDnsCacheServer)
+        val builder = buildVpnInterface(prefs)
         val buildDuration = System.currentTimeMillis() - buildStartTime
         AiLogHelper.d(TAG, "✅ TUN ESTABLISH: VPN interface configuration built (duration: ${buildDuration}ms)")
         
@@ -212,45 +171,6 @@ class TunInterfaceManager(private val vpnService: VpnService) {
             return null
         }
         
-        // Set VPN interface IP for DNS socket binding (ensures DNS queries go through VPN)
-        if (newTunFd != null && prefs.ipv4) {
-            sessionState.systemDnsCacheServer?.setVpnInterfaceIp(prefs.tunnelIpv4Address)
-            Log.i(TAG, "✅ VPN interface IP set for DNS: ${prefs.tunnelIpv4Address} (direct UDP DNS queries will be routed through VPN)")
-            AiLogHelper.i(TAG, "✅ TUN ESTABLISH: VPN interface IP set for DNS: ${prefs.tunnelIpv4Address}")
-        } else {
-            if (newTunFd == null) {
-                Log.w(TAG, "⚠️ VPN interface not established, DNS queries may not route through VPN")
-                AiLogHelper.w(TAG, "⚠️ TUN ESTABLISH: VPN interface not established, DNS queries may not route through VPN")
-            }
-            if (!prefs.ipv4) {
-                Log.w(TAG, "⚠️ IPv4 disabled, VPN interface IP not set for DNS")
-                AiLogHelper.w(TAG, "⚠️ TUN ESTABLISH: IPv4 disabled, VPN interface IP not set for DNS")
-            }
-        }
-        
-        // Try to set SOCKS5 proxy early if already ready (before checkSocks5Readiness)
-        // This ensures DNS queries can use SOCKS5 fallback immediately
-        val socksAddress = prefs.socksAddress
-        val socksPort = prefs.socksPort
-        serviceScope.launch {
-            try {
-                AiLogHelper.d(TAG, "🔧 TUN ESTABLISH: Checking SOCKS5 readiness (early check): $socksAddress:$socksPort")
-                // Quick check if SOCKS5 is already ready
-                if (Socks5ReadinessChecker.isSocks5Ready(context, socksAddress, socksPort)) {
-                    sessionState.systemDnsCacheServer?.setSocks5Proxy(socksAddress, socksPort)
-                    Log.d(TAG, "✅ SOCKS5 UDP proxy set for DNS (early check): $socksAddress:$socksPort")
-                    AiLogHelper.i(TAG, "✅ TUN ESTABLISH: SOCKS5 UDP proxy set for DNS (early check): $socksAddress:$socksPort")
-                } else {
-                    Log.d(TAG, "⏳ SOCKS5 not ready yet, will be set after readiness check")
-                    AiLogHelper.d(TAG, "⏳ TUN ESTABLISH: SOCKS5 not ready yet, will be set after readiness check")
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Error in early SOCKS5 proxy check: ${e.message}")
-                AiLogHelper.w(TAG, "⚠️ TUN ESTABLISH: Error in early SOCKS5 proxy check: ${e.message}")
-            }
-        }
-        
-        
         val totalDuration = System.currentTimeMillis() - establishStartTime
         Log.d(TAG, "VPN interface established successfully. Waiting for Xray to start and SOCKS5 to become ready...")
         AiLogHelper.i(TAG, "✅ TUN ESTABLISH SUCCESS: VPN interface established successfully (total duration: ${totalDuration}ms)")
@@ -262,12 +182,10 @@ class TunInterfaceManager(private val vpnService: VpnService) {
      * Matches getVpnBuilder() logic exactly from TProxyService.
      * 
      * @param prefs Preferences for VPN configuration
-     * @param dnsCacheServer Optional DNS cache server for DNS configuration
      * @return Configured VPN Builder
      */
     private fun buildVpnInterface(
-        prefs: Preferences,
-        dnsCacheServer: SystemDnsCacheServer?
+        prefs: Preferences
     ): VpnService.Builder = vpnService.Builder().apply {
         setBlocking(false)
         setMtu(prefs.tunnelMtu)
@@ -283,44 +201,14 @@ class TunInterfaceManager(private val vpnService: VpnService) {
         if (prefs.ipv4) {
             addAddress(prefs.tunnelIpv4Address, prefs.tunnelIpv4Prefix)
             addRoute("0.0.0.0", 0)
-            
-            // Use DNS cache server if available (started in establishVpnInterface())
-            // Note: DNS cache server is started before getVpnBuilder is called
-            val listeningPort = dnsCacheServer?.getListeningPort()
-            if (listeningPort != null) {
-                if (listeningPort == 53) {
-                    // SystemDnsCacheServer port 53'te çalışıyor - VpnService DNS'i 127.0.0.1 olarak ayarla
-                    try {
-                        addDnsServer("127.0.0.1") // Use local DNS cache server on port 53
-                        Log.d(TAG, "✅ VpnService DNS set to 127.0.0.1:53 (SystemDnsCacheServer)")
-                    } catch (e: IllegalArgumentException) {
-                        Log.e(TAG, "Failed to set VpnService DNS to 127.0.0.1: ${e.message}", e)
-                        // Fallback to custom DNS
-                        prefs.dnsIpv4.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
-                    }
-                } else {
-                    // SystemDnsCacheServer is running on port 5353 (port 53 not available)
-                    // VpnService DNS trafiğini yakalayıp SystemDnsCacheServer'a yönlendirmek için
-                    // VpnService DNS'i 127.0.0.1 olarak ayarlamayı deniyoruz, ancak VpnService port 53'e gidecek
-                    // Bu yüzden custom DNS kullanıyoruz ve SystemDnsCacheServer SOCKS5 üzerinden DNS sorgularını yapabilir
-                    Log.i(TAG, "⚠️ SystemDnsCacheServer on port $listeningPort - VpnService DNS will use custom DNS (SystemDnsCacheServer available via SOCKS5)")
-                    // Use custom DNS - SystemDnsCacheServer SOCKS5 üzerinden DNS sorgularını yapabilir
-                    prefs.dnsIpv4.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
-                }
-            } else {
-                // DNS cache server not available, use custom DNS
-                prefs.dnsIpv4.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
-            }
+            // Use custom DNS from preferences (DNS handled by native Go library)
+            prefs.dnsIpv4.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
         }
         if (prefs.ipv6) {
             addAddress(prefs.tunnelIpv6Address, prefs.tunnelIpv6Prefix)
             addRoute("::", 0)
-            // For IPv6, use custom DNS server or localhost if DNS cache server is running
-            if (dnsCacheServer?.isRunning() == true) {
-                addDnsServer("::1") // IPv6 localhost
-            } else {
-                prefs.dnsIpv6.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
-            }
+            // Use custom DNS from preferences (DNS handled by native Go library)
+            prefs.dnsIpv6.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
         }
 
         prefs.apps?.forEach { appName ->

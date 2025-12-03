@@ -9,7 +9,6 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.hyperxray.an.BuildConfig
-import com.hyperxray.an.core.network.dns.SystemDnsCacheServer
 import com.hyperxray.an.prefs.Preferences
 import java.util.concurrent.atomic.AtomicReference
 
@@ -29,12 +28,10 @@ class VpnInterfaceManager(private val vpnService: VpnService) {
      * Establish VPN interface (TUN).
      * 
      * @param prefs Preferences for VPN configuration
-     * @param dnsCacheServer Optional DNS cache server for DNS configuration
      * @return ParcelFileDescriptor if successful, null otherwise
      */
     fun establish(
-        prefs: Preferences,
-        dnsCacheServer: SystemDnsCacheServer?
+        prefs: Preferences
     ): ParcelFileDescriptor? {
         synchronized(tunFdLock) {
             if (tunFdRef.get() != null) {
@@ -54,7 +51,7 @@ class VpnInterfaceManager(private val vpnService: VpnService) {
         }
         
         Log.d(TAG, "Building VPN interface configuration...")
-        val builder = getVpnBuilder(prefs, dnsCacheServer)
+        val builder = getVpnBuilder(prefs)
         
         Log.d(TAG, "Attempting to establish VPN interface (TUN)...")
         val newTunFd = builder.establish()
@@ -94,12 +91,10 @@ class VpnInterfaceManager(private val vpnService: VpnService) {
      * Get VPN Builder with configuration.
      * 
      * @param prefs Preferences for VPN configuration
-     * @param dnsCacheServer Optional DNS cache server for DNS configuration
      * @return Configured VPN Builder
      */
     fun getVpnBuilder(
-        prefs: Preferences,
-        dnsCacheServer: SystemDnsCacheServer?
+        prefs: Preferences
     ): VpnService.Builder = vpnService.Builder().apply {
         setBlocking(false)
         setMtu(prefs.tunnelMtu)
@@ -115,41 +110,14 @@ class VpnInterfaceManager(private val vpnService: VpnService) {
         if (prefs.ipv4) {
             addAddress(prefs.tunnelIpv4Address, prefs.tunnelIpv4Prefix)
             addRoute("0.0.0.0", 0)
-            
-            // Use DNS cache server if available
-            val listeningPort = dnsCacheServer?.getListeningPort()
-            if (listeningPort != null) {
-                if (listeningPort == 53) {
-                    // SystemDnsCacheServer is running on port 53 - set VpnService DNS to 127.0.0.1
-                    try {
-                        addDnsServer("127.0.0.1") // Use local DNS cache server on port 53
-                        Log.d(TAG, "✅ VpnService DNS set to 127.0.0.1:53 (SystemDnsCacheServer)")
-                    } catch (e: IllegalArgumentException) {
-                        Log.e(TAG, "Failed to set VpnService DNS to 127.0.0.1: ${e.message}", e)
-                        // Fallback to custom DNS
-                        prefs.dnsIpv4.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
-                    }
-                } else {
-                    // SystemDnsCacheServer is running on port 5353 (port 53 not available)
-                    // VpnService DNS will use custom DNS (SystemDnsCacheServer available via SOCKS5)
-                    Log.i(TAG, "⚠️ SystemDnsCacheServer on port $listeningPort - VpnService DNS will use custom DNS (SystemDnsCacheServer available via SOCKS5)")
-                    // Use custom DNS - SystemDnsCacheServer can handle DNS queries via SOCKS5
-                    prefs.dnsIpv4.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
-                }
-            } else {
-                // DNS cache server not available, use custom DNS
-                prefs.dnsIpv4.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
-            }
+            // Use custom DNS from preferences (DNS handled by native Go library)
+            prefs.dnsIpv4.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
         }
         if (prefs.ipv6) {
             addAddress(prefs.tunnelIpv6Address, prefs.tunnelIpv6Prefix)
             addRoute("::", 0)
-            // For IPv6, use custom DNS server or localhost if DNS cache server is running
-            if (dnsCacheServer?.isRunning() == true) {
-                addDnsServer("::1") // IPv6 localhost
-            } else {
-                prefs.dnsIpv6.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
-            }
+            // Use custom DNS from preferences (DNS handled by native Go library)
+            prefs.dnsIpv6.takeIf { it.isNotEmpty() }?.also { addDnsServer(it) }
         }
         
         prefs.apps?.forEach { appName ->

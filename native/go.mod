@@ -43,6 +43,7 @@ require (
 	github.com/klauspost/compress v1.17.4 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.12 // indirect
 	github.com/kr/text v0.2.0 // indirect
+	github.com/leanovate/gopter v0.2.11 // indirect
 	github.com/miekg/dns v1.1.68 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pires/go-proxyproto v0.8.1 // indirect

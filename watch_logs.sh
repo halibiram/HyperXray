@@ -7,7 +7,7 @@ echo "Logları izlemek için Ctrl+C ile durdurun"
 echo ""
 echo "İzlenen Tag'ler:"
 echo "  - HttpClientFactory (HTTP client optimizasyonları)"
-echo "  - DnsCacheManager (DNS cache sistemi)"
+echo "  - GoogleDNS (DNS çözümleme - Google DNS)"
 echo "  - RetryInterceptor (Retry mekanizması)"
 echo "  - CacheLoggingInterceptor (HTTP cache logları)"
 echo ""
@@ -16,7 +16,7 @@ echo ""
 
 # Logları temizle ve canlı izle
 adb logcat -c
-adb logcat -s HttpClientFactory:D DnsCacheManager:D RetryInterceptor:D CacheLoggingInterceptor:D
+adb logcat -s HttpClientFactory:D GoogleDNS:D RetryInterceptor:D CacheLoggingInterceptor:D
 
 
 

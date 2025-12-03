@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import com.hyperxray.an.BuildConfig
 import com.hyperxray.an.common.ThemeMode
+import com.hyperxray.an.common.TunnelMode
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.viewmodel.ExtremeOptimizationSettings
 import com.hyperxray.an.viewmodel.InputFieldState
@@ -93,7 +94,8 @@ class SettingsRepository(
             ),
             bypassDomains = prefs.bypassDomains,
             bypassIps = prefs.bypassIps,
-            xrayCoreInstanceCount = prefs.xrayCoreInstanceCount
+            xrayCoreInstanceCount = prefs.xrayCoreInstanceCount,
+            tunnelMode = TunnelMode.fromString(prefs.tunnelMode)
         )
     }
 
@@ -871,6 +873,33 @@ class SettingsRepository(
         prefs.bypassIps = ips
         _settingsState.update {
             it.copy(bypassIps = ips)
+        }
+    }
+
+    // ==================== Tunnel Mode (MASQUE over Xray) ====================
+    
+    /**
+     * Get current tunnel mode.
+     */
+    fun getTunnelMode(): TunnelMode {
+        return TunnelMode.fromString(prefs.tunnelMode)
+    }
+    
+    /**
+     * Set tunnel mode.
+     */
+    fun setTunnelMode(mode: TunnelMode) {
+        prefs.tunnelMode = mode.name.lowercase()
+        _settingsState.update { it.copy(tunnelMode = mode) }
+        Log.d(TAG, "Tunnel mode set to: ${mode.name}")
+    }
+    
+    /**
+     * Observe tunnel mode changes as Flow.
+     */
+    fun observeTunnelMode(): Flow<TunnelMode> {
+        return kotlinx.coroutines.flow.flow {
+            emit(getTunnelMode())
         }
     }
 

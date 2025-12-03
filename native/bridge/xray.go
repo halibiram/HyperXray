@@ -30,10 +30,12 @@ import (
 
 const (
 	// ReadBufferSize is the size for read buffers (max UDP packet size).
-	ReadBufferSize = 65535
+	// Doubled from 65535 to 131070 for improved throughput.
+	ReadBufferSize = 131070
 	// PacketBufferSize is the size for packet data buffers.
 	// Used for copying received data to the read channel.
-	PacketBufferSize = 2048
+	// Doubled from 2048 to 4096 for larger packet handling.
+	PacketBufferSize = 4096
 )
 
 // readBufferPool provides reusable large buffers for reading from connections.
@@ -86,7 +88,7 @@ func putPacketBuffer(buf *[]byte) {
 // Global log channel for Xray logs (buffered, non-blocking)
 // Exported for access from native/lib.go
 var (
-	XrayLogChannel = make(chan string, 1000) // Buffer 1000 log entries
+	XrayLogChannel = make(chan string, 2000) // Buffer 2000 log entries (doubled)
 	XrayLogChannelMu sync.Mutex
 	XrayLogChannelClosed = false
 	xrayLogWriterCallCount int // Track how many times handler is called
@@ -99,8 +101,8 @@ func init() {
 	// Initialize log channel if not already initialized
 	XrayLogChannelMu.Lock()
 	if XrayLogChannel == nil {
-		XrayLogChannel = make(chan string, 1000)
-		logInfo("[XrayLogWriter] Created XrayLogChannel (buffer: 1000)")
+		XrayLogChannel = make(chan string, 2000)
+		logInfo("[XrayLogWriter] Created XrayLogChannel (buffer: 2000)")
 	}
 	XrayLogChannelClosed = false
 	XrayLogChannelMu.Unlock()
@@ -853,7 +855,7 @@ func (x *XrayWrapper) DialUDP(address string, port int) (*XrayUDPConn, error) {
 		dest:     dest,
 		address:  address,
 		port:     port,
-		readCh:   make(chan []byte, 256),
+		readCh:   make(chan []byte, 512), // Doubled from 256 for better buffering
 		stopChan: make(chan struct{}),
 	}
 	
@@ -1431,7 +1433,7 @@ drainDone:
 	default:
 		close(c.readCh)
 	}
-	c.readCh = make(chan []byte, 100) // Buffer size: 100 packets
+	c.readCh = make(chan []byte, 200) // Buffer size: 200 packets (doubled)
 	
 	// Close old connection if exists (with lock protection)
 	c.mu.Lock()
@@ -1512,3 +1514,289 @@ drainDone:
 	return nil
 }
 
+
+// ============================================================================
+// QUIC SUPPORT FOR MASQUE OVER XRAY
+// ============================================================================
+
+// QUICConnection represents a QUIC connection through Xray
+// This is used by MasqueBind for MASQUE over Xray tunneling
+type QUICConnection struct {
+	xray       *XrayWrapper
+	ctx        context.Context
+	cancel     context.CancelFunc
+	endpoint   string
+	conn       net.Conn
+	streams    map[int64]net.Conn // Stream ID -> Stream connection
+	streamsMu  sync.Mutex
+	nextStream int64
+	closed     atomic.Bool
+	readCh     chan []byte
+	stopChan   chan struct{}
+}
+
+// MasqueQUICConnection interface matches masque.QUICConnection
+// This allows bridge.QUICConnection to be used by masque.MasqueBind
+type MasqueQUICConnection interface {
+	Write(data []byte) (int, error)
+	Read(timeout time.Duration) ([]byte, error)
+	OpenStream() (int64, error)
+	CloseStream(streamID int64) error
+	Close() error
+	IsConnected() bool
+	GetEndpoint() string
+}
+
+// DialQUIC creates a QUIC-like connection through Xray outbound
+// This is the main entry point for MASQUE over Xray
+// 
+// The connection is established through Xray's outbound (VLESS/VMess/etc)
+// and provides a QUIC-like interface for HTTP/3 CONNECT-IP/CONNECT-UDP
+//
+// Parameters:
+//   - endpoint: The MASQUE proxy endpoint (e.g., "masque.example.com:443")
+//
+// Returns:
+//   - MasqueQUICConnection: A QUIC-like connection that can be used for MASQUE
+//   - error: Any error that occurred during connection
+func (x *XrayWrapper) DialQUIC(endpoint string) (MasqueQUICConnection, error) {
+	logInfo("[XrayQUIC] ========================================")
+	logInfo("[XrayQUIC] DialQUIC called")
+	logInfo("[XrayQUIC] Endpoint: %s", endpoint)
+	logInfo("[XrayQUIC] ========================================")
+
+	if !x.running {
+		logError("[XrayQUIC] ❌ Cannot DialQUIC - Xray not running!")
+		return nil, fmt.Errorf("xray not running")
+	}
+
+	if x.instance == nil {
+		logError("[XrayQUIC] ❌ Instance is nil!")
+		return nil, fmt.Errorf("instance is nil")
+	}
+
+	// Parse endpoint to get address and port
+	host, portStr, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		logError("[XrayQUIC] ❌ Invalid endpoint format: %v", err)
+		return nil, fmt.Errorf("invalid endpoint: %w", err)
+	}
+
+	port := 443 // Default QUIC port
+	if portStr != "" {
+		fmt.Sscanf(portStr, "%d", &port)
+	}
+
+	logInfo("[XrayQUIC] Parsed endpoint: host=%s, port=%d", host, port)
+
+	// Create destination - use TCP for now as Xray routes it through outbound
+	// The actual QUIC connection will be handled by the MASQUE proxy
+	dest := xnet.TCPDestination(xnet.ParseAddress(host), xnet.Port(port))
+	logInfo("[XrayQUIC] Destination created: %v", dest)
+
+	// Create context with cancellation
+	ctx, cancel := context.WithCancel(x.ctx)
+
+	// Dial through Xray's routing
+	logInfo("[XrayQUIC] Calling core.Dial()...")
+	conn, err := core.Dial(ctx, x.instance, dest)
+	if err != nil {
+		cancel()
+		logError("[XrayQUIC] ❌ core.Dial() FAILED: %v", err)
+		return nil, fmt.Errorf("dial: %w", err)
+	}
+
+	if conn == nil {
+		cancel()
+		logError("[XrayQUIC] ❌ core.Dial() returned nil connection!")
+		return nil, fmt.Errorf("dial returned nil")
+	}
+
+	logInfo("[XrayQUIC] ✅ core.Dial() successful!")
+	logInfo("[XrayQUIC] Connection type: %T", conn)
+
+	qc := &QUICConnection{
+		xray:       x,
+		ctx:        ctx,
+		cancel:     cancel,
+		endpoint:   endpoint,
+		conn:       conn,
+		streams:    make(map[int64]net.Conn),
+		nextStream: 0,
+		readCh:     make(chan []byte, 256),
+		stopChan:   make(chan struct{}),
+	}
+
+	// Start read goroutine
+	go qc.readLoop()
+
+	logInfo("[XrayQUIC] ✅ QUICConnection created successfully")
+	return qc, nil
+}
+
+// readLoop reads from the underlying connection
+func (qc *QUICConnection) readLoop() {
+	logInfo("[XrayQUIC] readLoop started for %s", qc.endpoint)
+	defer logInfo("[XrayQUIC] readLoop exited for %s", qc.endpoint)
+
+	buf := make([]byte, 65535)
+	for {
+		select {
+		case <-qc.ctx.Done():
+			return
+		case <-qc.stopChan:
+			return
+		default:
+		}
+
+		if qc.closed.Load() {
+			return
+		}
+
+		// Set read deadline to allow periodic checks
+		qc.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+
+		n, err := qc.conn.Read(buf)
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				continue // Timeout is expected, continue loop
+			}
+			if qc.closed.Load() {
+				return
+			}
+			logWarn("[XrayQUIC] Read error: %v", err)
+			continue
+		}
+
+		if n > 0 {
+			data := make([]byte, n)
+			copy(data, buf[:n])
+
+			select {
+			case qc.readCh <- data:
+				logDebug("[XrayQUIC] Received %d bytes", n)
+			default:
+				logWarn("[XrayQUIC] Read buffer full, dropping %d bytes", n)
+			}
+		}
+	}
+}
+
+// Write sends data through the QUIC connection
+func (qc *QUICConnection) Write(data []byte) (int, error) {
+	if qc.closed.Load() {
+		return 0, fmt.Errorf("connection closed")
+	}
+
+	n, err := qc.conn.Write(data)
+	if err != nil {
+		logError("[XrayQUIC] Write error: %v", err)
+		return 0, err
+	}
+
+	logDebug("[XrayQUIC] Wrote %d bytes", n)
+	return n, nil
+}
+
+// Read receives data from the QUIC connection
+func (qc *QUICConnection) Read(timeout time.Duration) ([]byte, error) {
+	select {
+	case data, ok := <-qc.readCh:
+		if !ok {
+			return nil, fmt.Errorf("connection closed")
+		}
+		return data, nil
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("read timeout")
+	case <-qc.ctx.Done():
+		return nil, fmt.Errorf("context cancelled")
+	case <-qc.stopChan:
+		return nil, fmt.Errorf("connection closed")
+	}
+}
+
+// OpenStream opens a new bidirectional stream (for HTTP/3 requests)
+func (qc *QUICConnection) OpenStream() (int64, error) {
+	if qc.closed.Load() {
+		return 0, fmt.Errorf("connection closed")
+	}
+
+	qc.streamsMu.Lock()
+	defer qc.streamsMu.Unlock()
+
+	streamID := qc.nextStream
+	qc.nextStream++
+
+	// For now, streams share the underlying connection
+	// In a full QUIC implementation, each stream would be multiplexed
+	qc.streams[streamID] = qc.conn
+
+	logInfo("[XrayQUIC] Opened stream %d", streamID)
+	return streamID, nil
+}
+
+// CloseStream closes a stream
+func (qc *QUICConnection) CloseStream(streamID int64) error {
+	qc.streamsMu.Lock()
+	defer qc.streamsMu.Unlock()
+
+	if _, exists := qc.streams[streamID]; !exists {
+		return fmt.Errorf("stream %d not found", streamID)
+	}
+
+	delete(qc.streams, streamID)
+	logInfo("[XrayQUIC] Closed stream %d", streamID)
+	return nil
+}
+
+// Close closes the QUIC connection
+func (qc *QUICConnection) Close() error {
+	if qc.closed.Swap(true) {
+		return nil // Already closed
+	}
+
+	logInfo("[XrayQUIC] Closing connection to %s", qc.endpoint)
+
+	// Signal goroutines to stop
+	close(qc.stopChan)
+
+	// Cancel context
+	qc.cancel()
+
+	// Close underlying connection
+	if qc.conn != nil {
+		qc.conn.Close()
+	}
+
+	// Close read channel
+	close(qc.readCh)
+
+	logInfo("[XrayQUIC] ✅ Connection closed")
+	return nil
+}
+
+// LocalAddr returns the local address
+func (qc *QUICConnection) LocalAddr() net.Addr {
+	if qc.conn != nil {
+		return qc.conn.LocalAddr()
+	}
+	return nil
+}
+
+// RemoteAddr returns the remote address
+func (qc *QUICConnection) RemoteAddr() net.Addr {
+	if qc.conn != nil {
+		return qc.conn.RemoteAddr()
+	}
+	return nil
+}
+
+// GetEndpoint returns the endpoint address
+func (qc *QUICConnection) GetEndpoint() string {
+	return qc.endpoint
+}
+
+// IsConnected checks if the connection is still valid
+func (qc *QUICConnection) IsConnected() bool {
+	return !qc.closed.Load() && qc.conn != nil
+}

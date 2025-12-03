@@ -30,6 +30,21 @@ import com.hyperxray.an.viewmodel.LogViewModel
 import com.hyperxray.an.viewmodel.LogViewModelFactory
 import com.hyperxray.an.viewmodel.MainViewModel
 import com.hyperxray.an.viewmodel.MainViewUiEvent
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -102,6 +117,10 @@ fun MainScreen(
                         appNavController.navigate(event.route)
                     }
                 }
+                
+                is MainViewUiEvent.ShowWarpAccountRequiredDialog -> {
+                    mainViewModel.setShowWarpAccountDialog(true)
+                }
             }
         }
     }
@@ -159,6 +178,79 @@ fun MainScreen(
             configListState = configListState,
             settingsScrollState = settingsScrollState,
             onSwitchVpnService = callbacks.onSwitchVpnService
+        )
+    }
+    
+    // WARP Account Required Dialog
+    WarpAccountRequiredDialog(
+        mainViewModel = mainViewModel,
+        scope = scope
+    )
+}
+
+
+@Composable
+private fun WarpAccountRequiredDialog(
+    mainViewModel: MainViewModel,
+    scope: kotlinx.coroutines.CoroutineScope
+) {
+    val showDialog by mainViewModel.showWarpAccountModal.collectAsState()
+    val isCreating by mainViewModel.isCreatingWarpAccount.collectAsState()
+    
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { 
+                if (!isCreating) {
+                    mainViewModel.setShowWarpAccountDialog(false)
+                }
+            },
+            title = {
+                Text("WARP Account Required")
+            },
+            text = {
+                Column {
+                    Text(
+                        "No WARP account found. A WARP account is required to connect to the VPN."
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Would you like to create a free Cloudflare WARP account now?",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    if (isCreating) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Creating account...")
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            mainViewModel.createWarpAccountAndConnect()
+                            mainViewModel.setShowWarpAccountDialog(false)
+                        }
+                    },
+                    enabled = !isCreating
+                ) {
+                    Text("Create Account")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { mainViewModel.setShowWarpAccountDialog(false) },
+                    enabled = !isCreating
+                ) {
+                    Text("Cancel")
+                }
+            }
         )
     }
 }

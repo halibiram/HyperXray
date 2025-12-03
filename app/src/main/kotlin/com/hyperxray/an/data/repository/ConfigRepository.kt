@@ -257,13 +257,16 @@ class ConfigRepository(
             _geositeDownloadProgress
         }
 
+        // Track if download was successful
+        var downloadError: Exception? = null
+        
         val job = downloadScope.launch {
             val proxy = if (isServiceEnabled) {
                 Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
             } else {
                 null
             }
-            val client = NetworkModule.getHttpClientFactory().createHttpClient(proxy)
+            val client = NetworkModule.getHttpClientFactory().create(proxy)
 
             try {
                 progressFlow.value = application.getString(com.hyperxray.an.R.string.connecting)
@@ -306,12 +309,28 @@ class ConfigRepository(
                 }
             } catch (e: CancellationException) {
                 Log.d(TAG, "Download cancelled for $fileName")
-                throw e
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to download rule file", e)
-                throw e
-            } finally {
                 progressFlow.value = null
+                throw e
+            } catch (e: java.net.SocketTimeoutException) {
+                Log.e(TAG, "Download timeout for $fileName: ${e.message}", e)
+                progressFlow.value = application.getString(com.hyperxray.an.R.string.download_timeout)
+                downloadError = e
+            } catch (e: java.net.ConnectException) {
+                Log.e(TAG, "Connection failed for $fileName: ${e.message}", e)
+                progressFlow.value = application.getString(com.hyperxray.an.R.string.connection_failed)
+                downloadError = e
+            } catch (e: java.net.UnknownHostException) {
+                Log.e(TAG, "DNS resolution failed for $fileName: ${e.message}", e)
+                progressFlow.value = application.getString(com.hyperxray.an.R.string.dns_failed)
+                downloadError = e
+            } catch (e: IOException) {
+                Log.e(TAG, "IO error downloading $fileName: ${e.message}", e)
+                progressFlow.value = application.getString(com.hyperxray.an.R.string.download_failed)
+                downloadError = e
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to download rule file $fileName", e)
+                progressFlow.value = application.getString(com.hyperxray.an.R.string.download_failed)
+                downloadError = e
             }
         }
 
@@ -321,7 +340,19 @@ class ConfigRepository(
             geositeDownloadJob = job
         }
 
-        job.invokeOnCompletion {
+        job.invokeOnCompletion { throwable ->
+            // Clear progress after a delay so user can see the error message
+            val hasError = throwable != null || downloadError != null
+            if (hasError && throwable !is CancellationException) {
+                downloadScope.launch {
+                    kotlinx.coroutines.delay(3000) // Show error for 3 seconds
+                    progressFlow.value = null
+                }
+            } else if (!hasError) {
+                // Success - clear immediately
+                progressFlow.value = null
+            }
+            
             if (fileName == "geoip.dat") {
                 geoipDownloadJob = null
             } else {
@@ -331,10 +362,16 @@ class ConfigRepository(
 
         return try {
             job.join()
-            Result.success(Unit)
+            when {
+                job.isCancelled -> Result.failure(CancellationException("Download cancelled"))
+                downloadError != null -> Result.failure(downloadError!!)
+                else -> Result.success(Unit)
+            }
         } catch (e: CancellationException) {
             Result.failure(e)
         } catch (e: Exception) {
+            // This shouldn't happen since we catch all exceptions inside the job
+            Log.e(TAG, "Unexpected error in downloadRuleFile", e)
             Result.failure(e)
         }
     }

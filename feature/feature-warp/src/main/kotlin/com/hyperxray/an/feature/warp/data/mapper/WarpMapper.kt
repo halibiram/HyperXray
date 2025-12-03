@@ -1,5 +1,6 @@
 package com.hyperxray.an.feature.warp.data.mapper
 
+import com.hyperxray.an.feature.warp.data.model.WarpAccountStorageModel
 import com.hyperxray.an.feature.warp.data.model.WarpApiResponse
 import com.hyperxray.an.feature.warp.data.model.WarpDeviceResponse
 import com.hyperxray.an.feature.warp.domain.entity.WarpAccount
@@ -111,6 +112,73 @@ object WarpMapper {
             activated = deviceResponse.activated,
             active = deviceResponse.active,
             role = deviceResponse.role
+        )
+    }
+    
+    /**
+     * Map storage model to domain entity (for import)
+     */
+    fun fromStorageModel(storageModel: WarpAccountStorageModel): WarpAccount {
+        return WarpAccount(
+            accountId = storageModel.account_id,
+            token = storageModel.token,
+            privateKey = storageModel.private_key,
+            publicKey = storageModel.public_key,
+            config = fromStorageConfig(storageModel.config),
+            account = fromStorageAccountInfo(storageModel.account),
+            created = storageModel.created
+        )
+    }
+    
+    private fun fromStorageConfig(config: com.hyperxray.an.feature.warp.data.model.WarpConfigStorageModel): WarpConfig {
+        return WarpConfig(
+            clientId = config.client_id,
+            peers = config.peers.map { peer ->
+                WarpPeer(
+                    publicKey = peer.public_key,
+                    endpoint = peer.endpoint?.let { ep ->
+                        WarpEndpoint(
+                            v4 = ep.v4,
+                            v6 = ep.v6,
+                            host = ep.host,
+                            ports = ep.ports
+                        )
+                    }
+                )
+            },
+            interfaceData = config.interfaceData?.let { iface ->
+                WarpInterface(
+                    addresses = iface.addresses?.let { addr ->
+                        WarpAddresses(
+                            v4 = addr.v4,
+                            v6 = addr.v6
+                        )
+                    }
+                )
+            },
+            services = config.services?.let { svc ->
+                WarpServices(
+                    httpProxy = svc.http_proxy
+                )
+            }
+        )
+    }
+    
+    private fun fromStorageAccountInfo(info: com.hyperxray.an.feature.warp.data.model.WarpAccountInfoStorageModel): WarpAccountInfo {
+        return WarpAccountInfo(
+            id = info.id,
+            accountType = info.account_type,
+            created = info.created,
+            updated = info.updated,
+            premiumData = info.premium_data,
+            quota = info.quota,
+            usage = info.usage,
+            warpPlus = info.warp_plus,
+            referralCount = info.referral_count,
+            referralRenewalCountdown = info.referral_renewal_countdown,
+            role = info.role,
+            license = info.license,
+            ttl = info.ttl
         )
     }
 }

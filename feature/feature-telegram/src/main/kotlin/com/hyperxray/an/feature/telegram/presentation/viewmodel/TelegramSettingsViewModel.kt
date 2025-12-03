@@ -115,16 +115,6 @@ class TelegramSettingsViewModel(application: Application) : AndroidViewModel(app
         )
     }
 
-    fun updateNotifyDnsCache(enabled: Boolean) {
-        _uiState.value = _uiState.value.copy(
-            config = _uiState.value.config?.copy(notifyDnsCache = enabled) ?: TelegramConfig(
-                botToken = "",
-                chatId = "",
-                notifyDnsCache = enabled
-            )
-        )
-    }
-
     fun updateNotifyManual(enabled: Boolean) {
         _uiState.value = _uiState.value.copy(
             config = _uiState.value.config?.copy(notifyManual = enabled) ?: TelegramConfig(

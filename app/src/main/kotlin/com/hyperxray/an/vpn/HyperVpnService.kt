@@ -184,7 +184,9 @@ class HyperVpnService : VpnService() {
         warpEndpoint: String,
         warpPrivateKey: String,
         nativeLibDir: String,
-        filesDir: String
+        filesDir: String,
+        tunnelMode: String,
+        masqueConfig: String
     ): Int
     
     private external fun stopHyperTunnel(): Int
@@ -625,6 +627,18 @@ class HyperVpnService : VpnService() {
         
         isStarting = true
         
+        // CRITICAL: Re-initialize socket protector on every VPN start
+        // This ensures fresh state (clears stale caches) and prevents routing loops
+        // The native code will reset Go-side caches (physical IP, DNS) on re-init
+        AiLogHelper.d(TAG, "Re-initializing socket protector for fresh session...")
+        try {
+            initSocketProtector()
+            AiLogHelper.i(TAG, "✅ Socket protector re-initialized")
+        } catch (e: Exception) {
+            AiLogHelper.e(TAG, "❌ Socket protector re-initialization failed: ${e.message}", e)
+            // Continue anyway - will verify below
+        }
+        
         // Verify socket protection is working before starting
         try {
             if (!isSocketProtectorVerified()) {
@@ -851,8 +865,8 @@ class HyperVpnService : VpnService() {
                 }
                 
                 // MTU for WireGuard over Xray
-                // 1420 is optimal for most networks while avoiding fragmentation
-                builder.setMtu(1420)
+                // 1280 is IPv6 minimum MTU, safer for problematic networks
+                builder.setMtu(1280)
                 
                 // CRITICAL: Add DNS servers - without DNS, builder.establish() may hang
                 // Use fallback DNS servers if prefs DNS is not available
@@ -1145,6 +1159,29 @@ class HyperVpnService : VpnService() {
                 val effectivePort = if (apiPort > 0 && apiPort <= 65535) apiPort else 65276
                 AiLogHelper.d(TAG, "✅ VPN START: gRPC StatsService injected (port: $effectivePort) - libhyperxray.so içindeki Xray-core kullanılacak")
                 
+                // Get tunnel mode from preferences (MASQUE over Xray feature)
+                val tunnelMode = prefs?.tunnelMode ?: "wireguard"
+                val masqueConfig = if (tunnelMode == "masque") {
+                    // Try to load MASQUE config from config/masque/masque.json
+                    loadMasqueConfig() ?: run {
+                        // Fallback: Build MASQUE config with defaults
+                        AiLogHelper.d(TAG, "📋 MASQUE: No saved config, using defaults")
+                        val masqueEndpoint = prefs?.masqueEndpoint ?: "162.159.192.1:443"
+                        val masqueMode = prefs?.masqueMode ?: "connect-udp"
+                        JSONObject().apply {
+                            put("proxyEndpoint", masqueEndpoint)
+                            put("mode", masqueMode)
+                            put("maxReconnects", 5)
+                            put("reconnectDelay", 1000)
+                            put("queueSize", 131072)
+                            put("mtu", 1420)
+                        }.toString()
+                    }
+                } else {
+                    "{}" // Empty config for WireGuard mode
+                }
+                AiLogHelper.d(TAG, "📋 VPN START: Tunnel mode: $tunnelMode")
+                
                 // Call native method in IO dispatcher context (already in coroutine, but ensure IO dispatcher)
                 val result = withContext(Dispatchers.IO) {
                     try {
@@ -1155,7 +1192,9 @@ class HyperVpnService : VpnService() {
                             warpEndpoint = warpEndpoint,
                             warpPrivateKey = warpPrivateKey,
                             nativeLibDir = nativeLibDir,
-                            filesDir = filesDirPath
+                            filesDir = filesDirPath,
+                            tunnelMode = tunnelMode,
+                            masqueConfig = masqueConfig
                         )
                         // If native returned 0, it successfully took ownership of the FD
                         if (nativeResult == 0) {
@@ -1991,6 +2030,90 @@ class HyperVpnService : VpnService() {
             AiLogHelper.e(TAG, "❌ WARP CONFIG: $errorMsg", e)
             broadcastError(errorMsg, -11, "WARP registration exception: ${e.message}. Stack: ${e.stackTraceToString().take(500)}")
             getDefaultWgConfig()
+        }
+    }
+    
+    /**
+     * Load MASQUE config from config/masque/masque.json
+     * If not found, creates from warp-account.json
+     * @return MASQUE config JSON string, or null if not found
+     */
+    private fun loadMasqueConfig(): String? {
+        return try {
+            val filesDir = applicationContext.filesDir
+            val masqueConfigFile = File(filesDir, "config/masque/masque.json")
+            
+            // Try loading existing config
+            if (masqueConfigFile.exists() && masqueConfigFile.canRead()) {
+                val configContent = masqueConfigFile.readText()
+                JSONObject(configContent) // Validate JSON
+                AiLogHelper.d(TAG, "✅ MASQUE: Loaded config from ${masqueConfigFile.absolutePath}")
+                return configContent
+            }
+            
+            // Create from warp-account.json
+            AiLogHelper.d(TAG, "📋 MASQUE: Config not found, creating from warp-account.json")
+            createMasqueConfigFromAccount(filesDir)
+        } catch (e: Exception) {
+            AiLogHelper.e(TAG, "❌ MASQUE: Error loading config: ${e.message}", e)
+            null
+        }
+    }
+    
+    /**
+     * Create MASQUE config from warp-account.json and save to config/masque/
+     */
+    private fun createMasqueConfigFromAccount(filesDir: File): String? {
+        return try {
+            val accountFile = File(filesDir, "warp-account.json")
+            if (!accountFile.exists() || !accountFile.canRead()) {
+                AiLogHelper.w(TAG, "⚠️ MASQUE: warp-account.json not found")
+                return null
+            }
+            
+            val accountJson = JSONObject(accountFile.readText())
+            val privateKey = accountJson.optString("privateKey", "")
+            if (privateKey.isBlank()) {
+                AiLogHelper.w(TAG, "⚠️ MASQUE: No privateKey in warp-account.json")
+                return null
+            }
+            
+            // Derive public key
+            val publicKey = try {
+                com.hyperxray.an.utils.WarpUtils.derivePublicKey(privateKey)
+            } catch (e: Exception) {
+                AiLogHelper.e(TAG, "❌ MASQUE: Failed to derive public key: ${e.message}")
+                return null
+            }
+            
+            // Create MASQUE config with WARP defaults
+            val masqueConfig = JSONObject().apply {
+                put("proxyEndpoint", "162.159.192.1:443") // WARP MASQUE endpoint
+                put("mode", "connect-udp")
+                put("maxReconnects", 5)
+                put("reconnectDelay", 1000)
+                put("queueSize", 131072)
+                put("mtu", 1420)
+                put("wireguard", JSONObject().apply {
+                    put("privateKey", privateKey)
+                    put("publicKey", publicKey)
+                    put("address", "172.16.0.2/32")
+                    put("addressV6", "")
+                    put("peerPublicKey", "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=")
+                })
+            }
+            
+            // Save to config/masque/masque.json
+            val masqueDir = File(filesDir, "config/masque")
+            masqueDir.mkdirs()
+            val masqueFile = File(masqueDir, "masque.json")
+            masqueFile.writeText(masqueConfig.toString(2))
+            
+            AiLogHelper.d(TAG, "✅ MASQUE: Created config from warp-account.json")
+            masqueConfig.toString()
+        } catch (e: Exception) {
+            AiLogHelper.e(TAG, "❌ MASQUE: Error creating config from account: ${e.message}", e)
+            null
         }
     }
     

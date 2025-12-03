@@ -2,7 +2,6 @@ package com.hyperxray.an.service.managers
 
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
-import com.hyperxray.an.core.network.dns.SystemDnsCacheServer
 import com.hyperxray.an.prefs.Preferences
 import org.junit.Before
 import org.junit.Test

@@ -8,7 +8,6 @@ const val ROUTE_SETTINGS = "settings"
 const val ROUTE_MAIN = "main"
 const val ROUTE_APP_LIST = "app_list"
 const val ROUTE_CONFIG_EDIT = "config_edit"
-const val ROUTE_AI_INSIGHTS = "ai_insights"
 
 // Feature module routes (reserved for future implementation)
 const val ROUTE_PROFILES = "profiles"
@@ -21,8 +20,6 @@ const val ROUTE_TELEGRAM_SETTINGS = "telegram_settings"
 
 // Utils Tool Routes
 const val ROUTE_UTILS_WARP = "utils/warp"
-const val ROUTE_UTILS_DNS_CACHE = "utils/dns_cache"
-const val ROUTE_UTILS_OPTIMIZER = "utils/optimizer"
 const val ROUTE_UTILS_IP_INFO = "utils/ip_info"
 const val ROUTE_UTILS_PING_TEST = "utils/ping_test"
 const val ROUTE_UTILS_GEOIP_LOOKUP = "utils/geoip_lookup"

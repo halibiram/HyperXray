@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
@@ -125,6 +127,8 @@ fun BottomNavHost(
             popEnterTransition = { popEnterTransition() },
             popExitTransition = { popExitTransition() }
         ) {
+            val showWarpDialog by mainViewModel.showWarpAccountModal.collectAsState()
+            
             DashboardScreen(
                 viewModel = mainViewModel.dashboardViewModel,
                 resources = object : com.hyperxray.an.feature.dashboard.DashboardResources {
@@ -141,7 +145,10 @@ fun BottomNavHost(
                     override val stringStatsUptime: Int = com.hyperxray.an.R.string.stats_uptime
                     override val stringStatsAlloc: Int = com.hyperxray.an.R.string.stats_alloc
                     override val stringVpnDisconnected: Int = com.hyperxray.an.R.string.vpn_disconnected
-                }
+                },
+                showWarpAccountDialog = showWarpDialog,
+                onDismissWarpAccountDialog = { mainViewModel.setShowWarpAccountDialog(false) },
+                onCreateWarpAccount = { mainViewModel.createWarpAccountAndConnect() }
             )
         }
 

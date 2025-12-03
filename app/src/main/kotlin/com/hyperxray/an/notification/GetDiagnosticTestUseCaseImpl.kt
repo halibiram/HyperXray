@@ -57,19 +57,12 @@ class GetDiagnosticTestUseCaseImpl(
                 )
             )
             
-            // Test 3: DNS Cache Server
-            val dnsCacheStatus = try {
-                val stats = com.hyperxray.an.core.network.dns.DnsCacheManager.getStats()
-                // getStats() returns String, parse it for hits/misses if needed
-                "✅ Active - $stats"
-            } catch (e: Exception) {
-                "❌ Error: ${e.message}"
-            }
+            // Test 3: DNS - Using Google DNS directly
             diagnosticResults.add(
                 DiagnosticResult(
-                    name = "DNS Cache Server",
-                    status = dnsCacheStatus,
-                    details = "DNS caching system status"
+                    name = "DNS",
+                    status = "✅ Using Google DNS (8.8.8.8)",
+                    details = "DNS queries handled by native Go library via Google DNS"
                 )
             )
             

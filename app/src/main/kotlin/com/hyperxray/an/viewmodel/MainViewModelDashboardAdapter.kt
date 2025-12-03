@@ -5,7 +5,6 @@ import com.hyperxray.an.feature.dashboard.CoreStatsState as FeatureCoreStatsStat
 import com.hyperxray.an.feature.dashboard.AggregatedTelemetry as FeatureAggregatedTelemetry
 import com.hyperxray.an.feature.dashboard.DnsCacheStats as FeatureDnsCacheStats
 import com.hyperxray.an.feature.dashboard.AndroidMemoryStats as FeatureAndroidMemoryStats
-import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.telemetry.AggregatedTelemetry
 import com.hyperxray.an.xray.runtime.XrayRuntimeStatus
 import com.hyperxray.an.viewmodel.MainViewUiEvent
@@ -87,54 +86,19 @@ fun com.hyperxray.an.core.monitor.AndroidMemoryStats.toFeatureState(): FeatureAn
     )
 }
 
-/**
- * Extension function to convert DnsCacheManager metrics to feature module DnsCacheStats
- * Maps all fields from the comprehensive DnsCacheMetrics to FeatureDnsCacheStats
- */
-private fun com.hyperxray.an.core.network.dns.DnsCacheManager.DnsCacheMetrics.toFeatureState(): FeatureDnsCacheStats {
-    // DEBUG: Log latency values to verify they are being passed correctly
-    if (avgHitLatencyMs > 0.0 || avgMissLatencyMs > 0.0) {
-        Log.d(TAG, "📊 toFeatureState: avgHitLatencyMs=${avgHitLatencyMs}, avgMissLatencyMs=${avgMissLatencyMs}")
-    }
-    return FeatureDnsCacheStats(
-        entryCount = entryCount,
-        memoryUsageMB = (memoryUsageBytes / (1024 * 1024)).toLong(), // Convert bytes to MB
-        memoryLimitMB = (memoryLimitBytes / (1024 * 1024)).toLong(), // Convert bytes to MB
-        memoryUsagePercent = memoryUsagePercent,
-        hits = hits,
-        misses = misses,
-        hitRate = hitRate,
-        avgDomainHitRate = avgDomainHitRate,
-        avgHitLatencyMs = avgHitLatencyMs,
-        avgMissLatencyMs = avgMissLatencyMs,
-        avgTtlSeconds = avgTtlSeconds,
-        activeEntries = activeEntries.map { entry ->
-            com.hyperxray.an.feature.dashboard.DnsCacheEntryUiModel(
-                domain = entry.domain,
-                ips = entry.ips,
-                expiryTime = entry.expiryTime
-            )
-        }
-    )
-}
 
 /**
  * MainViewModel implementation of DashboardViewModel
- * Uses cached StateFlow transformations to ensure stable state updates
+ * DNS cache removed - using Google DNS (8.8.8.8) directly
  */
 class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : DashboardViewModel {
-    // Cached transformed StateFlows - created once and reused
-    // CRITICAL FIX: Using SharingStarted.Lazily instead of WhileSubscribed(5000) to ensure
-    // StateFlow restarts after process death. WhileSubscribed(5000) may not restart properly
-    // when ViewModel is recreated after process death, causing StateFlow to stop updating.
-    // Lazily starts when first subscriber arrives and stops when last subscriber leaves,
-    // but can be restarted after process death when ViewModel is recreated.
+    
     override val coreStatsState: StateFlow<FeatureCoreStatsState> =
         mainViewModel.coreStatsState
             .map { it.toFeatureState() }
             .stateIn(
                 scope = mainViewModel.viewModelScope,
-                started = SharingStarted.Lazily, // Restart after process death
+                started = SharingStarted.Lazily,
                 initialValue = mainViewModel.coreStatsState.value.toFeatureState()
             )
     
@@ -143,73 +107,36 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
             .map { it?.toFeatureState() }
             .stateIn(
                 scope = mainViewModel.viewModelScope,
-                started = SharingStarted.Lazily, // Restart after process death
+                started = SharingStarted.Lazily,
                 initialValue = mainViewModel.telemetryState.value?.toFeatureState()
             )
     
-    // Connect directly to DnsCacheManager's StateFlow and map to feature state
-    // CRITICAL: Error handling returns default "zero" state instead of null to prevent flow termination
-    // CRITICAL: Using SharingStarted.Lazily to keep subscription alive - metrics job runs continuously
-    // and we want to ensure StateFlow updates are always available when UI subscribes
-    override val dnsCacheStats: StateFlow<FeatureDnsCacheStats?> =
-        DnsCacheManager.dashboardStats
-            .map { metrics ->
-                try {
-                    metrics.toFeatureState()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error converting DNS cache metrics to feature state", e)
-                    // Return default "zero" state instead of null to prevent flow termination
-                    FeatureDnsCacheStats(
-                        entryCount = 0,
-                        memoryUsageMB = 0L,
-                        memoryLimitMB = 0L,
-                        memoryUsagePercent = 0,
-                        hits = 0L,
-                        misses = 0L,
-                        hitRate = 0,
-                        avgDomainHitRate = 0,
-                        avgHitLatencyMs = 0.0,
-                        avgMissLatencyMs = 0.0,
-                        avgTtlSeconds = 0L,
-                        activeEntries = emptyList()
-                    )
-                }
-            }
-            .stateIn(
-                scope = mainViewModel.viewModelScope,
-                started = SharingStarted.Lazily, // Keep subscription alive - metrics job runs continuously
-                initialValue = try {
-                    DnsCacheManager.dashboardStats.value.toFeatureState()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error getting initial DNS cache metrics", e)
-                    // Return default "zero" state instead of null
-                    FeatureDnsCacheStats(
-                        entryCount = 0,
-                        memoryUsageMB = 0L,
-                        memoryLimitMB = 0L,
-                        memoryUsagePercent = 0,
-                        hits = 0L,
-                        misses = 0L,
-                        hitRate = 0,
-                        avgDomainHitRate = 0,
-                        avgHitLatencyMs = 0.0,
-                        avgMissLatencyMs = 0.0,
-                        avgTtlSeconds = 0L,
-                        activeEntries = emptyList()
-                    )
-                }
-            )
+    // DNS cache removed - return empty stats
+    private val _dnsCacheStats = MutableStateFlow<FeatureDnsCacheStats?>(
+        FeatureDnsCacheStats(
+            entryCount = 0,
+            memoryUsageMB = 0L,
+            memoryLimitMB = 0L,
+            memoryUsagePercent = 0,
+            hits = 0L,
+            misses = 0L,
+            hitRate = 0,
+            avgDomainHitRate = 0,
+            avgHitLatencyMs = 0.0,
+            avgMissLatencyMs = 0.0,
+            avgTtlSeconds = 0L,
+            activeEntries = emptyList()
+        )
+    )
+    override val dnsCacheStats: StateFlow<FeatureDnsCacheStats?> = _dnsCacheStats.asStateFlow()
     
-    override val isServiceEnabled: StateFlow<Boolean> =
-        mainViewModel.isServiceEnabled
+    override val isServiceEnabled: StateFlow<Boolean> = mainViewModel.isServiceEnabled
     
-    override val controlMenuClickable: StateFlow<Boolean> =
-        mainViewModel.controlMenuClickable
+    override val controlMenuClickable: StateFlow<Boolean> = mainViewModel.controlMenuClickable
     
     override val connectionState: StateFlow<com.hyperxray.an.feature.dashboard.ConnectionState> =
         mainViewModel.connectionState
     
-    // instancesStatus is not available in MainViewModel, return empty map
     override val instancesStatus: StateFlow<Map<Int, XrayRuntimeStatus>> =
         MutableStateFlow<Map<Int, XrayRuntimeStatus>>(emptyMap()).asStateFlow()
     
@@ -226,81 +153,42 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
     }
     
     override fun updateDnsCacheStats() {
-        mainViewModel.viewModelScope.launch {
-            try {
-                // Try to initialize DnsCacheManager if not already initialized
-                // Use prefs to get context (prefs has access to Application)
-                val context = mainViewModel.prefs.getContext()
-                try {
-                    // Initialize if not already initialized
-                    DnsCacheManager.initialize(context)
-                    
-                    // CRITICAL: Ensure metrics job is running even if already initialized
-                    // This handles the case where the job was cancelled or failed
-                    // and the UI is resubscribing after being away
-                    DnsCacheManager.ensureMetricsJobRunning()
-                    
-                    // Get current metrics to verify StateFlow is working
-                    val currentMetrics = DnsCacheManager.dashboardStats.value
-                    Log.i(TAG, "✅ DNS cache stats StateFlow connected: entries=${currentMetrics.entryCount}, hits=${currentMetrics.hits}, misses=${currentMetrics.misses}, hitRate=${currentMetrics.hitRate}%")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to initialize DnsCacheManager: ${e.message}", e)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error initializing DNS cache stats: ${e.message}", e)
-            }
-        }
+        // No-op: DNS cache removed, using Google DNS directly
+        Log.d(TAG, "updateDnsCacheStats: DNS cache removed, using Google DNS directly")
     }
     
     override fun clearDnsCache() {
+        // No-op: DNS cache removed
         mainViewModel.viewModelScope.launch {
-            try {
-                DnsCacheManager.clearCache()
-                // Trigger snackbar event
-                mainViewModel.emitUiEvent(MainViewUiEvent.ShowSnackbar("DNS Cache Cleared"))
-                Log.i(TAG, "✅ DNS cache cleared successfully")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error clearing DNS cache: ${e.message}", e)
-                mainViewModel.emitUiEvent(MainViewUiEvent.ShowSnackbar("Failed to clear DNS cache"))
-            }
+            mainViewModel.emitUiEvent(MainViewUiEvent.ShowSnackbar("Using Google DNS directly (no cache)"))
         }
     }
     
-    // HyperVpnService state flows
-    // Expose StateFlows from MainViewModel directly
     override val hyperVpnState: StateFlow<com.hyperxray.an.core.network.vpn.HyperVpnStateManager.VpnState>? =
         mainViewModel.hyperVpnState
     
     override val hyperVpnStats: StateFlow<com.hyperxray.an.core.network.vpn.HyperVpnStateManager.TunnelStats>? =
         mainViewModel.hyperVpnStats
     
-    override val hyperVpnError: StateFlow<String?>? =
-        mainViewModel.hyperVpnError
+    override val hyperVpnError: StateFlow<String?>? = mainViewModel.hyperVpnError
     
-    override fun startHyperVpn() {
-        mainViewModel.startHyperVpn()
-    }
+    override fun startHyperVpn() { mainViewModel.startHyperVpn() }
     
-    override fun stopHyperVpn() {
-        mainViewModel.stopHyperVpn()
-    }
+    override fun stopHyperVpn() { mainViewModel.stopHyperVpn() }
     
-    override fun clearHyperVpnError() {
-        mainViewModel.clearHyperVpnError()
-    }
+    override fun clearHyperVpnError() { mainViewModel.clearHyperVpnError() }
     
-    // WARP Account state flow
+    override fun createWarpAccountAndConnect() { mainViewModel.createWarpAccountAndConnect() }
+    
     override val warpAccountInfo: StateFlow<com.hyperxray.an.feature.dashboard.WarpAccountInfo>? =
         mainViewModel.warpAccountInfo
     
-    // Android Memory Stats state flow
-    // CRITICAL FIX: Using SharingStarted.Lazily to ensure restart after process death
     override val androidMemoryStats: StateFlow<FeatureAndroidMemoryStats>? =
         mainViewModel.androidMemoryStats
             .map { it.toFeatureState() }
             .stateIn(
                 scope = mainViewModel.viewModelScope,
-                started = SharingStarted.Lazily, // Restart after process death
+                started = SharingStarted.Lazily,
                 initialValue = mainViewModel.androidMemoryStats.value.toFeatureState()
             )
 }
@@ -309,9 +197,4 @@ class MainViewModelDashboardAdapter(private val mainViewModel: MainViewModel) : 
  * Extension property that provides cached DashboardViewModel instance
  */
 val MainViewModel.dashboardViewModel: DashboardViewModel
-    get() {
-        // Use a lazy cached property in MainViewModel to ensure same instance is always returned
-        // This will be initialized in MainViewModel class itself
-        return getOrCreateDashboardAdapter()
-    }
-
+    get() = getOrCreateDashboardAdapter()

@@ -116,13 +116,12 @@ object ConfigOptimizer {
             jsonObject.put("dns", dnsObject)
         }
 
-        // Disable Xray-core DNS cache to use SystemDnsCacheServer
-        // SystemDnsCacheServer provides centralized DNS caching for all apps
+        // Enable Xray-core DNS cache for better performance
         var cacheObject = dnsObject.optJSONObject("cache")
         if (cacheObject == null) {
             cacheObject = JSONObject()
         }
-        cacheObject.put("enabled", false) // Disable Xray-core DNS cache to use SystemDnsCacheServer
+        cacheObject.put("enabled", true)
         dnsObject.put("cache", cacheObject)
 
         // Query strategy for speed
@@ -510,12 +509,11 @@ object ConfigOptimizer {
         }
 
         // Extreme DNS cache - maximize cache size
-        // Disable Xray-core DNS cache to use SystemDnsCacheServer
         var cacheObject = dnsObject.optJSONObject("cache")
         if (cacheObject == null) {
             cacheObject = JSONObject()
         }
-        cacheObject.put("enabled", false) // Disable Xray-core DNS cache to use SystemDnsCacheServer
+        cacheObject.put("enabled", true)
         dnsObject.put("cache", cacheObject)
 
         // Parallel DNS queries for maximum CPU utilization

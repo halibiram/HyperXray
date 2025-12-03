@@ -67,7 +67,6 @@ class TelegramConfigDataSource(
                 notifyVpnStatus = getPrefData("TelegramNotifyVpnStatus")?.toBoolean() ?: true,
                 notifyErrors = getPrefData("TelegramNotifyErrors")?.toBoolean() ?: true,
                 notifyPerformance = getPrefData("TelegramNotifyPerformance")?.toBoolean() ?: false,
-                notifyDnsCache = getPrefData("TelegramNotifyDnsCache")?.toBoolean() ?: false,
                 notifyManual = getPrefData("TelegramNotifyManual")?.toBoolean() ?: true
             )
         } catch (e: Exception) {
@@ -87,7 +86,6 @@ class TelegramConfigDataSource(
             setPrefData("TelegramNotifyVpnStatus", config.notifyVpnStatus)
             setPrefData("TelegramNotifyErrors", config.notifyErrors)
             setPrefData("TelegramNotifyPerformance", config.notifyPerformance)
-            setPrefData("TelegramNotifyDnsCache", config.notifyDnsCache)
             setPrefData("TelegramNotifyManual", config.notifyManual)
 
             Log.d(TAG, "Config saved successfully")
@@ -105,7 +103,6 @@ class TelegramConfigDataSource(
             setPrefData("TelegramNotifyVpnStatus", true)
             setPrefData("TelegramNotifyErrors", true)
             setPrefData("TelegramNotifyPerformance", false)
-            setPrefData("TelegramNotifyDnsCache", false)
             setPrefData("TelegramNotifyManual", true)
             Log.d(TAG, "Config cleared")
         } catch (e: Exception) {

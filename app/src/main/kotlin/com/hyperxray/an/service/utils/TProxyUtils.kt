@@ -6,8 +6,6 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
 import android.util.Log
-import com.hyperxray.an.core.network.dns.DnsCacheManager
-import com.hyperxray.an.core.network.dns.SystemDnsCacheServer
 import com.hyperxray.an.ui.screens.log.extractDnsQuery
 import com.hyperxray.an.ui.screens.log.extractSniffedDomain
 import com.hyperxray.an.ui.screens.log.extractSNI
@@ -255,165 +253,33 @@ object TProxyUtils {
      * Intercept DNS queries from Xray-core logs and cache them.
      * This allows browser and other apps to benefit from DNS cache.
      * Root is NOT required - works by parsing Xray DNS logs.
+     * DNS resolution is handled by native Go library using Google DNS.
+     * 
+     * Note: DNS cache removed - using Google DNS (8.8.8.8) directly
      */
+    @Suppress("UNUSED_PARAMETER")
     fun interceptDnsFromXrayLogs(
         context: Context,
         logLine: String,
         dnsCacheInitialized: Boolean,
-        systemDnsCacheServer: SystemDnsCacheServer?,
         serviceScope: CoroutineScope
     ): Boolean {
-        var initialized = dnsCacheInitialized
-        if (!initialized) {
-            try {
-                DnsCacheManager.initialize(context)
-                initialized = true
-                Log.d(TAG, "DnsCacheManager initialized in interceptDnsFromXrayLogs()")
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to initialize DNS cache in interceptDnsFromXrayLogs(): ${e.message}", e)
-                return false
-            }
-        }
-        
-        try {
-            val dnsQuery = extractDnsQuery(logLine)
-            if (dnsQuery != null) {
-                val cached = DnsCacheManager.getFromCache(dnsQuery)
-                if (cached != null && cached.isNotEmpty()) {
-                    Log.d(TAG, "✅ DNS CACHE HIT (Xray log): $dnsQuery -> ${cached.map { it.hostAddress }}")
-                    return true
-                }
-                
-                serviceScope.launch {
-                    try {
-                        val resolvedAddresses = forwardDnsQueryToSystemCacheServer(
-                            context = context,
-                            domain = dnsQuery,
-                            systemDnsCacheServer = systemDnsCacheServer
-                        )
-                        if (resolvedAddresses.isNotEmpty()) {
-                            DnsCacheManager.saveToCache(dnsQuery, resolvedAddresses)
-                            Log.i(TAG, "✅ DNS resolved via SystemDnsCacheServer (Xray patch): $dnsQuery -> ${resolvedAddresses.map { it.hostAddress }}")
-                        } else {
-                            Log.d(TAG, "⚠️ DNS CACHE MISS (Xray log): $dnsQuery (SystemDnsCacheServer couldn't resolve)")
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error forwarding DNS query to SystemDnsCacheServer: $dnsQuery", e)
-                    }
-                }
-            }
-            
-            val sniffedDomain = extractSniffedDomain(logLine)
-            if (sniffedDomain != null) {
-                val cached = DnsCacheManager.getFromCache(sniffedDomain)
-                if (cached != null && cached.isNotEmpty()) {
-                    Log.d(TAG, "✅ DNS CACHE HIT (Xray sniffing): $sniffedDomain -> ${cached.map { it.hostAddress }} (served from cache)")
-                    return true
-                }
-                
-                serviceScope.launch {
-                    try {
-                        val addresses = forwardDnsQueryToSystemCacheServer(
-                            context = context,
-                            domain = sniffedDomain,
-                            systemDnsCacheServer = systemDnsCacheServer
-                        )
-                        if (addresses.isNotEmpty()) {
-                            DnsCacheManager.saveToCache(sniffedDomain, addresses)
-                            Log.d(TAG, "💾 DNS cached from Xray sniffing (via SystemDnsCacheServer): $sniffedDomain -> ${addresses.map { it.hostAddress }}")
-                        } else {
-                            Log.w(TAG, "⚠️ DNS resolution failed for $sniffedDomain (SystemDnsCacheServer with DoH fallback)")
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error caching DNS from sniffing: $sniffedDomain", e)
-                    }
-                }
-            }
-            
-            val dnsResponsePattern = Regex("""(?:A\s+record|resolved|answer).*?([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}).*?(\d+\.\d+\.\d+\.\d+)""", RegexOption.IGNORE_CASE)
-            dnsResponsePattern.find(logLine)?.let { matchResult ->
-                val domain = matchResult.groupValues[1]
-                val ip = matchResult.groupValues[2]
-                
-                if (domain.isNotEmpty() && ip.isNotEmpty()) {
-                    serviceScope.launch {
-                        try {
-                            val addresses = forwardDnsQueryToSystemCacheServer(
-                                context = context,
-                                domain = domain,
-                                systemDnsCacheServer = systemDnsCacheServer
-                            )
-                            if (addresses.isNotEmpty()) {
-                                DnsCacheManager.saveToCache(domain, addresses)
-                                Log.d(TAG, "💾 DNS cached from Xray DNS response (via SystemDnsCacheServer): $domain -> ${addresses.map { it.hostAddress }}")
-                            } else {
-                                val address = InetAddress.getByName(ip)
-                                DnsCacheManager.saveToCache(domain, listOf(address))
-                                Log.d(TAG, "💾 DNS cached from Xray DNS response (direct IP fallback): $domain -> $ip")
-                            }
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Error caching DNS response: $domain -> $ip", e)
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            // Silently fail - DNS cache integration should not break logging
-        }
-        
-        return initialized
+        // DNS cache removed - using Google DNS directly
+        // This function is kept for API compatibility but does nothing
+        return true
     }
     
     /**
-     * Forward DNS query to SystemDnsCacheServer for resolution.
+     * Resolve domain directly using system DNS (InetAddress).
+     * DNS is handled by native Go library through VPN tunnel.
      */
-    suspend fun forwardDnsQueryToSystemCacheServer(
-        context: Context,
-        domain: String,
-        systemDnsCacheServer: SystemDnsCacheServer?
-    ): List<InetAddress> {
+    private suspend fun resolveDomainDirect(domain: String): List<InetAddress> {
         return try {
-            var server = systemDnsCacheServer
-            if (server?.isRunning() != true) {
-                Log.d(TAG, "SystemDnsCacheServer not running, attempting to start...")
-                if (server == null) {
-                    server = SystemDnsCacheServer.getInstance(context)
-                }
-                server?.start()
-                
-                delay(100)
-                
-                if (server?.isRunning() != true) {
-                    Log.w(TAG, "SystemDnsCacheServer failed to start, cannot forward DNS query: $domain")
-                    return server?.resolveDomain(domain) ?: emptyList()
-                }
-            }
-            
-            // Increased timeout to 5000ms to accommodate Happy Eyeballs algorithm
-            // which may need to try multiple DNS servers with wave delays (400ms)
-            // and adaptive timeouts (max 3000ms per server)
-            val maxWaitTimeMs = 5000L
-            val startTime = System.currentTimeMillis()
-            
-            val result = withTimeoutOrNull(maxWaitTimeMs) {
-                server?.resolveDomain(domain) ?: emptyList()
-            }
-            
-            val elapsedTime = System.currentTimeMillis() - startTime
-            if (result == null) {
-                Log.w(TAG, "⚠️ DNS resolution timeout for $domain after ${elapsedTime}ms (max: ${maxWaitTimeMs}ms)")
-                return emptyList()
-            }
-            
-            if (result.isNotEmpty()) {
-                Log.d(TAG, "✅ DNS resolved for $domain in ${elapsedTime}ms -> ${result.map { it.hostAddress }}")
-            } else {
-                Log.w(TAG, "⚠️ DNS resolution returned empty result for $domain after ${elapsedTime}ms")
-            }
-            
-            result
+            withTimeoutOrNull(3000L) {
+                InetAddress.getAllByName(domain).toList()
+            } ?: emptyList()
         } catch (e: Exception) {
-            Log.e(TAG, "Error forwarding DNS query to SystemDnsCacheServer: $domain", e)
+            Log.w(TAG, "DNS resolution failed for $domain: ${e.message}")
             emptyList()
         }
     }
@@ -1224,7 +1090,6 @@ object TProxyUtils {
         prefs: Preferences,
         isStopping: Boolean,
         socks5ReadinessChecked: Boolean,
-        systemDnsCacheServer: SystemDnsCacheServer?,
         serviceScope: CoroutineScope,
         isActive: Boolean,
         onReadinessChanged: (Boolean) -> Unit,
@@ -1252,9 +1117,6 @@ object TProxyUtils {
                     } else if (isReady && !socks5ReadinessChecked) {
                         Log.i(TAG, "✅ SOCKS5 recovered - updating readiness state")
                         onReadinessChanged(true)
-                        
-                        systemDnsCacheServer?.setSocks5Proxy(socksAddress, socksPort)
-                        Log.d(TAG, "✅ SOCKS5 UDP proxy set for DNS (after recovery): $socksAddress:$socksPort")
                         
                         val readyIntent = Intent("com.hyperxray.an.SOCKS5_READY")
                         readyIntent.setPackage(context.packageName)

@@ -6,6 +6,7 @@ import com.hyperxray.an.feature.warp.data.repository.WarpRepositoryImpl
 import com.hyperxray.an.feature.warp.data.storage.WarpAccountStorage
 import com.hyperxray.an.feature.warp.domain.usecase.GenerateWarpConfigUseCase
 import com.hyperxray.an.feature.warp.domain.usecase.GetWarpDevicesUseCase
+import com.hyperxray.an.feature.warp.domain.usecase.ImportWarpAccountUseCase
 import com.hyperxray.an.feature.warp.domain.usecase.LoadWarpAccountUseCase
 import com.hyperxray.an.feature.warp.domain.usecase.RegisterWarpAccountUseCase
 import com.hyperxray.an.feature.warp.domain.usecase.RemoveWarpDeviceUseCase
@@ -26,6 +27,7 @@ object WarpFeatureProvider {
         val repository = WarpRepositoryImpl(context, apiDataSource, storage)
         
         val registerAccountUseCase = RegisterWarpAccountUseCase(repository)
+        val importAccountUseCase = ImportWarpAccountUseCase(repository)
         val updateLicenseUseCase = UpdateWarpLicenseUseCase(repository)
         val getDevicesUseCase = GetWarpDevicesUseCase(repository)
         val removeDeviceUseCase = RemoveWarpDeviceUseCase(repository)
@@ -34,6 +36,7 @@ object WarpFeatureProvider {
         
         return WarpViewModel(
             registerAccountUseCase = registerAccountUseCase,
+            importAccountUseCase = importAccountUseCase,
             updateLicenseUseCase = updateLicenseUseCase,
             getDevicesUseCase = getDevicesUseCase,
             removeDeviceUseCase = removeDeviceUseCase,

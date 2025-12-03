@@ -97,7 +97,6 @@ import com.hyperxray.an.common.ROUTE_STATS
 import com.hyperxray.an.common.ROUTE_MAIN
 import com.hyperxray.an.common.ROUTE_CONFIG_EDIT
 import com.hyperxray.an.common.ROUTE_APP_LIST
-import com.hyperxray.an.common.ROUTE_AI_INSIGHTS
 import com.hyperxray.an.viewmodel.LogViewModel
 import com.hyperxray.an.viewmodel.MainViewModel
 import kotlinx.coroutines.delay
@@ -263,7 +262,6 @@ fun AppTopAppBar(
         ROUTE_SETTINGS -> stringResource(R.string.settings)
         ROUTE_CONFIG_EDIT -> stringResource(R.string.configuration)
         ROUTE_APP_LIST -> "App List"
-        ROUTE_AI_INSIGHTS -> "AI Insights"
         else -> stringResource(R.string.app_name)
     }
 

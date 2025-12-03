@@ -2,7 +2,6 @@ package com.hyperxray.an.notification
 
 import android.content.Context
 import android.util.Log
-import com.hyperxray.an.core.network.dns.DnsCacheManager
 import com.hyperxray.an.feature.telegram.data.datasource.TelegramApiDataSource
 import com.hyperxray.an.feature.telegram.data.datasource.TelegramConfigDataSource
 import com.hyperxray.an.feature.telegram.data.repository.TelegramRepositoryImpl
@@ -17,8 +16,6 @@ import com.hyperxray.an.feature.telegram.domain.usecase.SendTelegramNotification
 import com.hyperxray.an.feature.telegram.domain.usecase.ProcessTelegramCommandUseCase
 import com.hyperxray.an.feature.telegram.domain.usecase.GetVpnStatusUseCase
 import com.hyperxray.an.feature.telegram.domain.usecase.GetPerformanceStatsUseCase
-import com.hyperxray.an.feature.telegram.domain.usecase.GetDnsCacheStatsUseCase
-import com.hyperxray.an.feature.telegram.domain.usecase.GetAiOptimizerStatusUseCase
 import com.hyperxray.an.feature.telegram.domain.usecase.GetDashboardUseCase
 import com.hyperxray.an.feature.telegram.domain.usecase.GetNetworkQualityScoreUseCase
 import com.hyperxray.an.feature.telegram.domain.usecase.VpnControlUseCase
@@ -56,8 +53,6 @@ class TelegramNotificationManager private constructor(context: Context) {
     // Use cases for command processing
     private val getVpnStatusUseCase: GetVpnStatusUseCase = GetVpnStatusUseCaseImpl(applicationContext)
     private val getPerformanceStatsUseCase: GetPerformanceStatsUseCase = GetPerformanceStatsUseCaseImpl(applicationContext)
-    private val getDnsCacheStatsUseCase = GetDnsCacheStatsUseCase(applicationContext)
-    private val getAiOptimizerStatusUseCase: GetAiOptimizerStatusUseCase = GetAiOptimizerStatusUseCaseImpl(applicationContext)
     private val getDashboardUseCase: GetDashboardUseCase = GetDashboardUseCaseImpl(applicationContext)
     private val getNetworkQualityScoreUseCase: GetNetworkQualityScoreUseCase = GetNetworkQualityScoreUseCaseImpl(applicationContext)
     private val vpnControlUseCase: VpnControlUseCase = VpnControlUseCaseImpl(applicationContext)
@@ -70,8 +65,6 @@ class TelegramNotificationManager private constructor(context: Context) {
         repository = repository,
         getVpnStatusUseCase = getVpnStatusUseCase,
         getPerformanceStatsUseCase = getPerformanceStatsUseCase,
-        getDnsCacheStatsUseCase = getDnsCacheStatsUseCase,
-        getAiOptimizerStatusUseCase = getAiOptimizerStatusUseCase,
         getDashboardUseCase = getDashboardUseCase,
         getNetworkQualityScoreUseCase = getNetworkQualityScoreUseCase,
         vpnControlUseCase = vpnControlUseCase,
@@ -172,28 +165,6 @@ class TelegramNotificationManager private constructor(context: Context) {
             sendNotificationUseCase(notification, config).fold(
                 onSuccess = { Log.d(TAG, "Performance metrics notification sent") },
                 onFailure = { error -> Log.e(TAG, "Failed to send performance metrics notification", error) }
-            )
-        }
-    }
-
-    /**
-     * Send DNS cache info notification
-     */
-    suspend fun notifyDnsCacheInfo() {
-        withContext(Dispatchers.IO) {
-            val config = getConfig() ?: return@withContext
-
-            val stats = DnsCacheManager.getStats()
-            val message = "🌐 *DNS Cache Statistics*\n\n$stats"
-
-            val notification = TelegramNotification(
-                type = NotificationType.DnsCacheInfo,
-                message = message
-            )
-
-            sendNotificationUseCase(notification, config).fold(
-                onSuccess = { Log.d(TAG, "DNS cache info notification sent") },
-                onFailure = { error -> Log.e(TAG, "Failed to send DNS cache info notification", error) }
             )
         }
     }

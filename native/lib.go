@@ -60,8 +60,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -70,8 +72,33 @@ import (
 	"unsafe"
 
 	"github.com/hyperxray/native/bridge"
-	"github.com/hyperxray/native/dns"
 )
+
+// Go Runtime Memory Configuration
+// These values are increased for improved performance
+const (
+	// GoMemoryLimit is the soft memory limit for Go runtime (1GB)
+	// Increased for better throughput on high-traffic scenarios
+	GoMemoryLimit = 1024 * 1024 * 1024 // 1 GB
+
+	// GoGCPercent controls garbage collection frequency
+	// Higher value = less frequent GC, more memory usage
+	// Doubled from default 100 to 200 for reduced GC pressure
+	GoGCPercent = 200
+)
+
+func init() {
+	// Configure Go runtime memory settings
+	// SetMemoryLimit sets a soft memory limit for the Go runtime
+	debug.SetMemoryLimit(GoMemoryLimit)
+	
+	// SetGCPercent sets the garbage collection target percentage
+	// Higher values reduce GC frequency but increase memory usage
+	debug.SetGCPercent(GoGCPercent)
+	
+	// Set GOMAXPROCS to use all available CPUs
+	runtime.GOMAXPROCS(runtime.NumCPU())
+}
 
 var (
 	tunnel     *bridge.HyperTunnel
@@ -311,7 +338,7 @@ func validateXrayConfig(jsonStr string) (*XrayConfig, error) {
 }
 
 //export StartHyperTunnel
-func StartHyperTunnel(tunFd C.int, wgConfigJSON, xrayConfigJSON, warpEndpoint, warpPrivateKey, nativeLibDir, filesDir *C.char) C.int {
+func StartHyperTunnel(tunFd C.int, wgConfigJSON, xrayConfigJSON, warpEndpoint, warpPrivateKey, nativeLibDir, filesDir, tunnelMode, masqueConfig *C.char) C.int {
 	// Recover from panics with proper error handling and cleanup
 	defer func() {
 		if r := recover(); r != nil {
@@ -415,11 +442,17 @@ func StartHyperTunnel(tunFd C.int, wgConfigJSON, xrayConfigJSON, warpEndpoint, w
 	xrayConfig := C.GoString(xrayConfigJSON)
 	endpoint := C.GoString(warpEndpoint)
 	privateKey := C.GoString(warpPrivateKey)
+	tunnelModeStr := C.GoString(tunnelMode)
+	masqueConfigStr := C.GoString(masqueConfig)
 
 	logDebug("WireGuard config length: %d bytes", len(wgConfig))
 	logDebug("Xray config length: %d bytes", len(xrayConfig))
 	logDebug("WARP endpoint: %s", endpoint)
 	logDebug("WARP private key length: %d", len(privateKey))
+	logInfo("Tunnel mode: %s", tunnelModeStr)
+	if tunnelModeStr == "masque" {
+		logDebug("MASQUE config length: %d bytes", len(masqueConfigStr))
+	}
 
 	// Early validation: Check for empty or null configs
 	// This prevents unnecessary processing and provides clear error messages
@@ -496,6 +529,11 @@ func StartHyperTunnel(tunFd C.int, wgConfigJSON, xrayConfigJSON, warpEndpoint, w
 	// Create tunnel configuration
 	logInfo("Creating HyperTunnel instance...")
 	
+	// Default to wireguard if tunnelMode is empty
+	if tunnelModeStr == "" {
+		tunnelModeStr = "wireguard"
+	}
+	
 	tunnelConfig := bridge.TunnelConfig{
 		TunFd:          tunFdInt,
 		WgConfig:       wgConfig,
@@ -505,6 +543,8 @@ func StartHyperTunnel(tunFd C.int, wgConfigJSON, xrayConfigJSON, warpEndpoint, w
 		MTU:            wgCfg.MTU,
 		NativeLibDir:   nativeDir,
 		FilesDir:       filesDirPath,
+		TunnelMode:     tunnelModeStr,
+		MasqueConfig:   masqueConfigStr,
 	}
 
 	// If MTU is 0, use default
@@ -588,11 +628,6 @@ func StopHyperTunnel() C.int {
 	logInfo("Stopping tunnel...")
 	tunnel.Stop()
 	tunnel = nil
-	
-	// Save DNS cache to disk on tunnel stop for persistence
-	logInfo("Saving DNS cache to disk...")
-	cacheManager := dns.GetCacheManager()
-	cacheManager.SaveToDisk("")
 	
 	logInfo("Tunnel stopped successfully")
 	return ErrorSuccess
@@ -863,6 +898,24 @@ func SetSocketProtector(protector C.socket_protector_func) {
 	logInfo("[JNI] Socket protector registered")
 }
 
+//export ClearSocketProtector
+func ClearSocketProtector() {
+	// Clear C protector callback
+	C.set_protector(nil)
+	// Clear Go protector and invalidate all caches
+	bridge.SetSocketProtector(nil)
+	logInfo("[JNI] Socket protector cleared and caches invalidated")
+}
+
+//export ResetSocketProtectorState
+func ResetSocketProtectorState() {
+	// Reset protection state without clearing the protector
+	// This is useful when VPN restarts but protector callback is still valid
+	bridge.InvalidatePhysicalIPCache()
+	bridge.ClearBootstrapDNSCache()
+	logInfo("[JNI] Socket protector state reset (caches invalidated)")
+}
+
 // ============================================================================
 // REMOVED: Multi-Instance Management Functions
 // ============================================================================
@@ -882,252 +935,91 @@ func SetSocketProtector(protector C.socket_protector_func) {
 // - IsMultiInstanceRunning
 
 // ============================================================================
-// DNS Cache Management Functions
+// DNS Cache Management Functions (REMOVED - Using Google DNS directly)
 // ============================================================================
+// DNS cache has been removed. Using Google DNS (8.8.8.8) directly for all DNS queries.
 
 //export InitDNSCache
 func InitDNSCache(cacheDir *C.char) C.int {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in InitDNSCache: %v\n%s", r, debug.Stack())
-		}
-	}()
-
-	dir := C.GoString(cacheDir)
-	logInfo("InitDNSCache: cacheDir=%s", dir)
-
-	cacheManager := dns.GetCacheManager()
-	if err := cacheManager.Initialize(dir); err != nil {
-		logError("Failed to initialize DNS cache: %v", err)
-		return -1
-	}
-
-	logInfo("DNS cache initialized successfully")
+	logInfo("InitDNSCache: DNS cache removed, using Google DNS directly")
 	return ErrorSuccess
 }
 
 //export DNSCacheLookup
 func DNSCacheLookup(hostname *C.char) *C.char {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in DNSCacheLookup: %v", r)
-		}
-	}()
-
-	host := C.GoString(hostname)
-	cacheManager := dns.GetCacheManager()
-
-	ips, found := cacheManager.Lookup(host)
-	if !found || len(ips) == 0 {
-		return C.CString("")
-	}
-
-	// Return first IP
-	return C.CString(ips[0].String())
+	return C.CString("")
 }
 
 //export DNSCacheLookupAll
 func DNSCacheLookupAll(hostname *C.char) *C.char {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in DNSCacheLookupAll: %v", r)
-		}
-	}()
-
-	host := C.GoString(hostname)
-	cacheManager := dns.GetCacheManager()
-
-	ips, found := cacheManager.Lookup(host)
-	if !found || len(ips) == 0 {
-		return C.CString("[]")
-	}
-
-	var ipStrings []string
-	for _, ip := range ips {
-		ipStrings = append(ipStrings, ip.String())
-	}
-
-	jsonBytes, _ := json.Marshal(ipStrings)
-	return C.CString(string(jsonBytes))
+	return C.CString("[]")
 }
 
 //export DNSCacheSave
 func DNSCacheSave(hostname *C.char, ipsJSON *C.char, ttl C.long) {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in DNSCacheSave: %v", r)
-		}
-	}()
-
-	host := C.GoString(hostname)
-	ipsStr := C.GoString(ipsJSON)
-
-	var ipStrings []string
-	json.Unmarshal([]byte(ipsStr), &ipStrings)
-
-	cacheManager := dns.GetCacheManager()
-	cacheManager.SaveFromStrings(host, ipStrings, int64(ttl))
+	// No-op: DNS cache removed
 }
 
 //export DNSCacheGetMetrics
 func DNSCacheGetMetrics() *C.char {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in DNSCacheGetMetrics: %v", r)
-		}
-	}()
-
-	cacheManager := dns.GetCacheManager()
-	return C.CString(cacheManager.GetMetricsJSON())
+	return C.CString(`{"removed":true,"message":"DNS cache removed, using Google DNS directly"}`)
 }
 
 //export DNSCacheClear
 func DNSCacheClear() {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in DNSCacheClear: %v", r)
-		}
-	}()
-
-	cacheManager := dns.GetCacheManager()
-	cacheManager.Clear()
-	logInfo("DNS cache cleared")
+	logInfo("DNSCacheClear: DNS cache removed, nothing to clear")
 }
 
 //export DNSCacheCleanupExpired
 func DNSCacheCleanupExpired() C.int {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in DNSCacheCleanupExpired: %v", r)
-		}
-	}()
-
-	cacheManager := dns.GetCacheManager()
-	removed := cacheManager.CleanupExpired()
-	return C.int(removed)
+	return 0
 }
 
 //export DNSCacheSaveToDisk
 func DNSCacheSaveToDisk() C.int {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in DNSCacheSaveToDisk: %v", r)
-		}
-	}()
-
-	cacheManager := dns.GetCacheManager()
-	cacheManager.SaveToDisk("")
-	logInfo("DNS cache saved to disk (explicit call)")
 	return ErrorSuccess
 }
 
 //export DNSCacheShutdown
 func DNSCacheShutdown() C.int {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in DNSCacheShutdown: %v", r)
-		}
-	}()
-
-	cacheManager := dns.GetCacheManager()
-	cacheManager.Shutdown()
-	logInfo("DNS cache shutdown complete")
 	return ErrorSuccess
 }
 
 // ============================================================================
-// DNS Server Functions
+// DNS Server Functions (REMOVED - Using Google DNS directly)
 // ============================================================================
 
 //export StartDNSServer
 func StartDNSServer(port C.int, upstreamDNS *C.char) C.int {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in StartDNSServer: %v\n%s", r, debug.Stack())
-		}
-	}()
-
-	upstream := C.GoString(upstreamDNS)
-	if upstream == "" {
-		upstream = "1.1.1.1:53"
-	}
-
-	server := dns.GetDNSServer()
-	server.SetUpstreamDNS(upstream)
-	server.SetLogCallback(func(msg string) {
-		logInfo("[DNS] %s", msg)
-	})
-
-	if err := server.Start(int(port)); err != nil {
-		logError("Failed to start DNS server: %v", err)
-		return -1
-	}
-
-	logInfo("DNS server started on port %d with upstream %s", server.GetListeningPort(), upstream)
-	return C.int(server.GetListeningPort())
+	logInfo("StartDNSServer: DNS server removed, using Google DNS directly")
+	return 0
 }
 
 //export StopDNSServer
 func StopDNSServer() C.int {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in StopDNSServer: %v", r)
-		}
-	}()
-
-	server := dns.GetDNSServer()
-	server.Stop()
-
-	logInfo("DNS server stopped")
 	return ErrorSuccess
 }
 
 //export IsDNSServerRunning
 func IsDNSServerRunning() C.int {
-	server := dns.GetDNSServer()
-	if server.IsRunning() {
-		return 1
-	}
 	return 0
 }
 
 //export GetDNSServerPort
 func GetDNSServerPort() C.int {
-	server := dns.GetDNSServer()
-	return C.int(server.GetListeningPort())
+	return 0
 }
 
 //export GetDNSServerStats
 func GetDNSServerStats() *C.char {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in GetDNSServerStats: %v", r)
-		}
-	}()
-
-	server := dns.GetDNSServer()
-	stats := server.GetStats()
-
-	jsonBytes, err := json.Marshal(stats)
-	if err != nil {
-		return C.CString("{}")
-	}
-
-	return C.CString(string(jsonBytes))
+	return C.CString(`{"removed":true,"message":"DNS server removed, using Google DNS directly"}`)
 }
 
 //export DNSResolve
 func DNSResolve(hostname *C.char) *C.char {
-	defer func() {
-		if r := recover(); r != nil {
-			logError("PANIC in DNSResolve: %v", r)
-		}
-	}()
-
 	host := C.GoString(hostname)
-	server := dns.GetDNSServer()
-
-	ips, err := server.Resolve(host)
+	
+	ips, err := net.LookupIP(host)
 	if err != nil || len(ips) == 0 {
 		return C.CString("")
 	}

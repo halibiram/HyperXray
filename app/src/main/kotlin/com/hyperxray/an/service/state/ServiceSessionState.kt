@@ -10,7 +10,6 @@ import com.hyperxray.an.service.managers.TrafficStatsHandler
 import com.hyperxray.an.service.managers.TunInterfaceManager
 import com.hyperxray.an.service.managers.XrayLogHandler
 import com.hyperxray.an.viewmodel.CoreStatsState
-import com.hyperxray.an.core.network.dns.SystemDnsCacheServer
 import com.hyperxray.an.notification.TelegramNotificationManager
 import com.hyperxray.an.xray.runtime.stats.CoreStatsClient
 import kotlinx.coroutines.Job
@@ -73,9 +72,6 @@ class ServiceSessionState {
     
     // Jobs
     var heartbeatJob: Job? = null
-    
-    // System DNS cache server (legacy, not used in WireGuard over Xray - native Go library handles DNS)
-    var systemDnsCacheServer: SystemDnsCacheServer? = null
     
     // Connection state
     val connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)

@@ -19,7 +19,6 @@ class SendTelegramNotificationUseCase(
             is NotificationType.VpnStatus -> config.notifyVpnStatus
             is NotificationType.Error -> config.notifyErrors
             is NotificationType.PerformanceMetrics -> config.notifyPerformance
-            is NotificationType.DnsCacheInfo -> config.notifyDnsCache
             is NotificationType.Manual -> config.notifyManual
         }
         

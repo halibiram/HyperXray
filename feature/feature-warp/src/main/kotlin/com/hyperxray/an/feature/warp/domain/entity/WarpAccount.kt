@@ -125,6 +125,8 @@ sealed class WarpRegistrationResult {
 enum class WarpConfigType {
     WIREGUARD,
     XRAY,
-    SINGBOX
+    SINGBOX,
+    MASQUE,
+    MASQUE_TUNNEL
 }
 

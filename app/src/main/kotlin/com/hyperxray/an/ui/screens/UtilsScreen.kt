@@ -52,20 +52,6 @@ fun UtilsScreen(
                     onClick = { navController?.navigate(ROUTE_UTILS_WARP) }
                 )
             }
-            item {
-                UtilsToolCard(
-                    title = "DNS Cache Manager",
-                    description = "View and manage DNS cache records",
-                    onClick = { navController?.navigate(ROUTE_UTILS_DNS_CACHE) }
-                )
-            }
-            item {
-                UtilsToolCard(
-                    title = "AI Optimizer",
-                    description = "AI-powered connection optimization",
-                    onClick = { navController?.navigate(ROUTE_UTILS_OPTIMIZER) }
-                )
-            }
 
             // Network Tools Section
             item {

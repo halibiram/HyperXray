@@ -53,7 +53,6 @@ import com.hyperxray.an.ui.screens.config.sections.AdvancedConfigSection
 import com.hyperxray.an.ui.screens.config.sections.BasicConfigSection
 import com.hyperxray.an.ui.screens.config.sections.ConfigContentSection
 import com.hyperxray.an.ui.screens.config.sections.StreamSettingsSection
-import com.hyperxray.an.ui.screens.config.sections.WireGuardSection
 import com.hyperxray.an.viewmodel.ConfigEditUiEvent
 import com.hyperxray.an.viewmodel.ConfigEditViewModel
 import kotlinx.coroutines.flow.collectLatest
@@ -82,19 +81,6 @@ fun ConfigEditScreen(
     val fragmentInterval by viewModel.fragmentInterval.collectAsStateWithLifecycle()
     val enableMux by viewModel.enableMux.collectAsStateWithLifecycle()
     val muxConcurrency by viewModel.muxConcurrency.collectAsStateWithLifecycle()
-
-    // WARP (WireGuard) settings
-    val enableWarp by viewModel.enableWarp.collectAsStateWithLifecycle()
-    val warpPrivateKey by viewModel.warpPrivateKey.collectAsStateWithLifecycle()
-    val warpPeerPublicKey by viewModel.warpPeerPublicKey.collectAsStateWithLifecycle()
-    val warpEndpoint by viewModel.warpEndpoint.collectAsStateWithLifecycle()
-    val warpLocalAddress by viewModel.warpLocalAddress.collectAsStateWithLifecycle()
-    
-    // WARP license binding
-    val warpLicenseKey by viewModel.warpLicenseKey.collectAsStateWithLifecycle()
-    val warpAccountType by viewModel.warpAccountType.collectAsStateWithLifecycle()
-    val warpQuota by viewModel.warpQuota.collectAsStateWithLifecycle()
-    val isBindingLicense by viewModel.isBindingLicense.collectAsStateWithLifecycle()
 
     val scrollState = rememberScrollState()
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
@@ -251,32 +237,6 @@ fun ConfigEditScreen(
                                 concurrency = concurrency
                             )
                         }
-                    )
-
-                    // WireGuard over Xray Section
-                    WireGuardSection(
-                        enableWarp = enableWarp,
-                        warpPrivateKey = warpPrivateKey,
-                        warpPeerPublicKey = warpPeerPublicKey,
-                        warpEndpoint = warpEndpoint,
-                        warpLocalAddress = warpLocalAddress,
-                        warpLicenseKey = warpLicenseKey,
-                        warpAccountType = warpAccountType,
-                        warpQuota = warpQuota,
-                        isBindingLicense = isBindingLicense,
-                        onWarpSettingsChange = { enabled, privateKey, endpoint, localAddress ->
-                            viewModel.updateWarpSettings(
-                                enabled = enabled,
-                                privateKey = privateKey,
-                                endpoint = endpoint,
-                                localAddress = localAddress
-                            )
-                        },
-                        onLicenseKeyInputChange = { viewModel.updateLicenseKeyInput(it) },
-                        onBindLicenseKey = { viewModel.bindLicenseKey() },
-                        onGenerateWarpIdentity = { viewModel.generateWarpIdentity() },
-                        onCreateFreeIdentity = { viewModel.createFreeIdentity() },
-                        onSetWarpPrivateKey = { viewModel.setWarpPrivateKey(it) }
                     )
 
                     // Config Content Section (Raw JSON Editor)

@@ -16,7 +16,6 @@ import androidx.lifecycle.application
 import androidx.lifecycle.viewModelScope
 import com.hyperxray.an.BuildConfig
 import com.hyperxray.an.R
-import com.hyperxray.an.common.ROUTE_AI_INSIGHTS
 import com.hyperxray.an.common.ROUTE_APP_LIST
 import com.hyperxray.an.common.formatBytes
 import com.hyperxray.an.common.formatThroughput
@@ -82,6 +81,7 @@ sealed class MainViewUiEvent {
     data class StartService(val intent: Intent) : MainViewUiEvent()
     data object RefreshConfigList : MainViewUiEvent()
     data class Navigate(val route: String) : MainViewUiEvent()
+    data object ShowWarpAccountRequiredDialog : MainViewUiEvent()
 }
 
 /**
@@ -155,6 +155,21 @@ class MainViewModel(
         com.hyperxray.an.feature.dashboard.WarpAccountInfo()
     )
     val warpAccountInfo: StateFlow<com.hyperxray.an.feature.dashboard.WarpAccountInfo> = _warpAccountInfo.asStateFlow()
+    
+    // Show WARP account creation modal
+    private val _showWarpAccountModal = MutableStateFlow(false)
+    val showWarpAccountModal: StateFlow<Boolean> = _showWarpAccountModal.asStateFlow()
+    
+    // WARP account creation in progress
+    private val _isCreatingWarpAccount = MutableStateFlow(false)
+    val isCreatingWarpAccount: StateFlow<Boolean> = _isCreatingWarpAccount.asStateFlow()
+    
+    /**
+     * Show/hide WARP account creation dialog
+     */
+    fun setShowWarpAccountDialog(show: Boolean) {
+        _showWarpAccountModal.value = show
+    }
 
     private val _uiEvent = Channel<MainViewUiEvent>(Channel.BUFFERED)
     val uiEvent = _uiEvent.receiveAsFlow()
@@ -412,15 +427,80 @@ class MainViewModel(
     
     /**
      * Start HyperVpnService with WARP
+     * Checks if WARP account exists, if not shows dialog to create one
      */
     fun startHyperVpn() {
         viewModelScope.launch {
             try {
+                // Check if WARP account exists
+                val filesDir = getApplication<Application>().filesDir
+                val accountFile = File(filesDir, "warp-account.json")
+                
+                if (!accountFile.exists() || !accountFile.canRead()) {
+                    // No WARP account - show dialog to create one
+                    Log.d(TAG, "No WARP account found, showing create account dialog")
+                    _uiEvent.trySend(MainViewUiEvent.ShowWarpAccountRequiredDialog)
+                    return@launch
+                }
+                
+                // Validate account file has required fields
+                try {
+                    val accountContent = accountFile.readText()
+                    val accountJson = JSONObject(accountContent)
+                    val privateKey = accountJson.optString("privateKey", "")
+                    
+                    if (privateKey.isBlank()) {
+                        Log.w(TAG, "WARP account file exists but privateKey is missing")
+                        _uiEvent.trySend(MainViewUiEvent.ShowWarpAccountRequiredDialog)
+                        return@launch
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error validating WARP account: ${e.message}", e)
+                    _uiEvent.trySend(MainViewUiEvent.ShowWarpAccountRequiredDialog)
+                    return@launch
+                }
+                
+                // WARP account exists and is valid - start VPN
                 HyperVpnHelper.startVpnWithWarp(application)
                 _uiEvent.trySend(MainViewUiEvent.ShowSnackbar("Starting HyperVpn..."))
             } catch (e: Exception) {
                 Log.e(TAG, "Error starting HyperVpn: ${e.message}", e)
                 _uiEvent.trySend(MainViewUiEvent.ShowSnackbar("Failed to start HyperVpn: ${e.message}"))
+            }
+        }
+    }
+    
+    /**
+     * Create WARP account and then start VPN
+     */
+    fun createWarpAccountAndConnect() {
+        viewModelScope.launch {
+            try {
+                _isCreatingWarpAccount.value = true
+                _uiEvent.trySend(MainViewUiEvent.ShowSnackbar("Creating WARP account..."))
+                
+                val filesDir = getApplication<Application>().filesDir
+                val warpManager = com.hyperxray.an.util.WarpManager.getInstance()
+                
+                val result = warpManager.registerAndGetConfig(filesDir)
+                
+                if (result.isSuccess) {
+                    Log.d(TAG, "✅ WARP account created successfully")
+                    loadWarpAccountInfo() // Refresh dashboard
+                    
+                    // Now start VPN
+                    HyperVpnHelper.startVpnWithWarp(application)
+                    _uiEvent.trySend(MainViewUiEvent.ShowSnackbar("WARP account created, connecting..."))
+                } else {
+                    val error = result.exceptionOrNull()?.message ?: "Unknown error"
+                    Log.e(TAG, "❌ Failed to create WARP account: $error")
+                    _uiEvent.trySend(MainViewUiEvent.ShowSnackbar("Failed to create WARP account: $error"))
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error creating WARP account: ${e.message}", e)
+                _uiEvent.trySend(MainViewUiEvent.ShowSnackbar("Error: ${e.message}"))
+            } finally {
+                _isCreatingWarpAccount.value = false
             }
         }
     }
@@ -680,6 +760,12 @@ class MainViewModel(
         settingsRepository.setAutoStart(enabled)
     }
 
+    fun setTunnelMode(mode: com.hyperxray.an.common.TunnelMode) {
+        settingsRepository.setTunnelMode(mode)
+        // Note: Tunnel mode change requires VPN restart to take effect
+        Log.d(TAG, "Tunnel mode changed to: ${mode.name}")
+    }
+
     fun setConnectionStateDisconnecting() {
         // Connection state is now managed by VpnConnectionUseCase
         // This method is kept for backward compatibility but does nothing
@@ -936,12 +1022,6 @@ class MainViewModel(
         viewModelScope.launch {
             appListViewModel = AppListViewModel(application)
             _uiEvent.trySend(MainViewUiEvent.Navigate(ROUTE_APP_LIST))
-        }
-    }
-
-    fun navigateToAiInsights() {
-        viewModelScope.launch {
-            _uiEvent.trySend(MainViewUiEvent.Navigate(ROUTE_AI_INSIGHTS))
         }
     }
 

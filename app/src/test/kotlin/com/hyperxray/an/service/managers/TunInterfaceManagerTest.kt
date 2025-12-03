@@ -6,7 +6,6 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
-import com.hyperxray.an.core.network.dns.SystemDnsCacheServer
 import com.hyperxray.an.prefs.Preferences
 import com.hyperxray.an.service.state.ServiceSessionState
 import kotlinx.coroutines.CoroutineScope
@@ -49,9 +48,6 @@ class TunInterfaceManagerTest {
     private lateinit var mockNetworkCapabilities: NetworkCapabilities
 
     @Mock
-    private lateinit var mockSystemDnsCacheServer: SystemDnsCacheServer
-
-    @Mock
     private lateinit var mockServiceScope: CoroutineScope
 
     private lateinit var manager: TunInterfaceManager
@@ -68,7 +64,6 @@ class TunInterfaceManagerTest {
         // Setup session state
         sessionState = ServiceSessionState()
         sessionState.dnsCacheInitialized = false
-        sessionState.systemDnsCacheServer = null
         
         // Setup preferences with IPv4/IPv6 enabled
         prefs = createTestPreferences()
@@ -101,11 +96,6 @@ class TunInterfaceManagerTest {
         whenever(mockConnectivityManager.activeNetwork).thenReturn(null)
         whenever(mockConnectivityManager.getNetworkCapabilities(any())).thenReturn(mockNetworkCapabilities)
         whenever(mockNetworkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)).thenReturn(false)
-        
-        // Mock SystemDnsCacheServer
-        sessionState.systemDnsCacheServer = mockSystemDnsCacheServer
-        whenever(mockSystemDnsCacheServer.getListeningPort()).thenReturn(53)
-        whenever(mockSystemDnsCacheServer.isRunning()).thenReturn(true)
         
         // Act
         // Note: VpnService.Builder.establish() requires real Android environment

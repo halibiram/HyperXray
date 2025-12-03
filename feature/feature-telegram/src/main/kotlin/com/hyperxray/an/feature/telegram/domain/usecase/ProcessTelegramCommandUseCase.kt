@@ -16,8 +16,6 @@ class ProcessTelegramCommandUseCase(
     private val repository: TelegramRepository,
     private val getVpnStatusUseCase: GetVpnStatusUseCase,
     private val getPerformanceStatsUseCase: GetPerformanceStatsUseCase,
-    private val getDnsCacheStatsUseCase: GetDnsCacheStatsUseCase,
-    private val getAiOptimizerStatusUseCase: GetAiOptimizerStatusUseCase? = null,
     private val getDashboardUseCase: GetDashboardUseCase? = null,
     private val getNetworkQualityScoreUseCase: GetNetworkQualityScoreUseCase? = null,
     private val vpnControlUseCase: VpnControlUseCase? = null,
@@ -47,22 +45,12 @@ class ProcessTelegramCommandUseCase(
                 val stats = getPerformanceStatsUseCase().getOrNull() ?: "Performance Stats: Unknown"
                 Pair(stats, getMainMenuKeyboard())
             }
-            "/dns" -> {
-                val dns = getDnsCacheStatsUseCase().getOrNull() ?: "DNS Cache Stats: Unknown"
-                Pair(dns, getMainMenuKeyboard())
-            }
             "/info" -> {
                 val info = getInfoMessage(
                     vpnStatus = getVpnStatusUseCase().getOrNull() ?: "Unknown",
-                    stats = getPerformanceStatsUseCase().getOrNull() ?: "Unknown",
-                    dns = getDnsCacheStatsUseCase().getOrNull() ?: "Unknown"
+                    stats = getPerformanceStatsUseCase().getOrNull() ?: "Unknown"
                 )
                 Pair(info, getMainMenuKeyboard())
-            }
-            "/ai_status" -> {
-                val aiStatus = getAiOptimizerStatusUseCase?.invoke()?.getOrNull() 
-                    ?: "AI Optimizer Status: Not Available"
-                Pair(aiStatus, getMainMenuKeyboard())
             }
             "/dashboard" -> {
                 val dashboard = getDashboardUseCase?.invoke()?.getOrNull() 
@@ -264,15 +252,10 @@ class ProcessTelegramCommandUseCase(
                 val stats = getPerformanceStatsUseCase().getOrNull() ?: "Performance Stats: Unknown"
                 Pair(stats, getMainMenuKeyboard())
             }
-            "menu_dns" -> {
-                val dns = getDnsCacheStatsUseCase().getOrNull() ?: "DNS Cache Stats: Unknown"
-                Pair(dns, getMainMenuKeyboard())
-            }
             "menu_info" -> {
                 val info = getInfoMessage(
                     vpnStatus = getVpnStatusUseCase().getOrNull() ?: "Unknown",
-                    stats = getPerformanceStatsUseCase().getOrNull() ?: "Unknown",
-                    dns = getDnsCacheStatsUseCase().getOrNull() ?: "Unknown"
+                    stats = getPerformanceStatsUseCase().getOrNull() ?: "Unknown"
                 )
                 Pair(info, getMainMenuKeyboard())
             }
@@ -280,11 +263,6 @@ class ProcessTelegramCommandUseCase(
                 val dashboard = getDashboardUseCase?.invoke()?.getOrNull() 
                     ?: "Dashboard: Not Available"
                 Pair(dashboard, getMainMenuKeyboard())
-            }
-            "menu_ai_status" -> {
-                val aiStatus = getAiOptimizerStatusUseCase?.invoke()?.getOrNull() 
-                    ?: "AI Optimizer Status: Not Available"
-                Pair(aiStatus, getMainMenuKeyboard())
             }
             "menu_quality" -> {
                 val quality = getNetworkQualityScoreUseCase?.invoke()?.getOrNull() 
@@ -427,9 +405,7 @@ class ProcessTelegramCommandUseCase(
             |/menu - Show main menu with buttons
             |/status - Get current VPN connection status
             |/stats - Get performance metrics (speed, ping, traffic)
-            |/dns - Get DNS cache statistics (hits, misses, hit rate)
-            |/info - Get comprehensive information (status + stats + DNS)
-            |/ai_status - Get AI Optimizer status (bandit, deep model, orchestrator)
+            |/info - Get comprehensive information (status + stats)
             |/dashboard - Get comprehensive dashboard (all metrics in one view)
             |/quality - Get network quality score (0-100) with detailed breakdown
             |/connect - Connect to VPN (requires confirmation)
@@ -465,21 +441,17 @@ class ProcessTelegramCommandUseCase(
                     InlineKeyboardButton("⚡ Performance", "menu_stats")
                 ),
                 listOf(
-                    InlineKeyboardButton("🌐 DNS Cache", "menu_dns"),
-                    InlineKeyboardButton("📱 Dashboard", "menu_dashboard")
-                ),
-                listOf(
-                    InlineKeyboardButton("🌐 Quality", "menu_quality"),
+                    InlineKeyboardButton("📱 Dashboard", "menu_dashboard"),
                     InlineKeyboardButton("ℹ️ All Info", "menu_info")
                 ),
-                // AI & Analytics Section
+                // Analytics Section
                 listOf(
-                    InlineKeyboardButton("🤖 AI Status", "menu_ai_status"),
-                    InlineKeyboardButton("📈 Graph", "menu_graph")
+                    InlineKeyboardButton("📈 Graph", "menu_graph"),
+                    InlineKeyboardButton("📊 Traffic", "menu_traffic")
                 ),
                 listOf(
-                    InlineKeyboardButton("📊 Traffic", "menu_traffic"),
-                    InlineKeyboardButton("🔍 Diagnose", "menu_diagnose")
+                    InlineKeyboardButton("🔍 Diagnose", "menu_diagnose"),
+                    InlineKeyboardButton("📊 Monitor", "menu_monitor")
                 ),
                 // Control Section
                 listOf(
@@ -499,7 +471,7 @@ class ProcessTelegramCommandUseCase(
         )
     }
 
-    private fun getInfoMessage(vpnStatus: String, stats: String, dns: String): String {
+    private fun getInfoMessage(vpnStatus: String, stats: String): String {
         return buildString {
             appendLine("<b>📋 COMPLETE INFORMATION</b>")
             appendLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -507,8 +479,6 @@ class ProcessTelegramCommandUseCase(
             appendLine(vpnStatus)
             appendLine()
             appendLine(stats)
-            appendLine()
-            appendLine(dns)
         }
     }
 }

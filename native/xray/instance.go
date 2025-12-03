@@ -44,8 +44,8 @@ func NewInstance(configJSON, nativeLibDir, filesDir string) (*Instance, error) {
 		nativeLibDir: nativeLibDir,
 		filesDir:     filesDir,
 		stopChan:     make(chan struct{}),
-		udpSendChan:  make(chan UDPPacket, 1024),
-		udpRecvChan:  make(chan []byte, 1024),
+		udpSendChan:  make(chan UDPPacket, 2048), // Doubled from 1024
+		udpRecvChan:  make(chan []byte, 2048),    // Doubled from 1024
 	}
 	
 	return instance, nil

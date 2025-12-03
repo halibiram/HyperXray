@@ -1,6 +1,7 @@
 package com.hyperxray.an.viewmodel
 
 import com.hyperxray.an.common.ThemeMode
+import com.hyperxray.an.common.TunnelMode
 
 data class InputFieldState(
     val value: String,
@@ -72,5 +73,6 @@ data class SettingsState(
     val performance: PerformanceSettings,
     val bypassDomains: List<String> = emptyList(),
     val bypassIps: List<String> = emptyList(),
-    val xrayCoreInstanceCount: Int = 1
+    val xrayCoreInstanceCount: Int = 1,
+    val tunnelMode: TunnelMode = TunnelMode.WIREGUARD
 ) 

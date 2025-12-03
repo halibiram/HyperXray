@@ -22,10 +22,7 @@ import com.hyperxray.an.common.*
 import com.hyperxray.an.ui.screens.AppListScreen
 import com.hyperxray.an.ui.screens.ConfigEditScreen
 import com.hyperxray.an.ui.screens.MainScreen
-import com.hyperxray.an.ui.screens.insights.AiInsightsScreen
-import com.hyperxray.an.ui.screens.utils.DnsCacheManagerScreen
 import com.hyperxray.an.ui.screens.utils.tools.*
-import com.hyperxray.an.ui.screens.insights.AiInsightsContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
@@ -34,9 +31,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.hyperxray.an.viewmodel.AiInsightsViewModel
 import com.hyperxray.an.viewmodel.AppListViewModel
 import com.hyperxray.an.viewmodel.ConfigEditViewModel
 import com.hyperxray.an.viewmodel.MainViewModel
@@ -123,18 +118,6 @@ fun AppNavHost(
         }
 
         composable(
-            route = ROUTE_AI_INSIGHTS,
-            enterTransition = { enterTransition() },
-            exitTransition = { exitTransition() },
-            popEnterTransition = { EnterTransition.None },
-            popExitTransition = { popExitTransition() }
-        ) {
-            AiInsightsScreen(
-                onBackClick = { navController.popBackStack() }
-            )
-        }
-
-        composable(
             route = ROUTE_TELEGRAM_SETTINGS,
             enterTransition = { enterTransition() },
             exitTransition = { exitTransition() },
@@ -169,36 +152,6 @@ fun AppNavHost(
             val viewModel = remember { WarpFeatureProvider.createViewModel(context) }
             ToolScreenWrapper(title = "WARP Account", navController = navController) {
                 WarpScreen(viewModel = viewModel)
-            }
-        }
-
-        composable(
-            route = ROUTE_UTILS_DNS_CACHE,
-            enterTransition = { enterTransition() },
-            exitTransition = { exitTransition() },
-            popEnterTransition = { EnterTransition.None },
-            popExitTransition = { popExitTransition() }
-        ) {
-            ToolScreenWrapper(title = "DNS Cache Manager", navController = navController) {
-                DnsCacheManagerScreen()
-            }
-        }
-
-        composable(
-            route = ROUTE_UTILS_OPTIMIZER,
-            enterTransition = { enterTransition() },
-            exitTransition = { exitTransition() },
-            popEnterTransition = { EnterTransition.None },
-            popExitTransition = { popExitTransition() }
-        ) {
-            val viewModel: AiInsightsViewModel = viewModel()
-            ToolScreenWrapper(title = "AI Optimizer", navController = navController) {
-                AiInsightsContent(
-                    viewModel = viewModel,
-                    showResetDialog = remember { mutableStateOf(false) },
-                    onShowResetDialogChange = { },
-                    onResetLearner = { }
-                )
             }
         }
 

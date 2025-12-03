@@ -186,9 +186,7 @@ fun LogStatsPanel(
                         color = LogColorPalette.NeonCyan,
                         modifier = Modifier.weight(1f)
                     )
-                
-        
-        }
+                }
 
                 Spacer(modifier = Modifier.height(8.dp))
 

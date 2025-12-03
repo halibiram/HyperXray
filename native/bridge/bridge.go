@@ -47,6 +47,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/hyperxray/native/masque"
 	"golang.org/x/crypto/curve25519"
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
@@ -133,6 +134,9 @@ type TunnelConfig struct {
 	MTU            int
 	NativeLibDir   string
 	FilesDir       string
+	// MASQUE over Xray support
+	TunnelMode     string // "wireguard" (default) or "masque"
+	MasqueConfig   string // JSON config for MASQUE mode
 }
 
 // TunnelStats holds tunnel statistics
@@ -189,6 +193,7 @@ type HyperTunnel struct {
 	// Xray integration
 	xrayInstance *XrayWrapper
 	xrayBind     *XrayBind
+	masqueBind   *masque.MasqueBind // MASQUE over Xray bind
 	
 	running    atomic.Bool
 	stats      TunnelStats
@@ -520,32 +525,62 @@ func (t *HyperTunnel) Start() error {
 		logWarn("[Tunnel] ⚠️ WireGuard may have issues if UDP path is not working")
 	}
 	
-	// ===== STEP 3: CREATE XRAY BIND =====
+	// ===== STEP 3: CREATE BIND (XrayBind or MasqueBind based on TunnelMode) =====
 	logInfo("[Tunnel] ")
-	logInfo("[Tunnel] ▶▶▶ STEP 3: Creating XrayBind...")
+	logInfo("[Tunnel] ▶▶▶ STEP 3: Creating Bind (mode: %s)...", t.config.TunnelMode)
 	logInfo("[Tunnel] ")
 	
-	t.xrayBind, err = NewXrayBind(t.xrayInstance, t.wgConfig.Endpoint)
-	if err != nil {
-		logError("[Tunnel] ❌ NewXrayBind failed: %v", err)
-		t.cleanup()
-		return fmt.Errorf("create bind: %w", err)
+	if t.config.TunnelMode == "masque" {
+		// MASQUE over Xray mode
+		logInfo("[Tunnel] Creating MasqueBind for MASQUE over Xray...")
+		
+		// Create MasqueBind with XrayWrapper and MASQUE config
+		t.masqueBind, err = masque.NewMasqueBind(t.xrayInstance, t.config.MasqueConfig)
+		if err != nil {
+			logError("[Tunnel] ❌ NewMasqueBind failed: %v", err)
+			t.cleanup()
+			return fmt.Errorf("create masque bind: %w", err)
+		}
+		
+		logInfo("[Tunnel] ✅ MasqueBind created")
+		
+		// Open MasqueBind
+		logInfo("[Tunnel] Opening MasqueBind...")
+		_, _, err = t.masqueBind.Open(0)
+		if err != nil {
+			logError("[Tunnel] ❌ MasqueBind.Open() failed: %v", err)
+			t.cleanup()
+			return fmt.Errorf("open masque bind: %w", err)
+		}
+		logInfo("[Tunnel] ✅ MasqueBind opened")
+		
+		t.bind = t.masqueBind
+	} else {
+		// WireGuard over Xray mode (default)
+		logInfo("[Tunnel] Creating XrayBind for WireGuard over Xray...")
+		
+		t.xrayBind, err = NewXrayBind(t.xrayInstance, t.wgConfig.Endpoint)
+		if err != nil {
+			logError("[Tunnel] ❌ NewXrayBind failed: %v", err)
+			t.cleanup()
+			return fmt.Errorf("create bind: %w", err)
+		}
+		
+		logInfo("[Tunnel] ✅ XrayBind created")
+		
+		// Open XrayBind before creating WireGuard device
+		// WireGuard will need the bind to be open when IpcSet is called
+		logInfo("[Tunnel] Opening XrayBind...")
+		_, _, err = t.xrayBind.Open(0)
+		if err != nil {
+			logError("[Tunnel] ❌ XrayBind.Open() failed: %v", err)
+			t.cleanup()
+			return fmt.Errorf("open bind: %w", err)
+		}
+		logInfo("[Tunnel] ✅ XrayBind opened")
+		
+		t.bind = t.xrayBind
 	}
-	
-	logInfo("[Tunnel] ✅ XrayBind created")
-	
-	// Open XrayBind before creating WireGuard device
-	// WireGuard will need the bind to be open when IpcSet is called
-	logInfo("[Tunnel] Opening XrayBind...")
-	_, _, err = t.xrayBind.Open(0)
-	if err != nil {
-		logError("[Tunnel] ❌ XrayBind.Open() failed: %v", err)
-		t.cleanup()
-		return fmt.Errorf("open bind: %w", err)
-	}
-	logInfo("[Tunnel] ✅ XrayBind opened")
-	
-	t.bind = t.xrayBind
 	
 	// ===== STEP 4: CREATE WIREGUARD DEVICE =====
 	logInfo("[Tunnel] ")
@@ -664,6 +699,8 @@ persistent_keepalive_interval=%d
 // resolveEndpoint resolves a domain name to IP address if needed
 // Input format: "host:port" or "IP:port"
 // Output format: "IP:port"
+//
+// Uses Google DNS (8.8.8.8) via protected DNS resolver to avoid VPN routing loop
 func resolveEndpoint(endpoint string) (string, error) {
 	// Parse endpoint to extract host and port
 	host, port, err := net.SplitHostPort(endpoint)
@@ -677,35 +714,45 @@ func resolveEndpoint(endpoint string) (string, error) {
 		return endpoint, nil
 	}
 	
-	// Resolve domain name to IP address
-	logError("🔍 Resolving domain name: %s", host)
-	ips, err := net.LookupIP(host)
+	logInfo("🔍 Resolving domain name: %s (using Google DNS)", host)
+	
+	// Use protected DNS resolver with Google DNS (bypasses VPN, prevents routing loop)
+	selectedIP, err := resolveDomainProtected(host)
 	if err != nil {
-		return endpoint, fmt.Errorf("DNS lookup failed: %v", err)
-	}
-	
-	if len(ips) == 0 {
-		return endpoint, fmt.Errorf("no IP addresses found for %s", host)
-	}
-	
-	// Prefer IPv4 over IPv6
-	var selectedIP net.IP
-	for _, ip := range ips {
-		if ip.To4() != nil {
-			selectedIP = ip
-			break
+		logError("❌ Protected DNS resolution failed for %s: %v", host, err)
+		
+		// Fallback to system DNS (last resort)
+		logWarn("⚠️ Falling back to system DNS for %s...", host)
+		ips, sysErr := net.LookupIP(host)
+		if sysErr != nil {
+			return endpoint, fmt.Errorf("DNS lookup failed (protected: %v, system: %v)", err, sysErr)
 		}
-	}
-	
-	// If no IPv4 found, use first available IP (IPv6)
-	if selectedIP == nil {
-		selectedIP = ips[0]
+		
+		if len(ips) == 0 {
+			return endpoint, fmt.Errorf("no IP addresses found for %s", host)
+		}
+		
+		// Prefer IPv4 over IPv6
+		for _, ip := range ips {
+			if ip.To4() != nil {
+				selectedIP = ip
+				break
+			}
+		}
+		if selectedIP == nil {
+			selectedIP = ips[0]
+		}
+		
+		logWarn("⚠️ System DNS resolved %s → %s (may cause issues if VPN is active)", host, selectedIP.String())
 	}
 	
 	// Return resolved IP with port
 	resolved := net.JoinHostPort(selectedIP.String(), port)
+	logInfo("✅ DNS resolved: %s → %s", host, resolved)
 	return resolved, nil
 }
+
+
 
 // hexEncode converts base64 to hex for WireGuard IPC
 func hexEncode(base64Str string) string {

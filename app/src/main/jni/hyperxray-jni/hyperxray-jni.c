@@ -31,7 +31,7 @@
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 
 // Function pointer types
-typedef int (*StartHyperTunnelFunc)(int, const char*, const char*, const char*, const char*, const char*, const char*);
+typedef int (*StartHyperTunnelFunc)(int, const char*, const char*, const char*, const char*, const char*, const char*, const char*, const char*);
 typedef int (*StopHyperTunnelFunc)(void);
 typedef char* (*GetTunnelStatsFunc)(void);
 typedef long long (*GetHandshakeRTTFunc)(void);
@@ -40,6 +40,8 @@ typedef char* (*NativeGeneratePublicKeyFunc)(const char*);
 typedef void (*FreeStringFunc)(char*);
 typedef bool (*SocketProtectorFunc)(int);
 typedef void (*SetSocketProtectorFunc)(SocketProtectorFunc);
+typedef void (*ClearSocketProtectorFunc)(void);
+typedef void (*ResetSocketProtectorStateFunc)(void);
 
 // REMOVED: Multi-instance function pointer types
 // These have been removed as part of architectural cleanup
@@ -78,6 +80,8 @@ static GetLastErrorFunc go_GetLastError = NULL;
 static NativeGeneratePublicKeyFunc go_NativeGeneratePublicKey = NULL;
 static FreeStringFunc go_FreeString = NULL;
 static SetSocketProtectorFunc go_SetSocketProtector = NULL;
+static ClearSocketProtectorFunc go_ClearSocketProtector = NULL;
+static ResetSocketProtectorStateFunc go_ResetSocketProtectorState = NULL;
 
 // REMOVED: Multi-instance function pointers
 // These have been removed as part of architectural cleanup
@@ -267,6 +271,20 @@ static int loadGoLibrary(JNIEnv *env) {
         LOGD("Found SetSocketProtector");
     }
     
+    go_ClearSocketProtector = (ClearSocketProtectorFunc)dlsym(goLibHandle, "ClearSocketProtector");
+    if (go_ClearSocketProtector == NULL) {
+        LOGD("ClearSocketProtector not found (optional): %s", dlerror());
+    } else {
+        LOGD("Found ClearSocketProtector");
+    }
+    
+    go_ResetSocketProtectorState = (ResetSocketProtectorStateFunc)dlsym(goLibHandle, "ResetSocketProtectorState");
+    if (go_ResetSocketProtectorState == NULL) {
+        LOGD("ResetSocketProtectorState not found (optional): %s", dlerror());
+    } else {
+        LOGD("Found ResetSocketProtectorState");
+    }
+    
     // REMOVED: Multi-instance symbol resolution
     // These symbols have been removed as part of architectural cleanup
     
@@ -406,7 +424,9 @@ JNIEXPORT void JNI_OnUnload(JavaVM* vm, void* reserved) {
  *     warpEndpoint: String,
  *     warpPrivateKey: String,
  *     nativeLibDir: String,
- *     filesDir: String
+ *     filesDir: String,
+ *     tunnelMode: String,
+ *     masqueConfig: String
  * ): Int
  */
 JNIEXPORT jint JNICALL
@@ -419,7 +439,9 @@ Java_com_hyperxray_an_vpn_HyperVpnService_startHyperTunnel(
     jstring warpEndpoint,
     jstring warpPrivateKey,
     jstring nativeLibDir,
-    jstring filesDir
+    jstring filesDir,
+    jstring tunnelMode,
+    jstring masqueConfig
 ) {
     LOGI("startHyperTunnel called with tunFd=%d", tunFd);
     
@@ -459,6 +481,8 @@ Java_com_hyperxray_an_vpn_HyperVpnService_startHyperTunnel(
     const char* warpPrivateKeyC = NULL;
     const char* nativeLibDirC = NULL;
     const char* filesDirC = NULL;
+    const char* tunnelModeC = NULL;
+    const char* masqueConfigC = NULL;
     
     if (wgConfigJSON != NULL) {
         wgConfigC = (*env)->GetStringUTFChars(env, wgConfigJSON, NULL);
@@ -524,7 +548,37 @@ Java_com_hyperxray_an_vpn_HyperVpnService_startHyperTunnel(
         }
     }
     
-    LOGD("Calling Go StartHyperTunnel...");
+    // Convert tunnelMode and masqueConfig (MASQUE over Xray feature)
+    if (tunnelMode != NULL) {
+        tunnelModeC = (*env)->GetStringUTFChars(env, tunnelMode, NULL);
+        if (tunnelModeC == NULL) {
+            LOGE("Failed to convert tunnelMode to C string");
+            if (wgConfigC) (*env)->ReleaseStringUTFChars(env, wgConfigJSON, wgConfigC);
+            if (xrayConfigC) (*env)->ReleaseStringUTFChars(env, xrayConfigJSON, xrayConfigC);
+            if (warpEndpointC) (*env)->ReleaseStringUTFChars(env, warpEndpoint, warpEndpointC);
+            if (warpPrivateKeyC) (*env)->ReleaseStringUTFChars(env, warpPrivateKey, warpPrivateKeyC);
+            if (nativeLibDirC) (*env)->ReleaseStringUTFChars(env, nativeLibDir, nativeLibDirC);
+            if (filesDirC) (*env)->ReleaseStringUTFChars(env, filesDir, filesDirC);
+            return -102;
+        }
+    }
+    
+    if (masqueConfig != NULL) {
+        masqueConfigC = (*env)->GetStringUTFChars(env, masqueConfig, NULL);
+        if (masqueConfigC == NULL) {
+            LOGE("Failed to convert masqueConfig to C string");
+            if (wgConfigC) (*env)->ReleaseStringUTFChars(env, wgConfigJSON, wgConfigC);
+            if (xrayConfigC) (*env)->ReleaseStringUTFChars(env, xrayConfigJSON, xrayConfigC);
+            if (warpEndpointC) (*env)->ReleaseStringUTFChars(env, warpEndpoint, warpEndpointC);
+            if (warpPrivateKeyC) (*env)->ReleaseStringUTFChars(env, warpPrivateKey, warpPrivateKeyC);
+            if (nativeLibDirC) (*env)->ReleaseStringUTFChars(env, nativeLibDir, nativeLibDirC);
+            if (filesDirC) (*env)->ReleaseStringUTFChars(env, filesDir, filesDirC);
+            if (tunnelModeC) (*env)->ReleaseStringUTFChars(env, tunnelMode, tunnelModeC);
+            return -102;
+        }
+    }
+    
+    LOGD("Calling Go StartHyperTunnel with tunnelMode=%s...", tunnelModeC ? tunnelModeC : "wireguard");
     
     // Call Go function with all parameters
     int result = go_StartHyperTunnel(
@@ -534,7 +588,9 @@ Java_com_hyperxray_an_vpn_HyperVpnService_startHyperTunnel(
         warpEndpointC ? warpEndpointC : "",
         warpPrivateKeyC ? warpPrivateKeyC : "",
         nativeLibDirC ? nativeLibDirC : "",
-        filesDirC ? filesDirC : ""
+        filesDirC ? filesDirC : "",
+        tunnelModeC ? tunnelModeC : "wireguard",
+        masqueConfigC ? masqueConfigC : "{}"
     );
     
     LOGI("Go StartHyperTunnel returned: %d", result);
@@ -546,6 +602,8 @@ Java_com_hyperxray_an_vpn_HyperVpnService_startHyperTunnel(
     if (warpPrivateKeyC) (*env)->ReleaseStringUTFChars(env, warpPrivateKey, warpPrivateKeyC);
     if (nativeLibDirC) (*env)->ReleaseStringUTFChars(env, nativeLibDir, nativeLibDirC);
     if (filesDirC) (*env)->ReleaseStringUTFChars(env, filesDir, filesDirC);
+    if (tunnelModeC) (*env)->ReleaseStringUTFChars(env, tunnelMode, tunnelModeC);
+    if (masqueConfigC) (*env)->ReleaseStringUTFChars(env, masqueConfig, masqueConfigC);
     
     return result;
 }
@@ -809,6 +867,8 @@ Java_com_hyperxray_an_vpn_HyperVpnService_loadGoLibraryWithPath(
     go_NativeGeneratePublicKey = (NativeGeneratePublicKeyFunc)dlsym(goLibHandle, "NativeGeneratePublicKey");
     go_FreeString = (FreeStringFunc)dlsym(goLibHandle, "FreeString");
     go_SetSocketProtector = (SetSocketProtectorFunc)dlsym(goLibHandle, "SetSocketProtector");
+    go_ClearSocketProtector = (ClearSocketProtectorFunc)dlsym(goLibHandle, "ClearSocketProtector");
+    go_ResetSocketProtectorState = (ResetSocketProtectorStateFunc)dlsym(goLibHandle, "ResetSocketProtectorState");
     
     // REMOVED: Multi-instance symbol resolution
     // These symbols have been removed as part of architectural cleanup
@@ -1294,6 +1354,10 @@ Java_com_hyperxray_an_vpn_HyperVpnService_setAiLogHelperCallback(
  * Initialize socket protector
  * 
  * Java signature: private external fun initSocketProtector()
+ * 
+ * CRITICAL: This function is called on every VPN start.
+ * It must reset Go-side caches to ensure fresh state for new session.
+ * This prevents routing loops caused by stale physical IP or DNS cache.
  */
 JNIEXPORT void JNICALL
 Java_com_hyperxray_an_vpn_HyperVpnService_initSocketProtector(
@@ -1310,6 +1374,14 @@ Java_com_hyperxray_an_vpn_HyperVpnService_initSocketProtector(
             g_protectorState.initialized = false;
             return;
         }
+    }
+    
+    // CRITICAL: Reset Go-side state FIRST if this is a re-initialization
+    // This clears stale physical IP cache and DNS cache from previous session
+    if (g_protectorState.initialized && go_ResetSocketProtectorState != NULL) {
+        LOGI("[Protector] Re-initialization detected, resetting Go-side state...");
+        go_ResetSocketProtectorState();
+        LOGI("[Protector] ✅ Go-side state reset (caches invalidated)");
     }
     
     // Save JVM reference to both legacy and new state
@@ -1360,7 +1432,7 @@ Java_com_hyperxray_an_vpn_HyperVpnService_initSocketProtector(
     g_protector = socket_protector_callback;
     LOGD("[Protector] g_protector set to socket_protector_callback (with retry support)");
     
-    // Register callback with Go
+    // Register callback with Go (this also invalidates caches in Go)
     if (go_SetSocketProtector != NULL) {
         go_SetSocketProtector(socket_protector_callback);
         LOGI("[Protector] ✅ Socket protector initialized successfully!");
@@ -1380,22 +1452,42 @@ Java_com_hyperxray_an_vpn_HyperVpnService_initSocketProtector(
  * Cleanup socket protector
  * 
  * Java signature: private external fun cleanupSocketProtector()
+ * 
+ * CRITICAL: This function must be called when VPN service is destroyed.
+ * It clears both JNI and Go-side state to prevent stale callbacks
+ * which can cause routing loops on VPN restart.
  */
 JNIEXPORT void JNICALL
 Java_com_hyperxray_an_vpn_HyperVpnService_cleanupSocketProtector(
     JNIEnv* env,
     jobject thiz __attribute__((unused))
 ) {
-    LOGI("[Protector] Cleaning up socket protector...");
+    LOGI("[Protector] Cleaning up socket protector (JNI + Go state)...");
     
-    // Clean up legacy globals
+    // STEP 1: Clear Go-side protector and caches FIRST
+    // This ensures Go doesn't try to use stale JNI callback
+    if (go_ClearSocketProtector != NULL) {
+        LOGI("[Protector] Clearing Go-side socket protector and caches...");
+        go_ClearSocketProtector();
+        LOGI("[Protector] ✅ Go-side protector cleared");
+    } else {
+        LOGD("[Protector] go_ClearSocketProtector not available, skipping Go cleanup");
+    }
+    
+    // STEP 2: Clear g_protector callback pointer
+    // This prevents any pending Go calls from using stale callback
+    g_protector = NULL;
+    LOGD("[Protector] g_protector set to NULL");
+    
+    // STEP 3: Clean up JNI global references
     if (g_vpnService != NULL) {
         (*env)->DeleteGlobalRef(env, g_vpnService);
         g_vpnService = NULL;
+        LOGD("[Protector] VpnService global ref deleted");
     }
     g_protectMethod = NULL;
     
-    // Clean up new state (vpnService is same reference, already cleaned)
+    // STEP 4: Clean up protector state struct
     g_protectorState.jvm = NULL;
     g_protectorState.vpnService = NULL;
     g_protectorState.protectMethod = NULL;
@@ -1403,10 +1495,7 @@ Java_com_hyperxray_an_vpn_HyperVpnService_cleanupSocketProtector(
     g_protectorState.verified = false;
     // Keep maxRetries and retryDelayMs at default values for next init
     
-    // Clear g_protector
-    g_protector = NULL;
-    
-    LOGI("[Protector] ✅ Socket protector cleaned up");
+    LOGI("[Protector] ✅ Socket protector fully cleaned up (JNI + Go)");
 }
 
 // Function pointer types for C-based socket creation

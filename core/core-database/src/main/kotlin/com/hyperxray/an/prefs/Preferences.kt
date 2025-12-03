@@ -655,6 +655,13 @@ class Preferences(context: Context) {
         // Xray log monitoring key
         const val XRAY_LOG_MONITORING_ENABLED: String = "XrayLogMonitoringEnabled"
         
+        // Tunnel mode key (MASQUE over Xray feature)
+        const val TUNNEL_MODE: String = "TunnelMode"
+        
+        // MASQUE configuration keys
+        const val MASQUE_ENDPOINT: String = "MasqueEndpoint"
+        const val MASQUE_MODE: String = "MasqueMode"
+        
         private const val TAG = "Preferences"
     }
     
@@ -694,6 +701,30 @@ class Preferences(context: Context) {
         get() = getBooleanPref(XRAY_LOG_MONITORING_ENABLED, false)
         set(enabled) {
             setValueInProvider(XRAY_LOG_MONITORING_ENABLED, enabled)
+        }
+    
+    // Tunnel mode preference (MASQUE over Xray feature)
+    // Values: "wireguard" (default) or "masque"
+    var tunnelMode: String
+        get() = getPrefData(TUNNEL_MODE).first ?: "wireguard"
+        set(mode) {
+            setValueInProvider(TUNNEL_MODE, mode)
+        }
+    
+    // MASQUE endpoint preference
+    // Default: Cloudflare WARP MASQUE endpoint (162.159.192.1:443)
+    var masqueEndpoint: String
+        get() = getPrefData(MASQUE_ENDPOINT).first ?: "162.159.192.1:443"
+        set(endpoint) {
+            setValueInProvider(MASQUE_ENDPOINT, endpoint)
+        }
+    
+    // MASQUE mode preference
+    // Values: "connect-ip" or "connect-udp" (default for WARP)
+    var masqueMode: String
+        get() = getPrefData(MASQUE_MODE).first ?: "connect-udp"
+        set(mode) {
+            setValueInProvider(MASQUE_MODE, mode)
         }
 }
 

@@ -111,6 +111,9 @@ fun WarpScreen(
                         onRegister = { licenseKey ->
                             viewModel.registerAccount(licenseKey.ifEmpty { null })
                         },
+                        onImport = { accountData ->
+                            viewModel.importAccount(accountData)
+                        },
                         isLoading = uiState.isLoading
                     )
                 } else {
@@ -396,16 +399,19 @@ private fun NeonOutlinedTextField(
 @Composable
 private fun RegisterAccountSection(
     onRegister: (String) -> Unit,
+    onImport: (String) -> Unit,
     isLoading: Boolean
 ) {
     var licenseKey by remember { mutableStateOf("") }
+    var importData by remember { mutableStateOf("") }
+    var showImport by remember { mutableStateOf(false) }
     
     GlassCard(glowColor = NeonGreen) {
         SectionHeader(
-            title = "REGISTER ACCOUNT",
+            title = if (showImport) "IMPORT ACCOUNT" else "REGISTER ACCOUNT",
             icon = {
                 Icon(
-                    imageVector = Icons.Rounded.PersonAdd,
+                    imageVector = if (showImport) Icons.Rounded.FileUpload else Icons.Rounded.PersonAdd,
                     contentDescription = null,
                     tint = NeonGreen,
                     modifier = Modifier.size(20.dp)
@@ -414,33 +420,108 @@ private fun RegisterAccountSection(
             accentColor = NeonGreen
         )
         
-        Text(
-            text = "Create a new WARP account to access Cloudflare's global network. Optionally provide a license key for WARP+ premium features.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = Color.White.copy(alpha = 0.7f),
-            lineHeight = 22.sp
-        )
-        
-        Spacer(modifier = Modifier.height(20.dp))
-        
-        NeonOutlinedTextField(
-            value = licenseKey,
-            onValueChange = { licenseKey = it },
-            label = "License Key (Optional)",
-            enabled = !isLoading,
-            accentColor = NeonGreen
-        )
-        
-        Spacer(modifier = Modifier.height(20.dp))
-        
-        NeonButton(
-            onClick = { onRegister(licenseKey) },
-            text = "REGISTER",
+        // Toggle between register and import
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            enabled = !isLoading,
-            isLoading = isLoading,
-            colors = listOf(NeonGreen, Color(0xFF00C853))
-        )
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = !showImport,
+                onClick = { showImport = false },
+                label = { Text("Register") },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = NeonGreen.copy(alpha = 0.2f),
+                    selectedLabelColor = NeonGreen
+                )
+            )
+            FilterChip(
+                selected = showImport,
+                onClick = { showImport = true },
+                label = { Text("Import") },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = NeonCyan.copy(alpha = 0.2f),
+                    selectedLabelColor = NeonCyan
+                )
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        if (showImport) {
+            Text(
+                text = "Import existing WARP account from JSON, WireGuard config, or license key.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.7f),
+                lineHeight = 22.sp
+            )
+            
+            Spacer(modifier = Modifier.height(20.dp))
+            
+            OutlinedTextField(
+                value = importData,
+                onValueChange = { importData = it },
+                label = { 
+                    Text(
+                        text = "Account JSON / WireGuard Config / License Key",
+                        color = NeonCyan.copy(alpha = 0.8f)
+                    ) 
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(150.dp),
+                enabled = !isLoading,
+                shape = RoundedCornerShape(14.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White.copy(alpha = 0.8f),
+                    focusedBorderColor = NeonCyan,
+                    unfocusedBorderColor = NeonCyan.copy(alpha = 0.3f),
+                    focusedContainerColor = Color.White.copy(alpha = 0.05f),
+                    unfocusedContainerColor = Color.White.copy(alpha = 0.02f),
+                    cursorColor = NeonCyan
+                ),
+                maxLines = 8
+            )
+            
+            Spacer(modifier = Modifier.height(20.dp))
+            
+            NeonButton(
+                onClick = { onImport(importData) },
+                text = "IMPORT",
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isLoading && importData.isNotBlank(),
+                isLoading = isLoading,
+                colors = listOf(NeonCyan, NeonPurple)
+            )
+        } else {
+            Text(
+                text = "Create a new WARP account to access Cloudflare's global network. Optionally provide a license key for WARP+ premium features.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.7f),
+                lineHeight = 22.sp
+            )
+            
+            Spacer(modifier = Modifier.height(20.dp))
+            
+            NeonOutlinedTextField(
+                value = licenseKey,
+                onValueChange = { licenseKey = it },
+                label = "License Key (Optional)",
+                enabled = !isLoading,
+                accentColor = NeonGreen
+            )
+            
+            Spacer(modifier = Modifier.height(20.dp))
+            
+            NeonButton(
+                onClick = { onRegister(licenseKey) },
+                text = "REGISTER",
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isLoading,
+                isLoading = isLoading,
+                colors = listOf(NeonGreen, Color(0xFF00C853))
+            )
+        }
     }
 }
 
@@ -638,7 +719,7 @@ private fun ConfigGenerationSection(
         
         Spacer(modifier = Modifier.height(20.dp))
         
-        // Config type buttons
+        // Config type buttons - Row 1
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -662,6 +743,29 @@ private fun ConfigGenerationSection(
                 onClick = { onGenerateConfig(WarpConfigType.SINGBOX, endpoint) },
                 enabled = !isLoading,
                 colors = listOf(NeonOrange, Color(0xFFCC4400)),
+                modifier = Modifier.weight(1f)
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(10.dp))
+        
+        // Config type buttons - Row 2 (MASQUE)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            ConfigTypeButton(
+                text = "MASQUE",
+                onClick = { onGenerateConfig(WarpConfigType.MASQUE, endpoint) },
+                enabled = !isLoading,
+                colors = listOf(NeonGreen, Color(0xFF00AA66)),
+                modifier = Modifier.weight(1f)
+            )
+            ConfigTypeButton(
+                text = "MASQUE Tunnel",
+                onClick = { onGenerateConfig(WarpConfigType.MASQUE_TUNNEL, endpoint) },
+                enabled = !isLoading,
+                colors = listOf(Color(0xFF9C27B0), Color(0xFF7B1FA2)),
                 modifier = Modifier.weight(1f)
             )
         }

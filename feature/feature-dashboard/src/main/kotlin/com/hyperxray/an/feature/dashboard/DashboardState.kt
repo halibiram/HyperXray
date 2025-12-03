@@ -166,5 +166,8 @@ interface DashboardViewModel {
     fun startHyperVpn() {}
     fun stopHyperVpn() {}
     fun clearHyperVpnError() {}
+    
+    // WARP account functions (optional)
+    fun createWarpAccountAndConnect() {}
 }
 

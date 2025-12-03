@@ -23,14 +23,24 @@ import java.util.zip.GZIPInputStream
 private const val TAG = "WarpApiDataSource"
 
 /**
- * Cloudflare WARP API versions to try
+ * Cloudflare WARP API versions to try (updated December 2024)
+ * Latest versions from official 1.1.1.1 Android app
  */
-private val API_VERSIONS = listOf("v0a2484", "v0i2409", "v0a977", "v0a769", "v0a737")
+private val API_VERSIONS = listOf("v0a2596", "v0a2584", "v0a2483", "v0a2484", "v0i2409")
 
 /**
  * Base URL template
  */
 private const val BASE_URL_TEMPLATE = "https://api.cloudflareclient.com/{version}"
+
+/**
+ * Alternative API endpoints (direct IPs) for when DNS is blocked
+ */
+private val ALTERNATIVE_HOSTS = listOf(
+    "api.cloudflareclient.com",
+    "104.19.193.29",  // Cloudflare API IP
+    "104.19.192.29"   // Cloudflare API IP backup
+)
 
 /**
  * WARP public key
@@ -43,25 +53,25 @@ private const val WARP_PUBLIC_KEY = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo
 private const val WARP_ENDPOINT = "engage.cloudflareclient.com:2408"
 
 /**
- * Default headers mimicking official Android client
+ * Default headers mimicking official Android client (updated December 2024)
  */
 private val DEFAULT_HEADERS = mapOf(
     "Content-Type" to "application/json",
     "Accept" to "application/json",
     "Accept-Encoding" to "gzip",
-    "User-Agent" to "okhttp/3.12.1",
-    "CF-Client-Version" to "a-6.28"
+    "User-Agent" to "okhttp/4.12.0",
+    "CF-Client-Version" to "a-6.30-2596"
 )
 
 /**
- * Alternative headers mimicking iOS client
+ * Alternative headers mimicking iOS client (updated December 2024)
  */
 private val IOS_HEADERS = mapOf(
     "Content-Type" to "application/json",
     "Accept" to "application/json",
     "Accept-Encoding" to "gzip, deflate",
-    "User-Agent" to "1.1.1.1/2024.5.397.0 CFNetwork/1496.0.7 Darwin/23.5.0",
-    "CF-Client-Version" to "i-6.27"
+    "User-Agent" to "1.1.1.1/2024.12.0 CFNetwork/1568.200.51 Darwin/24.1.0",
+    "CF-Client-Version" to "i-6.32"
 )
 
 /**
@@ -80,7 +90,16 @@ class WarpApiDataSource(
     private val useIosHeaders: Boolean = false
 ) {
     
-    private val httpClient = HttpClientFactory.createHttpClient()
+    // Use dedicated HTTP client for WARP API with shorter timeouts
+    // This client bypasses any proxy/VPN to directly reach Cloudflare
+    private val httpClient = okhttp3.OkHttpClient.Builder()
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .callTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        .proxy(java.net.Proxy.NO_PROXY) // Bypass any system proxy/VPN
+        .protocols(listOf(okhttp3.Protocol.HTTP_1_1)) // Force HTTP/1.1 for WARP API
+        .build()
     private val headers = if (useIosHeaders) IOS_HEADERS else DEFAULT_HEADERS
     private var workingApiVersion: String? = null
     private var baseUrl: String? = null
@@ -113,45 +132,54 @@ class WarpApiDataSource(
     suspend fun registerAccount(licenseKey: String? = null): Result<WarpApiResponse> {
         Log.d(TAG, "Registering new WARP account...")
         
-        // Try each API version
-        for (apiVersion in API_VERSIONS) {
-            Log.d(TAG, "Trying API version: $apiVersion...")
+        var lastError: String? = null
+        
+        // Try each host (domain + direct IPs for DNS bypass)
+        for (host in ALTERNATIVE_HOSTS) {
+            Log.d(TAG, "🌐 Trying host: $host")
             
-            val result = tryRegisterWithVersion(apiVersion)
-            if (result != null) {
-                workingApiVersion = apiVersion
-                baseUrl = BASE_URL_TEMPLATE.replace("{version}", apiVersion)
+            // Try each API version with this host
+            for (apiVersion in API_VERSIONS) {
+                Log.d(TAG, "  📡 Trying API version: $apiVersion with host: $host")
                 
-                // Store auth token if available
-                result.token?.let { token ->
-                    authToken = token
+                val result = tryRegisterWithVersionAndHost(apiVersion, host)
+                if (result != null) {
+                    workingApiVersion = apiVersion
+                    baseUrl = "https://$host/$apiVersion"
+                    
+                    // Store auth token if available
+                    result.token?.let { token ->
+                        authToken = token
+                    }
+                    
+                    Log.d(TAG, "✅ Success with API version: $apiVersion, host: $host")
+                    
+                    // Update license if provided
+                    if (licenseKey != null && result.id != null) {
+                        updateLicense(result.id, licenseKey)
+                    }
+                    
+                    return Result.success(result)
                 }
-                
-                Log.d(TAG, "Success with API version: $apiVersion")
-                
-                // Update license if provided
-                if (licenseKey != null && result.id != null) {
-                    updateLicense(result.id, licenseKey)
-                }
-                
-                return Result.success(result)
             }
         }
         
         return Result.failure(
-            IOException("All API versions failed. This is usually caused by:\n" +
-                "1. Running from a cloud server (AWS, GCP, Azure, etc.)\n" +
-                "2. Behind a VPN or proxy\n" +
+            IOException("All API versions and hosts failed. Last error: $lastError\n" +
+                "This is usually caused by:\n" +
+                "1. No internet connection\n" +
+                "2. ISP blocking Cloudflare API\n" +
                 "3. IP rate-limited\n" +
                 "4. Cloudflare API changes")
         )
     }
     
     /**
-     * Try to register with a specific API version
+     * Try to register with a specific API version and host
      */
-    private suspend fun tryRegisterWithVersion(apiVersion: String): WarpApiResponse? = withContext(Dispatchers.IO) {
-        val baseUrl = BASE_URL_TEMPLATE.replace("{version}", apiVersion)
+    private suspend fun tryRegisterWithVersionAndHost(apiVersion: String, host: String): WarpApiResponse? = withContext(Dispatchers.IO) {
+        val registerUrl = "https://$host/$apiVersion/reg"
+        Log.d(TAG, "    🔗 Request URL: $registerUrl")
         
         // Generate keypair
         val (privateKey, publicKey) = WireGuardKeyGenerator.generateKeyPair()
@@ -176,15 +204,23 @@ class WarpApiDataSource(
             val requestBody = json.encodeToString(WarpRegistrationRequest.serializer(), payload)
                 .toRequestBody("application/json".toMediaType())
             
-            val request = Request.Builder()
-                .url("$baseUrl/reg")
+            // Build request with Host header for IP-based requests
+            val requestBuilder = Request.Builder()
+                .url(registerUrl)
                 .post(requestBody)
-                .apply {
-                    headers.forEach { (key, value) ->
-                        addHeader(key, value)
-                    }
-                }
-                .build()
+            
+            // Add headers
+            headers.forEach { (key, value) ->
+                requestBuilder.addHeader(key, value)
+            }
+            
+            // If using direct IP, add Host header for SNI
+            if (host != "api.cloudflareclient.com") {
+                requestBuilder.header("Host", "api.cloudflareclient.com")
+            }
+            
+            val request = requestBuilder.build()
+            Log.d(TAG, "    📤 Sending request to: ${request.url}")
             
             val response = httpClient.newCall(request).execute()
             val statusCode = response.code

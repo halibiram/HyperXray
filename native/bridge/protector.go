@@ -181,9 +181,19 @@ func SetSocketProtector(protector SocketProtector) {
 	if protector != nil {
 		setProtectionState(ProtectionStateInitialized)
 		logInfo("[Protector] Socket protector set")
+		
+		// CRITICAL: Invalidate all caches when protector is set
+		// This ensures fresh state for new VPN session
+		InvalidatePhysicalIPCache()
+		ClearBootstrapDNSCache()
+		logInfo("[Protector] All caches invalidated for fresh session")
 	} else {
 		setProtectionState(ProtectionStateUninitialized)
 		logWarn("[Protector] Socket protector cleared")
+		
+		// Also clear caches when protector is cleared
+		InvalidatePhysicalIPCache()
+		ClearBootstrapDNSCache()
 	}
 	
 	// Add diagnostic log

@@ -12,7 +12,6 @@ data class TelegramConfigModel(
     val notifyVpnStatus: Boolean = true,
     val notifyErrors: Boolean = true,
     val notifyPerformance: Boolean = false,
-    val notifyDnsCache: Boolean = false,
     val notifyManual: Boolean = true
 ) {
     fun toDomain(): TelegramConfig {
@@ -23,7 +22,6 @@ data class TelegramConfigModel(
             notifyVpnStatus = notifyVpnStatus,
             notifyErrors = notifyErrors,
             notifyPerformance = notifyPerformance,
-            notifyDnsCache = notifyDnsCache,
             notifyManual = notifyManual
         )
     }
@@ -37,7 +35,6 @@ data class TelegramConfigModel(
                 notifyVpnStatus = config.notifyVpnStatus,
                 notifyErrors = config.notifyErrors,
                 notifyPerformance = config.notifyPerformance,
-                notifyDnsCache = config.notifyDnsCache,
                 notifyManual = config.notifyManual
             )
         }

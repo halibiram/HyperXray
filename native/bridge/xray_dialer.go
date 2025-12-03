@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -18,28 +17,11 @@ import (
 // This binds the socket to a specific network interface
 const SO_BINDTODEVICE = 25
 
-// Bootstrap DNS configuration
+// Google DNS configuration
 // These are hardcoded IPs used to resolve VPN server hostname BEFORE tunnel is established
-var (
-	bootstrapDNSServers = []string{
-		"8.8.8.8:53",      // Google DNS Primary
-		"1.1.1.1:53",      // Cloudflare DNS Primary
-		"8.8.4.4:53",      // Google DNS Secondary
-		"1.0.0.1:53",      // Cloudflare DNS Secondary
-		"9.9.9.9:53",      // Quad9 DNS
-		"208.67.222.222:53", // OpenDNS
-	}
-	
-	// Cache for bootstrap DNS resolutions to avoid repeated lookups
-	bootstrapDNSCache     = make(map[string]bootstrapDNSEntry)
-	bootstrapDNSCacheMu   sync.RWMutex
-	bootstrapDNSCacheTTL  = 5 * time.Minute
-)
-
-// bootstrapDNSEntry represents a cached DNS resolution
-type bootstrapDNSEntry struct {
-	ip        net.IP
-	timestamp time.Time
+var bootstrapDNSServers = []string{
+	"8.8.8.8:53",      // Google DNS Primary
+	"8.8.4.4:53",      // Google DNS Secondary
 }
 
 // Physical interface names to try for SO_BINDTODEVICE
@@ -351,66 +333,43 @@ func initXrayProtectedDialer() error {
 	return nil
 }
 
-// resolveDomainProtected resolves a domain name using Bootstrap DNS
+// resolveDomainProtected resolves a domain name using Google DNS (8.8.8.8)
 // This is CRITICAL for avoiding DNS deadlock:
 // - VPN is not yet established
 // - System DNS may try to use VPN (which isn't up)
-// - We use hardcoded DNS IPs to resolve the VPN server hostname
+// - We use Google DNS IPs to resolve the VPN server hostname
 // - DNS queries are sent through protected sockets on physical interface
 func resolveDomainProtected(domain string) (net.IP, error) {
-	logInfo("[BootstrapDNS] ========================================")
-	logInfo("[BootstrapDNS] Resolving domain: %s", domain)
-	logInfo("[BootstrapDNS] Using Bootstrap DNS (bypasses VPN routing)")
-	logInfo("[BootstrapDNS] ========================================")
-	
-	// Check cache first
-	bootstrapDNSCacheMu.RLock()
-	if entry, ok := bootstrapDNSCache[domain]; ok {
-		if time.Since(entry.timestamp) < bootstrapDNSCacheTTL {
-			bootstrapDNSCacheMu.RUnlock()
-			logInfo("[BootstrapDNS] ✅ Cache hit: %s → %s (age: %v)", domain, entry.ip.String(), time.Since(entry.timestamp))
-			return entry.ip, nil
-		}
-	}
-	bootstrapDNSCacheMu.RUnlock()
+	logDebug("[GoogleDNS] Resolving domain: %s", domain)
 	
 	// Detect physical interface for binding DNS queries
 	physicalIface := detectPhysicalInterface()
 	if physicalIface != "" {
-		logInfo("[BootstrapDNS] Physical interface for DNS: %s", physicalIface)
+		logInfo("[GoogleDNS] Physical interface for DNS: %s", physicalIface)
 	}
 	
-	// Try bootstrap DNS servers in order
+	// Try Google DNS servers (primary and secondary)
 	var lastErr error
 	for _, dnsServer := range bootstrapDNSServers {
-		logInfo("[BootstrapDNS] Trying DNS server: %s", dnsServer)
+		logInfo("[GoogleDNS] Trying DNS server: %s", dnsServer)
 		
 		ip, err := resolveDomainUDPProtected(domain, dnsServer, physicalIface)
 		if err == nil {
-			logInfo("[BootstrapDNS] ✅ Resolution successful via %s: %s → %s", dnsServer, domain, ip.String())
-			
-			// Cache the result
-			bootstrapDNSCacheMu.Lock()
-			bootstrapDNSCache[domain] = bootstrapDNSEntry{
-				ip:        ip,
-				timestamp: time.Now(),
-			}
-			bootstrapDNSCacheMu.Unlock()
-			
+			logInfo("[GoogleDNS] ✅ Resolution successful via %s: %s → %s", dnsServer, domain, ip.String())
 			return ip, nil
 		}
 		
-		logWarn("[BootstrapDNS] ⚠️ DNS server %s failed: %v", dnsServer, err)
+		logWarn("[GoogleDNS] ⚠️ DNS server %s failed: %v", dnsServer, err)
 		lastErr = err
 	}
 	
-	logError("[BootstrapDNS] ❌ All Bootstrap DNS servers failed!")
-	logError("[BootstrapDNS] ❌ This may indicate:")
-	logError("[BootstrapDNS]    1. No network connectivity")
-	logError("[BootstrapDNS]    2. All DNS servers blocked by firewall")
-	logError("[BootstrapDNS]    3. Socket protection not working")
+	logError("[GoogleDNS] ❌ All DNS servers failed!")
+	logError("[GoogleDNS] ❌ This may indicate:")
+	logError("[GoogleDNS]    1. No network connectivity")
+	logError("[GoogleDNS]    2. All DNS servers blocked by firewall")
+	logError("[GoogleDNS]    3. Socket protection not working")
 	
-	return nil, fmt.Errorf("bootstrap DNS resolution failed for %s: %w", domain, lastErr)
+	return nil, fmt.Errorf("Google DNS resolution failed for %s: %w", domain, lastErr)
 }
 
 // resolveDomainUDPProtected resolves domain using UDP DNS query with protected socket
@@ -716,26 +675,7 @@ func detectPhysicalInterface() string {
 	return ""
 }
 
-// ClearBootstrapDNSCache clears the bootstrap DNS cache
-// Call this when network state changes
+// ClearBootstrapDNSCache is a no-op (DNS cache removed, using Google DNS directly)
 func ClearBootstrapDNSCache() {
-	bootstrapDNSCacheMu.Lock()
-	defer bootstrapDNSCacheMu.Unlock()
-	bootstrapDNSCache = make(map[string]bootstrapDNSEntry)
-	logInfo("[BootstrapDNS] Cache cleared")
-}
-
-// GetBootstrapDNSCacheStats returns cache statistics for diagnostics
-func GetBootstrapDNSCacheStats() (entries int, oldestAge time.Duration) {
-	bootstrapDNSCacheMu.RLock()
-	defer bootstrapDNSCacheMu.RUnlock()
-	
-	entries = len(bootstrapDNSCache)
-	for _, entry := range bootstrapDNSCache {
-		age := time.Since(entry.timestamp)
-		if age > oldestAge {
-			oldestAge = age
-		}
-	}
-	return
+	logInfo("[GoogleDNS] No cache to clear (using Google DNS directly)")
 }
